@@ -684,8 +684,8 @@ export function processCSVRows(rows) {
   };
 }
 
-export async function generateContentHash(threadId, messageType, messageContent) {
-  var str = (threadId || "") + "|" + (messageType || "") + "|" + (messageContent || "");
+export async function generateContentHash(threadId, messageType, messageContent, messageDatetime) {
+  var str = (threadId || "") + "|" + (messageType || "") + "|" + (messageContent || "") + "|" + (messageDatetime || "");
   var buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
   return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
 }

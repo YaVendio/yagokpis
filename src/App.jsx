@@ -234,7 +234,7 @@ export default function Dashboard(){
           if(!r.thread_id) continue;
           var tsa=parseDatetime(r.template_sent_at);
           var mdt=parseDatetime(r.message_datetime);
-          var hash=await generateContentHash(r.thread_id,r.message_type,r.message_content);
+          var hash=await generateContentHash(r.thread_id,r.message_type,r.message_content,mdt?mdt.toISOString():r.message_datetime);
           inserts.push({
             thread_id:r.thread_id,
             phone_number:r.phone_number||null,
