@@ -94,7 +94,7 @@ var MONTH_MAP_PT = {
   julho: 6, agosto: 7, setembro: 8, outubro: 9, novembro: 10, dezembro: 11,
 };
 
-function parseDatetime(str) {
+export function parseDatetime(str) {
   if (!str) return null;
   try {
     var d = new Date(str);
@@ -194,7 +194,7 @@ export function parseCSV(file) {
   });
 }
 
-function processCSVRows(rows) {
+export function processCSVRows(rows) {
   // Group by thread_id
   var threads = {};
   for (var i = 0; i < rows.length; i++) {
@@ -227,10 +227,20 @@ function processCSVRows(rows) {
   var topicCounts = {};
   var engCounts = { alto: 0, medio: 0, bajo: 0, minimo: 0 };
   var igCount = 0;
+  var igLinkCount = 0;
+  var igAtOnlyCount = 0;
   var toolCount = 0;
   var mcCount = 0;
   var autoReplyThreads = 0;
   var esTotal = 0, esResp = 0, ptTotal = 0, ptResp = 0;
+
+  // Real (non-auto-reply) counters
+  var engCountsReal = { alto: 0, medio: 0, bajo: 0, minimo: 0 };
+  var topicCountsReal = {};
+  var hourlyReal = new Array(24).fill(0);
+  var allTemplatesRespReal = {};
+  var igCountReal = 0, igLinkCountReal = 0, igAtOnlyCountReal = 0;
+  var toolCountReal = 0, mcCountReal = 0;
 
   for (var t = 0; t < threadIds.length; t++) {
     var tid = threadIds[t];
@@ -242,7 +252,8 @@ function processCSVRows(rows) {
     var conversation = [];
     var humanMsgCount = 0;
     var wordCount = 0;
-    var hasIg = false;
+    var hasIgLink = false;
+    var hasIgAt = false;
     var hasTool = false;
     var hasMeetingLink = false;
     var isAuto = false;
@@ -294,13 +305,15 @@ function processCSVRows(rows) {
           if (isAutoReply(content)) isAuto = true;
         }
 
-        // Check for Instagram URL
-        if (/instagram\.com|ig\s*:|@\w+/i.test(content)) hasIg = true;
+        // Check for Instagram link vs @ mention
+        if (/instagram\.com/i.test(content)) hasIgLink = true;
+        if (/@\w+|ig\s*:/i.test(content)) hasIgAt = true;
 
         // Track hour of response
         var pd = parseDatetime(msg.message_datetime);
         if (pd && !isNaN(pd.getTime())) {
           hourlyAll[pd.getHours()]++;
+          if (!isAuto) hourlyReal[pd.getHours()]++;
         }
 
         conversation.push([1, content, dt]);
@@ -358,9 +371,23 @@ function processCSVRows(rows) {
 
     if (phone) {
       engCounts[engagement]++;
-      if (hasIg) igCount++;
+      if (hasIgLink) { igLinkCount++; igCount++; }
+      else if (hasIgAt) { igAtOnlyCount++; igCount++; }
       if (hasTool) toolCount++;
       if (isAuto) autoReplyThreads++;
+
+      // Real counters (non-auto-reply)
+      if (!isAuto) {
+        engCountsReal[engagement]++;
+        if (hasIgLink) { igLinkCountReal++; igCountReal++; }
+        else if (hasIgAt) { igAtOnlyCountReal++; igCountReal++; }
+        if (hasTool) toolCountReal++;
+        if (hasMeetingLink) mcCountReal++;
+        if (firstResponseTpl) {
+          if (!allTemplatesRespReal[firstResponseTpl]) allTemplatesRespReal[firstResponseTpl] = 0;
+          allTemplatesRespReal[firstResponseTpl]++;
+        }
+      }
 
       // Topics detection
       var convText = "";
@@ -376,6 +403,10 @@ function processCSVRows(rows) {
           if (convLower.includes(topicDef.kw[ki])) {
             if (!topicCounts[topicName]) topicCounts[topicName] = 0;
             topicCounts[topicName]++;
+            if (!isAuto) {
+              if (!topicCountsReal[topicName]) topicCountsReal[topicName] = 0;
+              topicCountsReal[topicName]++;
+            }
             break;
           }
         }
@@ -390,10 +421,12 @@ function processCSVRows(rows) {
         w: wordCount,
         au: isAuto,
         e: engagement,
+        q: qual,
         co: getCountryFlag(phone),
         tr: templatesSent.filter(function (v, i, a) { return a.indexOf(v) === i; }),
         fr: firstResponseTpl,
         c: conversation,
+        ml: hasMeetingLink,
       });
     }
   }
@@ -405,6 +438,8 @@ function processCSVRows(rows) {
   var rateReal = totalContactados > 0 ? ((realesCount / totalContactados) * 100).toFixed(1) + "%" : "0%";
 
   var igR = respondieron > 0 ? ((igCount / respondieron) * 100).toFixed(1) + "%" : "0%";
+  var igLinkR = respondieron > 0 ? ((igLinkCount / respondieron) * 100).toFixed(1) + "%" : "0%";
+  var igAtOnlyR = respondieron > 0 ? ((igAtOnlyCount / respondieron) * 100).toFixed(1) + "%" : "0%";
   var tR = respondieron > 0 ? ((toolCount / respondieron) * 100).toFixed(1) + "%" : "0%";
   var mR = respondieron > 0 ? ((mcCount / respondieron) * 100).toFixed(1) + "%" : "0%";
 
@@ -418,12 +453,26 @@ function processCSVRows(rows) {
   topicsArr.sort(function (a, b) { return b.n - a.n; });
 
   // Engagement percentages
-  function engEntry(val) {
-    return { v: val, p: respondieron > 0 ? ((val / respondieron) * 100).toFixed(1) + "%" : "0%" };
+  function engEntry(val, total) {
+    var t = total || respondieron;
+    return { v: val, p: t > 0 ? ((val / t) * 100).toFixed(1) + "%" : "0%" };
   }
 
-  // Hours for real (same as all for now)
-  var hourlyReal = hourlyAll.slice();
+  // Real topics sorted
+  var topicsArrReal = [];
+  for (var tnr in topicCountsReal) {
+    var cntr = topicCountsReal[tnr];
+    var defr = TOPIC_KEYWORDS[tnr];
+    topicsArrReal.push({ t: tnr, e: defr.e, n: cntr, p: realesCount > 0 ? parseFloat(((cntr / realesCount) * 100).toFixed(1)) : 0 });
+  }
+  topicsArrReal.sort(function (a, b) { return b.n - a.n; });
+
+  // Real rates
+  var igRReal = realesCount > 0 ? ((igCountReal / realesCount) * 100).toFixed(1) + "%" : "0%";
+  var igLinkRReal = realesCount > 0 ? ((igLinkCountReal / realesCount) * 100).toFixed(1) + "%" : "0%";
+  var igAtOnlyRReal = realesCount > 0 ? ((igAtOnlyCountReal / realesCount) * 100).toFixed(1) + "%" : "0%";
+  var tRReal = realesCount > 0 ? ((toolCountReal / realesCount) * 100).toFixed(1) + "%" : "0%";
+  var mRReal = realesCount > 0 ? ((mcCountReal / realesCount) * 100).toFixed(1) + "%" : "0%";
 
   // Template performance
   var tplNames = { MSG1: "MSG 1 \u2014 Yago SDR", MSG2a: "MSG 2a \u2014 Sin WA", MSG2b: "MSG 2b \u2014 Caso de \u00C9xito", MSG3: "MSG 3 \u2014 Value Nudge", MSG4: "MSG 4 \u2014 Quick Audit" };
@@ -461,6 +510,37 @@ function processCSVRows(rows) {
     }
   }
 
+  // Real template performance
+  var tplPerfReal = [];
+  for (var tri = 0; tri < tplOrder.length; tri++) {
+    var rkey = tplOrder[tri];
+    var rsent = allTemplatesSent[rkey] || 0;
+    var rresp = allTemplatesRespReal[rkey] || 0;
+    tplPerfReal.push({
+      name: tplNames[rkey] || rkey,
+      day: tplDays[rkey] || "",
+      sent: rsent,
+      resp: rresp,
+      rate: rsent > 0 ? ((rresp / rsent) * 100).toFixed(1) + "%" : "0%",
+    });
+  }
+
+  var bcastPerfReal = [];
+  for (var bri = 0; bri < bcastOrder.length; bri++) {
+    var brkey = bcastOrder[bri];
+    var brsent = allTemplatesSent[brkey] || 0;
+    var brresp = allTemplatesRespReal[brkey] || 0;
+    if (brsent > 0) {
+      bcastPerfReal.push({
+        name: "Emprende Show",
+        day: "Bcast",
+        sent: brsent,
+        resp: brresp,
+        rate: brsent > 0 ? ((brresp / brsent) * 100).toFixed(1) + "%" : "0%",
+      });
+    }
+  }
+
   // Daily distribution sorted
   var dailyArr = [];
   var dailyKeys = Object.keys(dailyMap).sort(function (a, b) {
@@ -494,9 +574,9 @@ function processCSVRows(rows) {
   var funnelReal = [
     { n: "Contactados", v: totalContactados, c: C.accent },
     { n: "Resp. Reales", v: realesCount, c: C.cyan },
-    { n: "Config. Plataf.", v: toolCount, c: C.green },
-    { n: "Enviaron IG", v: igCount, c: C.orange },
-    { n: "Oferta Reuni\u00F3n", v: mcCount, c: C.pink },
+    { n: "Config. Plataf.", v: toolCountReal, c: C.green },
+    { n: "Enviaron IG", v: igCountReal, c: C.orange },
+    { n: "Oferta Reuni\u00F3n", v: mcCountReal, c: C.pink },
   ];
 
   // Channel benchmarks
@@ -523,23 +603,31 @@ function processCSVRows(rows) {
     { m: "Msgs/Conv.", y: avgMsgs, b: "10-20", d: parseFloat(avgMsgs) > 20 ? "Alto" : "Normal", s: parseFloat(avgMsgs) >= 10 ? 1 : 0 },
   ];
 
-  // Meet by template (first response)
+  // Meet by template (first response) — All and Real
   var tplColors = { MSG1: C.accent, MSG2a: C.purple, MSG2b: C.purple, MSG2c: "#D97706", MSG3: C.cyan, MSG4: C.orange };
-  var meetByTplMap = {};
+  var meetByTplMapAll = {};
+  var meetByTplMapReal = {};
   for (var mi = 0; mi < meetings.length; mi++) {
     var fr = meetings[mi].fr;
     if (fr) {
-      if (!meetByTplMap[fr]) meetByTplMap[fr] = 0;
-      meetByTplMap[fr]++;
+      if (!meetByTplMapAll[fr]) meetByTplMapAll[fr] = 0;
+      meetByTplMapAll[fr]++;
+      if (!meetings[mi].au) {
+        if (!meetByTplMapReal[fr]) meetByTplMapReal[fr] = 0;
+        meetByTplMapReal[fr]++;
+      }
     }
   }
-  var meetByTpl = [];
+  var meetByTplAll = [];
+  var meetByTplReal = [];
   var allTpls = ["MSG1", "MSG2a", "MSG2b", "MSG2c", "MSG3", "MSG4"];
   for (var ti = 0; ti < allTpls.length; ti++) {
     var k = allTpls[ti];
-    meetByTpl.push({ l: k, v: meetByTplMap[k] || 0, c: tplColors[k] || C.accent });
+    meetByTplAll.push({ l: k, v: meetByTplMapAll[k] || 0, c: tplColors[k] || C.accent });
+    meetByTplReal.push({ l: k, v: meetByTplMapReal[k] || 0, c: tplColors[k] || C.accent });
   }
-  meetByTpl.sort(function (a, b) { return b.v - a.v; });
+  meetByTplAll.sort(function (a, b) { return b.v - a.v; });
+  meetByTplReal.sort(function (a, b) { return b.v - a.v; });
 
   // ES vs PT stats
   var esRate = esTotal > 0 ? ((esResp / esTotal) * 100).toFixed(1) : "0.0";
@@ -549,12 +637,13 @@ function processCSVRows(rows) {
   var leadsPerDay = dailyArr.length > 0 ? Math.round(totalContactados / dailyArr.length) : 0;
 
   return {
+    rawRows: rows,
     MEETINGS: meetings,
     topicsAll: topicsArr,
     D: {
       all: {
         resp: respondieron, rate: rate, topics: topicsArr,
-        ig: igCount, igR: igR, mc: mcCount, mR: mR,
+        ig: igCount, igR: igR, igLink: igLinkCount, igLinkR: igLinkR, igAt: igAtOnlyCount, igAtR: igAtOnlyR, mc: mcCount, mR: mR,
         tool: toolCount, tR: tR,
         eng: { alto: engEntry(engCounts.alto), medio: engEntry(engCounts.medio), bajo: engEntry(engCounts.bajo), minimo: engEntry(engCounts.minimo) },
         hours: hourlyAll,
@@ -562,14 +651,16 @@ function processCSVRows(rows) {
         bcast: bcastPerf,
       },
       real: {
-        resp: realesCount, rate: rateReal, topics: topicsArr,
-        ig: igCount, igR: respondieron > 0 ? ((igCount / realesCount) * 100).toFixed(1) + "%" : "0%",
-        mc: mcCount, mR: realesCount > 0 ? ((mcCount / realesCount) * 100).toFixed(1) + "%" : "0%",
-        tool: toolCount, tR: realesCount > 0 ? ((toolCount / realesCount) * 100).toFixed(1) + "%" : "0%",
-        eng: { alto: engEntry(engCounts.alto), medio: engEntry(engCounts.medio), bajo: engEntry(engCounts.bajo), minimo: engEntry(engCounts.minimo) },
+        resp: realesCount, rate: rateReal, topics: topicsArrReal,
+        ig: igCountReal, igR: igRReal,
+        igLink: igLinkCountReal, igLinkR: igLinkRReal,
+        igAt: igAtOnlyCountReal, igAtR: igAtOnlyRReal,
+        mc: mcCountReal, mR: mRReal,
+        tool: toolCountReal, tR: tRReal,
+        eng: { alto: engEntry(engCountsReal.alto, realesCount), medio: engEntry(engCountsReal.medio, realesCount), bajo: engEntry(engCountsReal.bajo, realesCount), minimo: engEntry(engCountsReal.minimo, realesCount) },
         hours: hourlyReal,
-        tpl: tplPerf,
-        bcast: bcastPerf,
+        tpl: tplPerfReal,
+        bcast: bcastPerfReal,
       },
     },
     funnelAll: funnelAll,
@@ -577,7 +668,8 @@ function processCSVRows(rows) {
     chBench: chBench,
     daily: dailyArr,
     bTable: bTable,
-    meetByTpl: meetByTpl,
+    meetByTplAll: meetByTplAll,
+    meetByTplReal: meetByTplReal,
     totalContactados: totalContactados,
     leadsPerDay: leadsPerDay,
     dateRange: dateRange,
@@ -590,4 +682,24 @@ function processCSVRows(rows) {
     ptResp: ptResp,
     ptTotal: ptTotal,
   };
+}
+
+export async function generateContentHash(threadId, messageType, messageContent) {
+  var str = (threadId || "") + "|" + (messageType || "") + "|" + (messageContent || "");
+  var buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+}
+
+export function dbRowsToCSVFormat(dbRows) {
+  return dbRows.map(function (r) {
+    return {
+      thread_id: r.thread_id || "",
+      phone_number: r.phone_number || "",
+      template_sent_at: r.template_sent_at || "",
+      message_type: r.message_type || "",
+      message_datetime: r.message_datetime || "",
+      message_content: r.message_content || "",
+      lead_qualification: r.lead_qualification || "",
+    };
+  });
 }
