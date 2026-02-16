@@ -368,6 +368,9 @@ export function processCSVRows(rows) {
       var type = msg.message_type;
       var dt = formatDatetime(msg.message_datetime);
 
+      // Check for HubSpot meeting link in any message type
+      if (content.includes("meetings.hubspot.com/")) hasMeetingLink = true;
+
       if (type === "ai") {
         if (isTemplate(content) || msg.template_name) {
           // Use template_name from CSV row if available, otherwise classify from content
@@ -378,7 +381,6 @@ export function processCSVRows(rows) {
             if (!templateContents[tplName]) templateContents[tplName] = content;
           }
         } else {
-          if (content.includes("meetings.hubspot.com/")) hasMeetingLink = true;
           conversation.push([2, content, dt]);
         }
       } else if (type === "human") {
