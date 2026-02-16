@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area } from "recharts";
+import Papa from "papaparse";
 import { parseCSV, processCSVRows, dbRowsToCSVFormat, generateContentHash, parseDatetime, parseTemplateName, humanizeTemplateName } from "./csvParser";
 import { supabase } from "./supabase";
 import { DEFAULT_MEETINGS as _RAW_MEETINGS } from "./defaultData";
@@ -323,20 +324,21 @@ export default function Dashboard(){
   }
 
   useEffect(function(){
-    async function loadFromDB(){
+    async function loadFixedCSV(){
       try{
-        var {data:allImports}=await supabase.from("imports").select("*").order("imported_at",{ascending:false});
-        if(allImports && allImports.length>0){
-          setImports(allImports);
-          var latestId=allImports[0].id;
-          setSelectedImportId(latestId);
-          setCsvName(allImports[0].label||allImports[0].filename);
-          await loadMessagesForImport(latestId);
-        }
-      }catch(e){console.error("Load error:",e);}
+        var resp=await fetch("/026-02-16T14_01_.csv");
+        var text=await resp.text();
+        var parsed=Papa.parse(text,{header:true,skipEmptyLines:true});
+        var csvRows=parsed.data;
+        setRawRows(csvRows);
+        var result=processCSVRows(csvRows);
+        var hi={totalContactados:result.totalContactados,leadsPerDay:result.leadsPerDay,dateRange:result.dateRange,autoReplyCount:result.autoReplyCount,realesCount:result.realesCount,esRate:result.esRate,esResp:result.esResp,esTotal:result.esTotal,ptRate:result.ptRate,ptResp:result.ptResp,ptTotal:result.ptTotal};
+        setMeetings(result.MEETINGS);setTopicsAll(result.topicsAll);setDataD(result.D);setFunnelAll(result.funnelAll);setFunnelReal(result.funnelReal);setChBench(result.chBench);setDaily(result.daily);setBTable(result.bTable);setMeetByTplAll(result.meetByTplAll);setMeetByTplReal(result.meetByTplReal);setHeaderInfo(hi);
+        setCsvName("026-02-16T14_01_");
+      }catch(e){console.error("Load fixed CSV error:",e);}
       setDbLoading(false);
     }
-    loadFromDB();
+    loadFixedCSV();
   },[]);
 
   useEffect(function(){
