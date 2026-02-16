@@ -369,7 +369,7 @@ export function processCSVRows(rows) {
       var dt = formatDatetime(msg.message_datetime);
 
       if (type === "ai") {
-        if (isTemplate(content)) {
+        if (isTemplate(content) || msg.template_name) {
           // Use template_name from CSV row if available, otherwise classify from content
           var tplName = msg.template_name || classifyTemplate(content);
           if (tplName) {
@@ -626,7 +626,7 @@ export function processCSVRows(rows) {
         var lang = "es";
         if (tName.startsWith("pt_") || tName.includes("_br")) lang = "pt";
         steps[step].templates.push({
-          name: tName, displayName: humanizeTemplateName(tName), lang: lang,
+          name: tName, displayName: tName, lang: lang,
           sent: s, resp: r, rate: s > 0 ? ((r / s) * 100).toFixed(1) + "%" : "0%"
         });
         steps[step].totalSent += s;
@@ -820,7 +820,7 @@ export function processCSVRows(rows) {
   }
   for (var mti = 0; mti < allMeetTpls.length; mti++) {
     var mk2 = allMeetTpls[mti];
-    var meetLabel = hasStepOrder ? humanizeTemplateName(mk2) : mk2;
+    var meetLabel = mk2;
     meetByTplAll.push({ l: meetLabel, v: meetByTplMapAll[mk2] || 0, c: getMeetTplColor(mk2) });
     meetByTplReal.push({ l: meetLabel, v: meetByTplMapReal[mk2] || 0, c: getMeetTplColor(mk2) });
   }

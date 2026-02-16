@@ -79,7 +79,7 @@ function ConvView({lead,onBack}){
         var dt=m[2]||"";
         if(m[0]===0){
           var tc=tplCol[m[1]]||(m[1]&&m[1].startsWith("pt_")?C.green:m[1]&&m[1].startsWith("es_")?C.accent:C.accent);
-          var tn=tplNm[m[1]]||humanizeTemplateName(m[1]);
+          var tn=tplNm[m[1]]||m[1];
           return (<div key={i} style={{alignSelf:"center",background:tc+"0C",border:"2px dashed "+tc+"55",borderRadius:12,padding:"10px 20px",margin:"10px 0",maxWidth:"88%",textAlign:"center"}}>
             <div style={{fontSize:11,fontWeight:800,color:tc,textTransform:"uppercase",letterSpacing:1}}>{"\u{1F4CB} TEMPLATE ENVIADO"}</div>
             <div style={{fontSize:15,fontWeight:700,color:tc,marginTop:3}}>{tn}</div>
