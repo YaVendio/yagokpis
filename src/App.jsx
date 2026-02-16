@@ -279,16 +279,24 @@ export default function Dashboard(){
 
   async function loadMessagesForImport(importId){
     if(!importId) return;
-    var {data:rows,error}=await supabase.from("messages").select("thread_id,phone_number,template_sent_at,message_type,message_datetime,message_content,lead_qualification,template_name,step_order").eq("import_id",importId).limit(10000);
-    if(error){console.error("Load messages error:",error);return;}
-    if(rows && rows.length>0){
-      var csvRows=dbRowsToCSVFormat(rows);
+    var allRows=[];
+    var PAGE=5000;
+    var offset=0;
+    while(true){
+      var {data:rows,error}=await supabase.from("messages").select("thread_id,phone_number,template_sent_at,message_type,message_datetime,message_content,lead_qualification,template_name,step_order").eq("import_id",importId).range(offset,offset+PAGE-1);
+      if(error){console.error("Load messages error:",error);break;}
+      if(!rows||rows.length===0) break;
+      allRows=allRows.concat(rows);
+      if(rows.length<PAGE) break;
+      offset+=PAGE;
+    }
+    if(allRows.length>0){
+      var csvRows=dbRowsToCSVFormat(allRows);
       setRawRows(csvRows);
       var result=processCSVRows(csvRows);
       var hi={totalContactados:result.totalContactados,leadsPerDay:result.leadsPerDay,dateRange:result.dateRange,autoReplyCount:result.autoReplyCount,realesCount:result.realesCount,esRate:result.esRate,esResp:result.esResp,esTotal:result.esTotal,ptRate:result.ptRate,ptResp:result.ptResp,ptTotal:result.ptTotal};
       setMeetings(result.MEETINGS);setTopicsAll(result.topicsAll);setDataD(result.D);setFunnelAll(result.funnelAll);setFunnelReal(result.funnelReal);setChBench(result.chBench);setDaily(result.daily);setBTable(result.bTable);setMeetByTplAll(result.meetByTplAll);setMeetByTplReal(result.meetByTplReal);setHeaderInfo(hi);
     } else {
-      // Empty import
       setRawRows(null);setMeetings([]);setTopicsAll([]);setDataD(EMPTY_D);setFunnelAll([]);setFunnelReal([]);setChBench([]);setDaily([]);setBTable([]);setMeetByTplAll([]);setMeetByTplReal([]);setHeaderInfo(EMPTY_HEADER);
     }
     setDateFrom("");setDateTo("");
@@ -296,10 +304,19 @@ export default function Dashboard(){
 
   async function loadCompareData(importId){
     if(!importId){setCompareData(null);return;}
-    var {data:rows,error}=await supabase.from("messages").select("thread_id,phone_number,template_sent_at,message_type,message_datetime,message_content,lead_qualification,template_name,step_order").eq("import_id",importId).limit(10000);
-    if(error){console.error("Load compare error:",error);setCompareData(null);return;}
-    if(rows && rows.length>0){
-      var csvRows=dbRowsToCSVFormat(rows);
+    var allRows=[];
+    var PAGE=5000;
+    var offset=0;
+    while(true){
+      var {data:rows,error}=await supabase.from("messages").select("thread_id,phone_number,template_sent_at,message_type,message_datetime,message_content,lead_qualification,template_name,step_order").eq("import_id",importId).range(offset,offset+PAGE-1);
+      if(error){console.error("Load compare error:",error);setCompareData(null);return;}
+      if(!rows||rows.length===0) break;
+      allRows=allRows.concat(rows);
+      if(rows.length<PAGE) break;
+      offset+=PAGE;
+    }
+    if(allRows.length>0){
+      var csvRows=dbRowsToCSVFormat(allRows);
       var result=processCSVRows(csvRows);
       setCompareData({D:result.D,totalContactados:result.totalContactados,realesCount:result.realesCount,autoReplyCount:result.autoReplyCount});
     } else { setCompareData(null); }
