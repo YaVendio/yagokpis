@@ -76,6 +76,71 @@ function classifyTemplate(content) {
   return null;
 }
 
+export function parseTemplateName(name) {
+  if (!name) return null;
+  // New qualified format: calificados_d0__v1, no_calificado_d0__v1_br (double underscore before version)
+  var m = name.match(/^(no_calificado|calificados?)_d(\d+)_{1,2}v(\d+)(_br)?$/i);
+  if (m) {
+    var qual = m[1].toLowerCase();
+    if (qual === "calificados") qual = "calificado";
+    return { qualification: qual, day: parseInt(m[2]), version: parseInt(m[3]), region: m[4] ? "br" : "es", raw: name };
+  }
+  // msg_1_yago_sdr format: msg_1_yago_sdr_1, msg_1_yago_sdr_br_1
+  var m2 = name.match(/^msg_(\d+)_yago_sdr(?:_(br))?(?:_(\d+))?$/i);
+  if (m2) {
+    var msgNum = parseInt(m2[1]);
+    var dayMap = {1:0, 2:1, 3:3, 4:5};
+    return { qualification: "msg", day: dayMap[msgNum] !== undefined ? dayMap[msgNum] : msgNum - 1, version: m2[3] ? parseInt(m2[3]) : 1, region: m2[2] ? "br" : "es", raw: name };
+  }
+  // Pattern 3: es_*/pt_* format — es_quick_audit_offer_2_d5, pt_caso_de_xito_
+  var m3 = name.match(/^(es|pt)_(.+?)(?:_d(\d+))?_?$/i);
+  if (m3) {
+    var region3 = m3[1].toLowerCase() === "pt" ? "br" : "es";
+    var body = m3[2];
+    var day3 = m3[3] ? parseInt(m3[3]) : 0;
+    // Extract version if body ends with _N
+    var version3 = 1;
+    var vm = body.match(/^(.+?)_(\d+)$/);
+    if (vm) { body = vm[1]; version3 = parseInt(vm[2]); }
+    return { qualification: body, day: day3, version: version3, region: region3, raw: name };
+  }
+  return null;
+}
+
+var STEP_DAY_MAP = {1:"D+0", 2:"D+1", 3:"D+3", 4:"D+5"};
+export function stepToDay(stepOrder) {
+  return STEP_DAY_MAP[stepOrder] || "D+?";
+}
+
+var HUMANIZE_MAP = {
+  "msg_1_yago_sdr": "Yago SDR (ES)",
+  "msg_1_yago_sdr_1": "Yago SDR v2 (ES)",
+  "msg_1_yago_sdr_br_1": "Yago SDR v2 (PT)",
+  "calificados_d0__v1": "Calificados v1 (ES)",
+  "calificados_d0__v3": "Calificados v3 (ES)",
+  "es_event_sin_whatsapp_d1": "Sin WhatsApp (ES)",
+  "pt_event_sem_whatsapp_d1": "Sem WhatsApp (PT)",
+  "es_caso_de_xito": "Caso de \u00C9xito (ES)",
+  "pt_caso_de_xito_": "Caso de \u00C9xito (PT)",
+  "es_value_nudge_1_d3": "Value Nudge (ES)",
+  "pt_value_nudge_1_d3": "Value Nudge (PT)",
+  "es_quick_audit_offer_2_d5": "Quick Audit (ES)",
+  "pt_quick_audit_offer_2_d5": "Quick Audit (PT)",
+};
+
+export function humanizeTemplateName(name) {
+  if (!name) return "?";
+  if (HUMANIZE_MAP[name]) return HUMANIZE_MAP[name];
+  // Fallback: strip es_/pt_ prefix, strip _dN suffix, replace _ with space, title case
+  var display = name;
+  var lang = "";
+  if (/^pt_/i.test(display)) { lang = " (PT)"; display = display.replace(/^pt_/i, ""); }
+  else if (/^es_/i.test(display)) { lang = " (ES)"; display = display.replace(/^es_/i, ""); }
+  display = display.replace(/_d\d+$/i, "").replace(/_+$/, "");
+  display = display.replace(/_/g, " ").replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+  return display + lang;
+}
+
 function isAutoReply(content) {
   if (!content) return false;
   var lower = content.toLowerCase();
@@ -145,6 +210,16 @@ function formatDatetime(str) {
 }
 
 function detectLangFromMessages(msgs) {
+  // Fast path: detect from template_name prefix
+  for (var i = 0; i < msgs.length; i++) {
+    var tn = msgs[i].template_name;
+    if (tn) {
+      if (tn.startsWith("pt_") || tn.includes("_br")) return "pt";
+      if (tn.startsWith("es_")) return "es";
+      var parsed = parseTemplateName(tn);
+      if (parsed) return parsed.region === "br" ? "pt" : "es";
+    }
+  }
   // Detect language from MSG1 template specifically (most reliable)
   for (var i = 0; i < msgs.length; i++) {
     var content = msgs[i].message_content || "";
@@ -205,10 +280,18 @@ export function processCSVRows(rows) {
     threads[tid].push(r);
   }
 
-  // Only count threads that received MSG1 as "contactados"
+  // Only count threads that received MSG1 (or a d0 template_name or step_order=1) as "contactados"
   var threadIds = Object.keys(threads).filter(function (tid) {
     var msgs = threads[tid];
     for (var i = 0; i < msgs.length; i++) {
+      // step_order === 1 means first contact
+      if (msgs[i].step_order && parseInt(msgs[i].step_order) === 1) return true;
+      // New format: template_name with day 0
+      if (msgs[i].template_name) {
+        var parsed = parseTemplateName(msgs[i].template_name);
+        if (parsed && parsed.day === 0) return true;
+      }
+      // Legacy format: detect MSG1 from content
       var content = msgs[i].message_content || "";
       if (msgs[i].message_type === "ai" && isTemplate(content) && classifyTemplate(content) === "MSG1") {
         return true;
@@ -285,7 +368,8 @@ export function processCSVRows(rows) {
 
       if (type === "ai") {
         if (isTemplate(content)) {
-          var tplName = classifyTemplate(content);
+          // Use template_name from CSV row if available, otherwise classify from content
+          var tplName = msg.template_name || classifyTemplate(content);
           if (tplName) {
             templatesSent.push(tplName);
             conversation.push([0, tplName, dt]);
@@ -474,70 +558,167 @@ export function processCSVRows(rows) {
   var tRReal = realesCount > 0 ? ((toolCountReal / realesCount) * 100).toFixed(1) + "%" : "0%";
   var mRReal = realesCount > 0 ? ((mcCountReal / realesCount) * 100).toFixed(1) + "%" : "0%";
 
-  // Template performance
-  var tplNames = { MSG1: "MSG 1 \u2014 Yago SDR", MSG2a: "MSG 2a \u2014 Sin WA", MSG2b: "MSG 2b \u2014 Caso de \u00C9xito", MSG3: "MSG 3 \u2014 Value Nudge", MSG4: "MSG 4 \u2014 Quick Audit" };
-  var tplDays = { MSG1: "D+0", MSG2a: "D+1", MSG2b: "D+1", MSG3: "D+3", MSG4: "D+5" };
-  var tplOrder = ["MSG1", "MSG2a", "MSG2b", "MSG3", "MSG4"];
+  // Template performance — supports both legacy (MSG1, MSG2a...) and new format (calificados_d0_v1...)
+  var tplNamesMap = { MSG1: "MSG 1 \u2014 Yago SDR", MSG2a: "MSG 2a \u2014 Sin WA", MSG2b: "MSG 2b \u2014 Caso de \u00C9xito", MSG3: "MSG 3 \u2014 Value Nudge", MSG4: "MSG 4 \u2014 Quick Audit" };
+  var tplDaysMap = { MSG1: "D+0", MSG2a: "D+1", MSG2b: "D+1", MSG3: "D+3", MSG4: "D+5" };
+  var legacyOrder = ["MSG1", "MSG2a", "MSG2b", "MSG3", "MSG4"];
   var bcastOrder = ["MSG2c"];
 
-  var tplPerf = [];
-  for (var ti = 0; ti < tplOrder.length; ti++) {
-    var key = tplOrder[ti];
-    var sent = allTemplatesSent[key] || 0;
-    var resp = allTemplatesResp[key] || 0;
-    tplPerf.push({
-      name: tplNames[key] || key,
-      day: tplDays[key] || "",
-      sent: sent,
-      resp: resp,
-      rate: sent > 0 ? ((resp / sent) * 100).toFixed(1) + "%" : "0%",
-    });
-  }
-
-  var bcastPerf = [];
-  for (var bi = 0; bi < bcastOrder.length; bi++) {
-    var key = bcastOrder[bi];
-    var sent = allTemplatesSent[key] || 0;
-    var resp = allTemplatesResp[key] || 0;
-    if (sent > 0) {
-      bcastPerf.push({
-        name: "Emprende Show",
-        day: "Bcast",
-        sent: sent,
-        resp: resp,
-        rate: sent > 0 ? ((resp / sent) * 100).toFixed(1) + "%" : "0%",
-      });
+  // Detect step_order in data
+  var threadStepMap = {};
+  var threadTemplateMap = {};
+  var hasStepOrder = false;
+  for (var si = 0; si < rows.length; si++) {
+    var sr = rows[si];
+    if (sr.step_order && sr.thread_id) {
+      var so = parseInt(sr.step_order);
+      if (!isNaN(so) && so >= 1) {
+        hasStepOrder = true;
+        threadStepMap[sr.thread_id] = so;
+      }
+    }
+    if (sr.template_name && sr.thread_id) {
+      threadTemplateMap[sr.thread_id] = sr.template_name;
     }
   }
 
-  // Real template performance
+  // Detect if we have new-format template names
+  var allSentKeys = Object.keys(allTemplatesSent);
+  var hasNewFormat = allSentKeys.some(function (k) { return parseTemplateName(k) !== null; });
+
+  var tplPerf = [];
   var tplPerfReal = [];
-  for (var tri = 0; tri < tplOrder.length; tri++) {
-    var rkey = tplOrder[tri];
-    var rsent = allTemplatesSent[rkey] || 0;
-    var rresp = allTemplatesRespReal[rkey] || 0;
-    tplPerfReal.push({
-      name: tplNames[rkey] || rkey,
-      day: tplDays[rkey] || "",
-      sent: rsent,
-      resp: rresp,
-      rate: rsent > 0 ? ((rresp / rsent) * 100).toFixed(1) + "%" : "0%",
-    });
+  var bcastPerf = [];
+  var bcastPerfReal = [];
+  var stepGroupsAll = null;
+  var stepGroupsReal = null;
+
+  var STEP_LABELS = {1:"Contacto Inicial",2:"Seguimiento",3:"Value Nudge",4:"Quick Audit"};
+  var STEP_COLORS = {1:C.accent,2:C.purple,3:C.cyan,4:C.orange};
+
+  // Collect per-template step info (needed by both tplByStep and meetByTpl)
+  var tplStepInfo = {};
+  if (hasStepOrder) {
+    for (var tsi = 0; tsi < rows.length; tsi++) {
+      var tsr = rows[tsi];
+      if (tsr.template_name && tsr.step_order) {
+        tplStepInfo[tsr.template_name] = parseInt(tsr.step_order);
+      }
+    }
   }
 
-  var bcastPerfReal = [];
+  if (hasStepOrder) {
+    function buildStepGroups(sentMap, respMap) {
+      var steps = {};
+      var tplNames = Object.keys(sentMap);
+      for (var ti = 0; ti < tplNames.length; ti++) {
+        var tName = tplNames[ti];
+        var step = tplStepInfo[tName];
+        if (!step) continue;
+        if (!steps[step]) {
+          steps[step] = { day: stepToDay(step), label: STEP_LABELS[step] || "Step " + step, color: STEP_COLORS[step] || C.accent, templates: [], totalSent: 0, totalResp: 0 };
+        }
+        var s = sentMap[tName] || 0;
+        var r = respMap[tName] || 0;
+        var lang = "es";
+        if (tName.startsWith("pt_") || tName.includes("_br")) lang = "pt";
+        steps[step].templates.push({
+          name: tName, displayName: humanizeTemplateName(tName), lang: lang,
+          sent: s, resp: r, rate: s > 0 ? ((r / s) * 100).toFixed(1) + "%" : "0%"
+        });
+        steps[step].totalSent += s;
+        steps[step].totalResp += r;
+      }
+      // Add totalRate and sort templates by sent desc
+      var stepKeys = Object.keys(steps).sort(function(a,b){return parseInt(a)-parseInt(b);});
+      var result = {};
+      for (var si2 = 0; si2 < stepKeys.length; si2++) {
+        var sk = stepKeys[si2];
+        var sg = steps[sk];
+        sg.totalRate = sg.totalSent > 0 ? ((sg.totalResp / sg.totalSent) * 100).toFixed(1) + "%" : "0%";
+        sg.templates.sort(function(a,b){return b.sent - a.sent;});
+        result[sk] = sg;
+      }
+      return result;
+    }
+
+    stepGroupsAll = buildStepGroups(allTemplatesSent, allTemplatesResp);
+    stepGroupsReal = buildStepGroups(allTemplatesSent, allTemplatesRespReal);
+
+    // Also build flat tplPerf for compatibility with compare mode
+    var stepSorted = Object.keys(tplStepInfo).sort(function(a,b){
+      var sa = tplStepInfo[a] || 99, sb = tplStepInfo[b] || 99;
+      if (sa !== sb) return sa - sb;
+      return a.localeCompare(b);
+    });
+    for (var fi = 0; fi < stepSorted.length; fi++) {
+      var fk = stepSorted[fi];
+      var fsent = allTemplatesSent[fk] || 0;
+      if (fsent === 0) continue;
+      var fresp = allTemplatesResp[fk] || 0;
+      var frrespReal = allTemplatesRespReal[fk] || 0;
+      var fstep = tplStepInfo[fk];
+      tplPerf.push({ name: fk, day: stepToDay(fstep), sent: fsent, resp: fresp, rate: fsent > 0 ? ((fresp / fsent) * 100).toFixed(1) + "%" : "0%" });
+      tplPerfReal.push({ name: fk, day: stepToDay(fstep), sent: fsent, resp: frrespReal, rate: fsent > 0 ? ((frrespReal / fsent) * 100).toFixed(1) + "%" : "0%" });
+    }
+  } else if (hasNewFormat) {
+    // New format: sort by day then by name
+    var newKeys = allSentKeys.filter(function (k) { return parseTemplateName(k) !== null; });
+    newKeys.sort(function (a, b) {
+      var pa = parseTemplateName(a), pb = parseTemplateName(b);
+      if (pa.day !== pb.day) return pa.day - pb.day;
+      return a.localeCompare(b);
+    });
+    for (var ni = 0; ni < newKeys.length; ni++) {
+      var nk = newKeys[ni];
+      var np = parseTemplateName(nk);
+      var nsent = allTemplatesSent[nk] || 0;
+      var nresp = allTemplatesResp[nk] || 0;
+      var nrrespReal = allTemplatesRespReal[nk] || 0;
+      tplPerf.push({ name: nk, day: "D+" + np.day, sent: nsent, resp: nresp, rate: nsent > 0 ? ((nresp / nsent) * 100).toFixed(1) + "%" : "0%" });
+      tplPerfReal.push({ name: nk, day: "D+" + np.day, sent: nsent, resp: nrrespReal, rate: nsent > 0 ? ((nrrespReal / nsent) * 100).toFixed(1) + "%" : "0%" });
+    }
+    // Also include any legacy templates that may exist in the same import
+    for (var li = 0; li < legacyOrder.length; li++) {
+      var lk = legacyOrder[li];
+      if (allTemplatesSent[lk]) {
+        var lsent = allTemplatesSent[lk] || 0;
+        var lresp = allTemplatesResp[lk] || 0;
+        var lrrespReal = allTemplatesRespReal[lk] || 0;
+        tplPerf.push({ name: tplNamesMap[lk] || lk, day: tplDaysMap[lk] || "", sent: lsent, resp: lresp, rate: lsent > 0 ? ((lresp / lsent) * 100).toFixed(1) + "%" : "0%" });
+        tplPerfReal.push({ name: tplNamesMap[lk] || lk, day: tplDaysMap[lk] || "", sent: lsent, resp: lrrespReal, rate: lsent > 0 ? ((lrrespReal / lsent) * 100).toFixed(1) + "%" : "0%" });
+      }
+    }
+  } else {
+    // Legacy format
+    for (var ti = 0; ti < legacyOrder.length; ti++) {
+      var key = legacyOrder[ti];
+      var sent = allTemplatesSent[key] || 0;
+      var resp = allTemplatesResp[key] || 0;
+      tplPerf.push({ name: tplNamesMap[key] || key, day: tplDaysMap[key] || "", sent: sent, resp: resp, rate: sent > 0 ? ((resp / sent) * 100).toFixed(1) + "%" : "0%" });
+    }
+    for (var tri = 0; tri < legacyOrder.length; tri++) {
+      var rkey = legacyOrder[tri];
+      var rsent = allTemplatesSent[rkey] || 0;
+      var rresp = allTemplatesRespReal[rkey] || 0;
+      tplPerfReal.push({ name: tplNamesMap[rkey] || rkey, day: tplDaysMap[rkey] || "", sent: rsent, resp: rresp, rate: rsent > 0 ? ((rresp / rsent) * 100).toFixed(1) + "%" : "0%" });
+    }
+  }
+
+  for (var bi = 0; bi < bcastOrder.length; bi++) {
+    var bkey = bcastOrder[bi];
+    var bsent = allTemplatesSent[bkey] || 0;
+    var bresp = allTemplatesResp[bkey] || 0;
+    if (bsent > 0) {
+      bcastPerf.push({ name: "Emprende Show", day: "Bcast", sent: bsent, resp: bresp, rate: bsent > 0 ? ((bresp / bsent) * 100).toFixed(1) + "%" : "0%" });
+    }
+  }
   for (var bri = 0; bri < bcastOrder.length; bri++) {
     var brkey = bcastOrder[bri];
     var brsent = allTemplatesSent[brkey] || 0;
     var brresp = allTemplatesRespReal[brkey] || 0;
     if (brsent > 0) {
-      bcastPerfReal.push({
-        name: "Emprende Show",
-        day: "Bcast",
-        sent: brsent,
-        resp: brresp,
-        rate: brsent > 0 ? ((brresp / brsent) * 100).toFixed(1) + "%" : "0%",
-      });
+      bcastPerfReal.push({ name: "Emprende Show", day: "Bcast", sent: brsent, resp: brresp, rate: brsent > 0 ? ((brresp / brsent) * 100).toFixed(1) + "%" : "0%" });
     }
   }
 
@@ -620,11 +801,25 @@ export function processCSVRows(rows) {
   }
   var meetByTplAll = [];
   var meetByTplReal = [];
-  var allTpls = ["MSG1", "MSG2a", "MSG2b", "MSG2c", "MSG3", "MSG4"];
-  for (var ti = 0; ti < allTpls.length; ti++) {
-    var k = allTpls[ti];
-    meetByTplAll.push({ l: k, v: meetByTplMapAll[k] || 0, c: tplColors[k] || C.accent });
-    meetByTplReal.push({ l: k, v: meetByTplMapReal[k] || 0, c: tplColors[k] || C.accent });
+  // Build dynamic list from all templates that got responses
+  var allMeetTpls = Object.keys(meetByTplMapAll);
+  var realKeys = Object.keys(meetByTplMapReal);
+  for (var rki = 0; rki < realKeys.length; rki++) {
+    if (allMeetTpls.indexOf(realKeys[rki]) < 0) allMeetTpls.push(realKeys[rki]);
+  }
+  function getMeetTplColor(tplName) {
+    if (tplColors[tplName]) return tplColors[tplName];
+    var step = tplStepInfo ? tplStepInfo[tplName] : null;
+    if (step && STEP_COLORS[step]) return STEP_COLORS[step];
+    if (tplName.startsWith("pt_")) return C.green;
+    if (tplName.startsWith("es_")) return C.accent;
+    return C.accent;
+  }
+  for (var mti = 0; mti < allMeetTpls.length; mti++) {
+    var mk2 = allMeetTpls[mti];
+    var meetLabel = hasStepOrder ? humanizeTemplateName(mk2) : mk2;
+    meetByTplAll.push({ l: meetLabel, v: meetByTplMapAll[mk2] || 0, c: getMeetTplColor(mk2) });
+    meetByTplReal.push({ l: meetLabel, v: meetByTplMapReal[mk2] || 0, c: getMeetTplColor(mk2) });
   }
   meetByTplAll.sort(function (a, b) { return b.v - a.v; });
   meetByTplReal.sort(function (a, b) { return b.v - a.v; });
@@ -649,6 +844,7 @@ export function processCSVRows(rows) {
         hours: hourlyAll,
         tpl: tplPerf,
         bcast: bcastPerf,
+        tplByStep: hasStepOrder ? stepGroupsAll : null,
       },
       real: {
         resp: realesCount, rate: rateReal, topics: topicsArrReal,
@@ -661,6 +857,7 @@ export function processCSVRows(rows) {
         hours: hourlyReal,
         tpl: tplPerfReal,
         bcast: bcastPerfReal,
+        tplByStep: hasStepOrder ? stepGroupsReal : null,
       },
     },
     funnelAll: funnelAll,
@@ -700,6 +897,8 @@ export function dbRowsToCSVFormat(dbRows) {
       message_datetime: r.message_datetime || "",
       message_content: r.message_content || "",
       lead_qualification: r.lead_qualification || "",
+      template_name: r.template_name || "",
+      step_order: r.step_order != null ? String(r.step_order) : "",
     };
   });
 }
