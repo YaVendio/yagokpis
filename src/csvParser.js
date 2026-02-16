@@ -325,6 +325,8 @@ export function processCSVRows(rows) {
   var igCountReal = 0, igLinkCountReal = 0, igAtOnlyCountReal = 0;
   var toolCountReal = 0, mcCountReal = 0;
 
+  var templateContents = {};
+
   for (var t = 0; t < threadIds.length; t++) {
     var tid = threadIds[t];
     var msgs = threads[tid];
@@ -373,6 +375,7 @@ export function processCSVRows(rows) {
           if (tplName) {
             templatesSent.push(tplName);
             conversation.push([0, tplName, dt]);
+            if (!templateContents[tplName]) templateContents[tplName] = content;
           }
         } else {
           if (content.includes("meetings.hubspot.com/")) hasMeetingLink = true;
@@ -594,7 +597,7 @@ export function processCSVRows(rows) {
   var stepGroupsReal = null;
 
   var STEP_LABELS = {1:"Contacto Inicial",2:"Seguimiento",3:"Value Nudge",4:"Quick Audit"};
-  var STEP_COLORS = {1:C.accent,2:C.purple,3:C.cyan,4:C.orange};
+  var STEP_COLORS = {1:"#2563EB",2:"#7C3AED",3:"#0891B2",4:"#EA580C"};
 
   // Collect per-template step info (needed by both tplByStep and meetByTpl)
   var tplStepInfo = {};
@@ -616,7 +619,7 @@ export function processCSVRows(rows) {
         var step = tplStepInfo[tName];
         if (!step) continue;
         if (!steps[step]) {
-          steps[step] = { day: stepToDay(step), label: STEP_LABELS[step] || "Step " + step, color: STEP_COLORS[step] || C.accent, templates: [], totalSent: 0, totalResp: 0 };
+          steps[step] = { day: stepToDay(step), label: STEP_LABELS[step] || "Step " + step, color: STEP_COLORS[step] || "#2563EB", templates: [], totalSent: 0, totalResp: 0 };
         }
         var s = sentMap[tName] || 0;
         var r = respMap[tName] || 0;
@@ -658,8 +661,8 @@ export function processCSVRows(rows) {
       var fresp = allTemplatesResp[fk] || 0;
       var frrespReal = allTemplatesRespReal[fk] || 0;
       var fstep = tplStepInfo[fk];
-      tplPerf.push({ name: fk, day: stepToDay(fstep), sent: fsent, resp: fresp, rate: fsent > 0 ? ((fresp / fsent) * 100).toFixed(1) + "%" : "0%" });
-      tplPerfReal.push({ name: fk, day: stepToDay(fstep), sent: fsent, resp: frrespReal, rate: fsent > 0 ? ((frrespReal / fsent) * 100).toFixed(1) + "%" : "0%" });
+      tplPerf.push({ name: fk, day: stepToDay(fstep), sent: fsent, resp: fresp, rate: fsent > 0 ? ((fresp / fsent) * 100).toFixed(1) + "%" : "0%", key: fk, content: templateContents[fk] || null });
+      tplPerfReal.push({ name: fk, day: stepToDay(fstep), sent: fsent, resp: frrespReal, rate: fsent > 0 ? ((frrespReal / fsent) * 100).toFixed(1) + "%" : "0%", key: fk, content: templateContents[fk] || null });
     }
   } else if (hasNewFormat) {
     // New format: sort by day then by name
@@ -675,8 +678,8 @@ export function processCSVRows(rows) {
       var nsent = allTemplatesSent[nk] || 0;
       var nresp = allTemplatesResp[nk] || 0;
       var nrrespReal = allTemplatesRespReal[nk] || 0;
-      tplPerf.push({ name: nk, day: "D+" + np.day, sent: nsent, resp: nresp, rate: nsent > 0 ? ((nresp / nsent) * 100).toFixed(1) + "%" : "0%" });
-      tplPerfReal.push({ name: nk, day: "D+" + np.day, sent: nsent, resp: nrrespReal, rate: nsent > 0 ? ((nrrespReal / nsent) * 100).toFixed(1) + "%" : "0%" });
+      tplPerf.push({ name: nk, day: "D+" + np.day, sent: nsent, resp: nresp, rate: nsent > 0 ? ((nresp / nsent) * 100).toFixed(1) + "%" : "0%", key: nk, content: templateContents[nk] || null });
+      tplPerfReal.push({ name: nk, day: "D+" + np.day, sent: nsent, resp: nrrespReal, rate: nsent > 0 ? ((nrrespReal / nsent) * 100).toFixed(1) + "%" : "0%", key: nk, content: templateContents[nk] || null });
     }
     // Also include any legacy templates that may exist in the same import
     for (var li = 0; li < legacyOrder.length; li++) {
@@ -685,8 +688,8 @@ export function processCSVRows(rows) {
         var lsent = allTemplatesSent[lk] || 0;
         var lresp = allTemplatesResp[lk] || 0;
         var lrrespReal = allTemplatesRespReal[lk] || 0;
-        tplPerf.push({ name: tplNamesMap[lk] || lk, day: tplDaysMap[lk] || "", sent: lsent, resp: lresp, rate: lsent > 0 ? ((lresp / lsent) * 100).toFixed(1) + "%" : "0%" });
-        tplPerfReal.push({ name: tplNamesMap[lk] || lk, day: tplDaysMap[lk] || "", sent: lsent, resp: lrrespReal, rate: lsent > 0 ? ((lrrespReal / lsent) * 100).toFixed(1) + "%" : "0%" });
+        tplPerf.push({ name: tplNamesMap[lk] || lk, day: tplDaysMap[lk] || "", sent: lsent, resp: lresp, rate: lsent > 0 ? ((lresp / lsent) * 100).toFixed(1) + "%" : "0%", key: lk, content: templateContents[lk] || null });
+        tplPerfReal.push({ name: tplNamesMap[lk] || lk, day: tplDaysMap[lk] || "", sent: lsent, resp: lrrespReal, rate: lsent > 0 ? ((lrrespReal / lsent) * 100).toFixed(1) + "%" : "0%", key: lk, content: templateContents[lk] || null });
       }
     }
   } else {
@@ -695,13 +698,13 @@ export function processCSVRows(rows) {
       var key = legacyOrder[ti];
       var sent = allTemplatesSent[key] || 0;
       var resp = allTemplatesResp[key] || 0;
-      tplPerf.push({ name: tplNamesMap[key] || key, day: tplDaysMap[key] || "", sent: sent, resp: resp, rate: sent > 0 ? ((resp / sent) * 100).toFixed(1) + "%" : "0%" });
+      tplPerf.push({ name: tplNamesMap[key] || key, day: tplDaysMap[key] || "", sent: sent, resp: resp, rate: sent > 0 ? ((resp / sent) * 100).toFixed(1) + "%" : "0%", key: key, content: templateContents[key] || null });
     }
     for (var tri = 0; tri < legacyOrder.length; tri++) {
       var rkey = legacyOrder[tri];
       var rsent = allTemplatesSent[rkey] || 0;
       var rresp = allTemplatesRespReal[rkey] || 0;
-      tplPerfReal.push({ name: tplNamesMap[rkey] || rkey, day: tplDaysMap[rkey] || "", sent: rsent, resp: rresp, rate: rsent > 0 ? ((rresp / rsent) * 100).toFixed(1) + "%" : "0%" });
+      tplPerfReal.push({ name: tplNamesMap[rkey] || rkey, day: tplDaysMap[rkey] || "", sent: rsent, resp: rresp, rate: rsent > 0 ? ((rresp / rsent) * 100).toFixed(1) + "%" : "0%", key: rkey, content: templateContents[rkey] || null });
     }
   }
 
@@ -710,7 +713,7 @@ export function processCSVRows(rows) {
     var bsent = allTemplatesSent[bkey] || 0;
     var bresp = allTemplatesResp[bkey] || 0;
     if (bsent > 0) {
-      bcastPerf.push({ name: "Emprende Show", day: "Bcast", sent: bsent, resp: bresp, rate: bsent > 0 ? ((bresp / bsent) * 100).toFixed(1) + "%" : "0%" });
+      bcastPerf.push({ name: "Emprende Show", day: "Bcast", sent: bsent, resp: bresp, rate: bsent > 0 ? ((bresp / bsent) * 100).toFixed(1) + "%" : "0%", key: bkey, content: templateContents[bkey] || null });
     }
   }
   for (var bri = 0; bri < bcastOrder.length; bri++) {
@@ -718,7 +721,7 @@ export function processCSVRows(rows) {
     var brsent = allTemplatesSent[brkey] || 0;
     var brresp = allTemplatesRespReal[brkey] || 0;
     if (brsent > 0) {
-      bcastPerfReal.push({ name: "Emprende Show", day: "Bcast", sent: brsent, resp: brresp, rate: brsent > 0 ? ((brresp / brsent) * 100).toFixed(1) + "%" : "0%" });
+      bcastPerfReal.push({ name: "Emprende Show", day: "Bcast", sent: brsent, resp: brresp, rate: brsent > 0 ? ((brresp / brsent) * 100).toFixed(1) + "%" : "0%", key: brkey, content: templateContents[brkey] || null });
     }
   }
 

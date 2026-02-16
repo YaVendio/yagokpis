@@ -154,6 +154,74 @@ function MeetModal({leads,onClose,mode,title}){
   </div>);
 }
 
+function TplModal({tpl,leads,mode,onClose}){
+  const [sel,setSel]=useState(null);
+  var eC={alto:C.green,medio:C.accent,bajo:C.yellow,minimo:C.red};
+  var filtered=leads.filter(function(l){
+    if(mode===1&&l.au) return false;
+    return l.fr===tpl.key;
+  });
+  var cleanContent=tpl.content;
+  if(cleanContent){
+    cleanContent=cleanContent.replace(/\[Este mensaje fue enviado automáticamente[^\]]*\]/gi,"").replace(/\[Esta mensagem foi enviada automaticamente[^\]]*\]/gi,"").trim();
+  }
+  var rn=parseFloat(tpl.rate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;
+
+  return (<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#00000055",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={onClose}>
+    <div style={{background:C.card,borderRadius:16,padding:24,maxWidth:880,width:"100%",maxHeight:"92vh",boxShadow:"0 25px 60px #00000025"}} onClick={function(e){e.stopPropagation();}}>
+      {sel!==null ? (
+        <ConvView lead={filtered[sel]} onBack={function(){setSel(null);}} />
+      ) : (<div style={{maxHeight:"82vh",overflowY:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+          <div>
+            <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <span style={{fontSize:19,fontWeight:900}}>{tpl.name}</span>
+              <span style={{fontSize:12,color:C.muted,background:"#F3F4F6",padding:"2px 8px",borderRadius:4}}>{tpl.day}</span>
+              <Bd color={sc}>{tpl.rate}</Bd>
+            </div>
+            <div style={{fontSize:13,color:C.muted,marginTop:4}}>{filtered.length} leads respondieron a este template</div>
+          </div>
+          <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:36,height:36,fontSize:18,cursor:"pointer",color:C.muted,fontWeight:700}}>{"\u2715"}</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:18}}>
+          {[{l:"Enviados",v:tpl.sent,c:C.accent},{l:"Respondieron",v:tpl.resp,c:C.purple},{l:"Tasa",v:tpl.rate,c:sc}].map(function(s,i){return (<div key={i} style={{background:s.c+"08",borderRadius:10,padding:"10px 14px",textAlign:"center",border:"1px solid "+s.c+"18"}}>
+            <div style={{fontSize:11,color:C.muted,fontWeight:600}}>{s.l}</div>
+            <div style={{fontSize:24,fontWeight:800,fontFamily:mono,color:s.c}}>{s.v}</div>
+          </div>);})}
+        </div>
+        {cleanContent && <div style={{marginBottom:18}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Contenido del template</div>
+          <div style={{background:"#F9FAFB",border:"1px solid "+C.border,borderRadius:12,padding:"14px 18px",fontSize:14,color:C.sub,lineHeight:1.7,whiteSpace:"pre-wrap",maxHeight:200,overflowY:"auto"}}>{cleanContent}</div>
+        </div>}
+        {filtered.length>0 && <div>
+          <div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Leads que respondieron ({filtered.length})</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {filtered.map(function(l,i){
+              var ql=qualLabel(l.q);
+              return (<div key={i} onClick={function(){setSel(i);}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:"#F9FAFB",borderRadius:12,cursor:"pointer",border:"2px solid transparent"}}>
+                <span style={{fontSize:20}}>{l.co}</span>
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span style={{fontFamily:mono,fontWeight:700,fontSize:16}}>{l.p}</span>
+                    <Bd color={eC[l.e]||C.muted}>{l.e}</Bd>
+                    <Bd color={ql.c}>{ql.t}</Bd>
+                    {l.au && <Bd color={C.red}>AUTO</Bd>}
+                  </div>
+                  <div style={{fontSize:12,color:C.muted,marginTop:3}}>
+                    {l.ms} msgs {"\u00B7"} {l.w.toLocaleString()} pal. {"\u00B7"} Tpls: <strong>{l.tr.join(", ")}</strong>
+                  </div>
+                </div>
+                <div style={{color:C.accent,fontSize:18,fontWeight:700}}>{"\u2192"}</div>
+              </div>);
+            })}
+          </div>
+        </div>}
+        {filtered.length===0 && <div style={{textAlign:"center",padding:30,color:C.muted,fontSize:14}}>Ning\u00FAn lead respondi\u00F3 a este template{mode===1?" (filtro reales activo)":""}.</div>}
+      </div>)}
+    </div>
+  </div>);
+}
+
 function Delta({current,previous,suffix,invert}){
   if(previous===null||previous===undefined) return null;
   var cv=typeof current==="string"?parseFloat(current):current;
@@ -194,6 +262,7 @@ export default function Dashboard(){
   const [meetByTplAll,setMeetByTplAll]=useState([]);
   const [meetByTplReal,setMeetByTplReal]=useState([]);
   const [headerInfo,setHeaderInfo]=useState(EMPTY_HEADER);
+  const [selTpl,setSelTpl]=useState(null);
   const [searchQuery,setSearchQuery]=useState("");
   const [searchResults,setSearchResults]=useState(null);
   const [searchLoading,setSearchLoading]=useState(false);
@@ -448,16 +517,20 @@ export default function Dashboard(){
       if(!tid) continue;
       if(!threads[tid]) threads[tid]={rows:[],sentAt:null};
       threads[tid].rows.push(rows[i]);
-      if(!threads[tid].sentAt&&rows[i].template_sent_at){
-        var dd=parseDatetime(rows[i].template_sent_at);
-        if(dd&&!isNaN(dd.getTime())) threads[tid].sentAt=dd;
+      if(!threads[tid].sentAt){
+        // Try template_sent_at first, then message_datetime as fallback
+        var src=rows[i].template_sent_at||rows[i].message_datetime;
+        if(src){
+          var dd=parseDatetime(src);
+          if(dd&&!isNaN(dd.getTime())) threads[tid].sentAt=dd;
+        }
       }
     }
     var out=[];
     var tids=Object.keys(threads);
     for(var j=0;j<tids.length;j++){
       var th=threads[tids[j]];
-      if(!th.sentAt){out=out.concat(th.rows);continue;}
+      if(!th.sentAt) continue;
       if(fromD&&th.sentAt<fromD) continue;
       if(toD&&th.sentAt>toD) continue;
       out=out.concat(th.rows);
@@ -492,13 +565,14 @@ export default function Dashboard(){
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
     {showM && <MeetModal leads={meetings.filter(function(l){return l.ml;})} mode={mode} onClose={function(){setShowM(false);}} title={"\u{1F4C5} Leads con Oferta de Reuni\u00F3n"}/>}
     {showA && <MeetModal leads={meetings} mode={mode} onClose={function(){setShowA(false);}} title={"\u{1F4AC} Todas las Conversaciones"}/>}
+    {selTpl && <TplModal tpl={selTpl} leads={meetings} mode={mode} onClose={function(){setSelTpl(null);}}/>}
 
     <div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"16px 28px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
       <div style={{display:"flex",alignItems:"center",gap:14}}>
         <h1 style={{margin:0,fontSize:22,fontWeight:900}}><span style={{color:C.accent}}>YAGO</span> <span style={{color:C.muted,fontWeight:400}}>SDR</span></h1>
         <span style={{fontSize:13,color:C.muted,background:"#F3F4F6",padding:"4px 10px",borderRadius:6,fontWeight:600}}>{headerInfo.dateRange} {"\u00B7"} {tc} leads</span>
-        {imports.length>0 && <select value={selectedImportId||""} onChange={function(ev){var newId=Number(ev.target.value);setSelectedImportId(newId);var imp=imports.find(function(i){return i.id===newId;});setCsvName(imp?imp.label||imp.filename:"");setCompareImportId(null);setCompareData(null);setComparing(false);loadMessagesForImport(newId);}} style={{fontSize:12,fontWeight:600,padding:"4px 8px",borderRadius:6,border:"1px solid "+C.border,background:"#F9FAFB",color:C.text,fontFamily:font,cursor:"pointer"}}>
-          {imports.map(function(imp){var d=imp.imported_at?new Date(imp.imported_at):null;var ds=d?String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0"):"";return <option key={imp.id} value={imp.id}>{(imp.label||imp.filename)+(ds?" ("+ds+")":"")}</option>;})}
+        {imports.length>0 && <select value={selectedImportId||""} onChange={function(ev){var newId=Number(ev.target.value);setSelectedImportId(newId);var imp=imports.find(function(i){return i.id===newId;});setCsvName(imp?imp.label||imp.filename:"");setCompareImportId(null);setCompareData(null);setComparing(false);loadMessagesForImport(newId);}} style={{fontSize:12,fontWeight:600,padding:"4px 8px",borderRadius:6,border:"1px solid "+C.border,background:"#F9FAFB",color:C.text,fontFamily:font,cursor:"pointer",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis"}}>
+          {imports.map(function(imp){var d=imp.imported_at?new Date(imp.imported_at):null;var ds=d?String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0"):"";var lbl=(imp.label||imp.filename);if(lbl.length>18)lbl=lbl.substring(0,18)+"\u2026";return <option key={imp.id} value={imp.id}>{lbl+(ds?" ("+ds+")":"")}</option>;})}
         </select>}
         {imports.length>1 && <button onClick={function(){setComparing(!comparing);if(comparing){setCompareImportId(null);setCompareData(null);}}} style={{fontSize:11,fontWeight:700,padding:"4px 10px",borderRadius:6,border:"1px solid "+(comparing?C.purple+"55":C.border),background:comparing?C.lPurple:"#F9FAFB",color:comparing?C.purple:C.muted,cursor:"pointer",fontFamily:font}}>{comparing?"Cerrar":"Comparar"}</button>}
         {comparing && <select value={compareImportId||""} onChange={function(ev){var cid=Number(ev.target.value);setCompareImportId(cid);loadCompareData(cid);}} style={{fontSize:12,fontWeight:600,padding:"4px 8px",borderRadius:6,border:"1px solid "+C.purple+"44",background:C.lPurple,color:C.purple,fontFamily:font,cursor:"pointer"}}>
@@ -716,7 +790,8 @@ export default function Dashboard(){
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:sg.templates.length===1?"1fr":"1fr 1fr",gap:12}}>
                   {sg.templates.map(function(t,i){var trn=parseFloat(t.rate);var tsc=trn>=20?C.green:trn>=12?C.yellow:C.red;
-                    return (<Cd key={i}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:800,fontSize:15}}>{t.displayName}</div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,color:C.muted,background:"#F3F4F6",padding:"2px 8px",borderRadius:4}}>{sg.day}</span><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span></div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div></Cd>);
+                    var tplItem=d.tpl.find(function(x){return x.key===t.name;});
+                    return (<Cd key={i} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={tplItem?{cursor:"pointer"}:{}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:800,fontSize:15}}>{t.displayName}</div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,color:C.muted,background:"#F3F4F6",padding:"2px 8px",borderRadius:4}}>{sg.day}</span><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span></div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
                   })}
                 </div>
               </div>);
@@ -729,11 +804,11 @@ export default function Dashboard(){
           <Sec>Performance por Template</Sec>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:22}}>
             {d.tpl.map(function(t,i){var rn=parseFloat(t.rate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;
-              return (<Cd key={i}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:800,fontSize:16}}>{t.name}</div><span style={{fontSize:12,color:C.muted,background:"#F3F4F6",padding:"2px 8px",borderRadius:4}}>{t.day}</span></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:13,color:C.muted}}>{t.resp} de {t.sent}</div></div></div></Cd>);
+              return (<Cd key={i} onClick={function(){setSelTpl(t);}} style={{cursor:"pointer"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:800,fontSize:16}}>{t.name}</div><span style={{fontSize:12,color:C.muted,background:"#F3F4F6",padding:"2px 8px",borderRadius:4}}>{t.day}</span></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:13,color:C.muted}}>{t.resp} de {t.sent}</div></div></div><div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div></Cd>);
             })}
           </div>
         </>)}
-        {d.bcast&&d.bcast.length>0&&(<div style={{marginTop:10,marginBottom:22}}><div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",marginBottom:8,letterSpacing:1}}>Disparos Puntuais (fora do lifecycle)</div><div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>{d.bcast.map(function(t,i){var rn=parseFloat(t.rate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;return(<Cd key={i} style={{background:"#FEFCE8",border:"1px dashed "+C.yellow+"55"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontWeight:800,fontSize:16}}>{t.name}</div><span style={{fontSize:12,color:C.muted,background:"#FEF9C3",padding:"2px 8px",borderRadius:4}}>Broadcast</span></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:13,color:C.muted}}>{t.resp+" de "+t.sent}</div></div></div></Cd>);})}</div></div>)}
+        {d.bcast&&d.bcast.length>0&&(<div style={{marginTop:10,marginBottom:22}}><div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",marginBottom:8,letterSpacing:1}}>Disparos Puntuais (fora do lifecycle)</div><div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>{d.bcast.map(function(t,i){var rn=parseFloat(t.rate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;return(<Cd key={i} onClick={function(){setSelTpl(t);}} style={{background:"#FEFCE8",border:"1px dashed "+C.yellow+"55",cursor:"pointer"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontWeight:800,fontSize:16}}>{t.name}</div><span style={{fontSize:12,color:C.muted,background:"#FEF9C3",padding:"2px 8px",borderRadius:4}}>Broadcast</span></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:13,color:C.muted}}>{t.resp+" de "+t.sent}</div></div></div><div style={{fontSize:11,color:C.yellow,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div></Cd>);})}</div></div>)}
         <Cd style={{marginBottom:18,background:C.lPurple,border:"1px solid "+C.purple+"20"}}>
           <Sec>{"\u{1F4C5} \u00BFEn qu\u00E9 template respondieron los que llegaron a reuni\u00F3n?"}</Sec>
           <div style={{fontSize:14,color:C.sub,marginBottom:14}}>De {d.mc} leads, este fue el <strong>template donde respondieron por primera vez</strong>:</div>
