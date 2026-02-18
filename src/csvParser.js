@@ -1,5 +1,3 @@
-import Papa from "papaparse";
-
 var TEMPLATE_MARKER_ES = "[Este mensaje fue enviado automáticamente por YaVendió]";
 var TEMPLATE_MARKER_PT = "[Esta mensagem foi enviada automaticamente pelo YaVendió]";
 
@@ -248,26 +246,6 @@ var TOPIC_KEYWORDS = {
   "Precios": { e: "\u{1F4B0}", kw: ["precio", "preço", "cost", "plan", "pago", "cobr", "dinero", "dinheiro", "pagar"] },
   "Configuración": { e: "\u2699\uFE0F", kw: ["config", "conect", "integr", "instal", "setup", "vincul"] },
 };
-
-export function parseCSV(file) {
-  return new Promise(function (resolve, reject) {
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: function (results) {
-        try {
-          var data = processCSVRows(results.data);
-          resolve(data);
-        } catch (e) {
-          reject(e);
-        }
-      },
-      error: function (err) {
-        reject(err);
-      },
-    });
-  });
-}
 
 export function processCSVRows(rows) {
   // Group by thread_id
@@ -886,24 +864,3 @@ export function processCSVRows(rows) {
   };
 }
 
-export async function generateContentHash(threadId, messageType, messageContent, messageDatetime) {
-  var str = (threadId || "") + "|" + (messageType || "") + "|" + (messageContent || "") + "|" + (messageDatetime || "");
-  var buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
-}
-
-export function dbRowsToCSVFormat(dbRows) {
-  return dbRows.map(function (r) {
-    return {
-      thread_id: r.thread_id || "",
-      phone_number: r.phone_number || "",
-      template_sent_at: r.template_sent_at || "",
-      message_type: r.message_type || "",
-      message_datetime: r.message_datetime || "",
-      message_content: r.message_content || "",
-      lead_qualification: r.lead_qualification || "",
-      template_name: r.template_name || "",
-      step_order: r.step_order != null ? String(r.step_order) : "",
-    };
-  });
-}
