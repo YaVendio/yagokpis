@@ -83,112 +83,158 @@ export async function fetchThreadsFromPostHog(stepFilter) {
 }
 
 export function expandThreadMessages(threads) {
-  var rows = [];
+  // Phase 1: Parse messages for each thread and group threads by phone_number.
+  // This merges all steps of the same lead into one virtual thread, reproducing
+  // the old CSV structure where one thread_id contained all step messages.
 
+  var parsed = []; // { thread, messages[] }
   for (var i = 0; i < threads.length; i++) {
     var t = threads[i];
     var messages = [];
-
     if (t.values_json) {
       try {
         var values = JSON.parse(t.values_json);
-        if (values && values.messages) {
-          messages = values.messages;
-        }
-      } catch (e) {
-        // Skip threads with unparseable values
+        if (values && values.messages) { messages = values.messages; }
+      } catch (e) { /* skip unparseable */ }
+    }
+    parsed.push({ thread: t, messages: messages });
+  }
+
+  // Group by phone_number; fallback to thread_id when phone is missing
+  var phoneGroups = {}; // phone → [ index into parsed[] ]
+  for (var p = 0; p < parsed.length; p++) {
+    var key = parsed[p].thread.phone_number || parsed[p].thread.thread_id;
+    if (!phoneGroups[key]) phoneGroups[key] = [];
+    phoneGroups[key].push(p);
+  }
+
+  // Phase 2 & 3: For each phone group, compute shared fields and emit rows
+  var rows = [];
+  var sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+  var groupKeys = Object.keys(phoneGroups);
+
+  for (var g = 0; g < groupKeys.length; g++) {
+    var gKey = groupKeys[g];
+    var indices = phoneGroups[gKey];
+
+    // Sort threads in this group by step_order (step 1 first)
+    indices.sort(function (a, b) {
+      var sa = parsed[a].thread.step_order || 999;
+      var sb = parsed[b].thread.step_order || 999;
+      return sa - sb;
+    });
+
+    // Determine virtual thread id = phone_number (or fallback thread_id)
+    var virtualThreadId = gKey;
+
+    // Check if ANY thread in the group has a human response
+    var anyHumanResponse = false;
+    for (var ah = 0; ah < indices.length; ah++) {
+      var ahMsgs = parsed[indices[ah]].messages;
+      for (var ah2 = 0; ah2 < ahMsgs.length; ah2++) {
+        if (ahMsgs[ah2].type === "human") { anyHumanResponse = true; break; }
+      }
+      if (anyHumanResponse) break;
+    }
+
+    // Get lead_qualification from first thread that has one
+    var groupQualification = "";
+    for (var q = 0; q < indices.length; q++) {
+      if (parsed[indices[q]].thread.lead_qualification) {
+        groupQualification = parsed[indices[q]].thread.lead_qualification;
+        break;
       }
     }
 
-    var sentAtDate = t.template_sent_at ? new Date(t.template_sent_at) : null;
-    var sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    // Get template_sent_at from step 1 thread (first in sorted order)
+    var step1Thread = parsed[indices[0]].thread;
+    var groupSentAt = step1Thread.template_sent_at || "";
 
-    // Check if thread has any human response (processCSVRows uses phone presence as signal)
-    var hasHumanResponse = false;
-    for (var h = 0; h < messages.length; h++) {
-      if (messages[h].type === "human") { hasHumanResponse = true; break; }
-    }
-    // Only set phone_number on rows from threads with human responses
-    var phoneForRows = hasHumanResponse ? (t.phone_number || "") : "";
+    // Phone only shown if lead responded
+    var phoneForRows = anyHumanResponse ? (step1Thread.phone_number || "") : "";
 
-    if (messages.length === 0) {
-      // Even if no messages, emit one row so the thread is counted as contactado
-      rows.push({
-        thread_id: t.thread_id,
-        phone_number: "",
-        template_sent_at: t.template_sent_at || "",
-        template_id: t.template_id || "",
-        template_name: t.template_name || "",
-        step_order: t.step_order != null ? String(t.step_order) : "",
-        lead_qualification: t.lead_qualification || "",
-        message_type: "ai",
-        message_datetime: t.template_sent_at || "",
-        message_content: "",
-        is_valid_response: "false",
-      });
-      continue;
-    }
+    // Emit rows for each thread in the group
+    for (var ti = 0; ti < indices.length; ti++) {
+      var entry = parsed[indices[ti]];
+      var thr = entry.thread;
+      var msgs = entry.messages;
+      var sentAtDate = thr.template_sent_at ? new Date(thr.template_sent_at) : null;
 
-    for (var j = 0; j < messages.length; j++) {
-      var msg = messages[j];
-      var msgType = msg.type === "human" ? "human" : msg.type === "tool" ? "tool" : "ai";
-
-      // Ensure content is always a string (LangChain can store arrays for multi-modal)
-      var msgContent = "";
-      if (typeof msg.content === "string") {
-        msgContent = msg.content;
-      } else if (Array.isArray(msg.content)) {
-        msgContent = msg.content.map(function(block) {
-          if (typeof block === "string") return block;
-          if (block && block.text) return block.text;
-          return "";
-        }).join("");
+      if (msgs.length === 0) {
+        rows.push({
+          thread_id: virtualThreadId,
+          phone_number: "",
+          template_sent_at: groupSentAt,
+          template_id: thr.template_id || "",
+          template_name: thr.template_name || "",
+          step_order: thr.step_order != null ? String(thr.step_order) : "",
+          lead_qualification: groupQualification,
+          message_type: "ai",
+          message_datetime: groupSentAt,
+          message_content: "",
+          is_valid_response: "false",
+        });
+        continue;
       }
 
-      // Only set template_name on the actual template message, not on Yago's
-      // conversational AI responses. Use per-message metadata first, then fall back
-      // to execution-level template_name for the first AI message only.
-      var msgTemplateName = "";
-      if (msg.additional_kwargs && msg.additional_kwargs.metadata && msg.additional_kwargs.metadata.template_name) {
-        msgTemplateName = msg.additional_kwargs.metadata.template_name;
-      } else if (msgType === "ai" && j === 0) {
-        // First AI message is the template — use execution-level name as fallback
-        msgTemplateName = t.template_name || "";
-      }
+      for (var j = 0; j < msgs.length; j++) {
+        var msg = msgs[j];
+        var msgType = msg.type === "human" ? "human" : msg.type === "tool" ? "tool" : "ai";
 
-      // Extract timestamp from additional_kwargs.metadata.timestamp
-      var msgDatetime = "";
-      if (msg.additional_kwargs && msg.additional_kwargs.metadata && msg.additional_kwargs.metadata.timestamp) {
-        var ts = msg.additional_kwargs.metadata.timestamp;
-        // Convert Unix timestamp (seconds) to ISO string
-        if (typeof ts === "number") {
-          msgDatetime = new Date(ts * 1000).toISOString();
-        } else {
-          msgDatetime = String(ts);
+        // Normalize content to string
+        var msgContent = "";
+        if (typeof msg.content === "string") {
+          msgContent = msg.content;
+        } else if (Array.isArray(msg.content)) {
+          msgContent = msg.content.map(function (block) {
+            if (typeof block === "string") return block;
+            if (block && block.text) return block.text;
+            return "";
+          }).join("");
         }
-      }
 
-      var isValid = false;
-      if (msgType === "human" && sentAtDate && msgDatetime) {
-        var msgDate = new Date(msgDatetime);
-        if (!isNaN(msgDate.getTime())) {
-          isValid = msgDate >= sentAtDate && msgDate <= new Date(sentAtDate.getTime() + sevenDaysMs);
+        // template_name: per-message metadata first, then execution-level for first AI msg
+        var msgTemplateName = "";
+        if (msg.additional_kwargs && msg.additional_kwargs.metadata && msg.additional_kwargs.metadata.template_name) {
+          msgTemplateName = msg.additional_kwargs.metadata.template_name;
+        } else if (msgType === "ai" && j === 0) {
+          msgTemplateName = thr.template_name || "";
         }
-      }
 
-      rows.push({
-        thread_id: t.thread_id,
-        phone_number: phoneForRows,
-        template_sent_at: t.template_sent_at || "",
-        template_id: t.template_id || "",
-        template_name: msgTemplateName,
-        step_order: t.step_order != null ? String(t.step_order) : "",
-        lead_qualification: t.lead_qualification || "",
-        message_type: msgType,
-        message_datetime: msgDatetime,
-        message_content: msgContent,
-        is_valid_response: String(isValid),
-      });
+        // Extract timestamp
+        var msgDatetime = "";
+        if (msg.additional_kwargs && msg.additional_kwargs.metadata && msg.additional_kwargs.metadata.timestamp) {
+          var ts = msg.additional_kwargs.metadata.timestamp;
+          if (typeof ts === "number") {
+            msgDatetime = new Date(ts * 1000).toISOString();
+          } else {
+            msgDatetime = String(ts);
+          }
+        }
+
+        // is_valid_response uses per-thread sentAtDate (before merging)
+        var isValid = false;
+        if (msgType === "human" && sentAtDate && msgDatetime) {
+          var msgDate = new Date(msgDatetime);
+          if (!isNaN(msgDate.getTime())) {
+            isValid = msgDate >= sentAtDate && msgDate <= new Date(sentAtDate.getTime() + sevenDaysMs);
+          }
+        }
+
+        rows.push({
+          thread_id: virtualThreadId,
+          phone_number: phoneForRows,
+          template_sent_at: groupSentAt,
+          template_id: thr.template_id || "",
+          template_name: msgTemplateName,
+          step_order: thr.step_order != null ? String(thr.step_order) : "",
+          lead_qualification: groupQualification,
+          message_type: msgType,
+          message_datetime: msgDatetime,
+          message_content: msgContent,
+          is_valid_response: String(isValid),
+        });
+      }
     }
   }
 

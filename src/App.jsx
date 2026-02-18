@@ -3,6 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { processCSVRows, parseDatetime } from "./csvParser";
 import { fetchThreadsFromPostHog, expandThreadMessages } from "./posthogApi";
 import { DEFAULT_MEETINGS as _RAW_MEETINGS } from "./defaultData";
+import { supabase } from "./supabase";
 
 var font="'Source Sans 3', sans-serif";
 var mono="'JetBrains Mono', monospace";
@@ -271,13 +272,34 @@ export default function Dashboard(){
   const [rawRows,setRawRows]=useState(null);
   const [dateFrom,setDateFrom]=useState("");
   const [dateTo,setDateTo]=useState("");
+  const [templateConfig,setTemplateConfig]=useState({});
+  const [configLoaded,setConfigLoaded]=useState(false);
+  const [allTemplateNames,setAllTemplateNames]=useState([]);
 
   function applyResult(result){
     var hi={totalContactados:result.totalContactados,leadsPerDay:result.leadsPerDay,dateRange:result.dateRange,autoReplyCount:result.autoReplyCount,realesCount:result.realesCount,esRate:result.esRate,esResp:result.esResp,esTotal:result.esTotal,ptRate:result.ptRate,ptResp:result.ptResp,ptTotal:result.ptTotal};
     setMeetings(result.MEETINGS);setTopicsAll(result.topicsAll);setDataD(result.D);setFunnelAll(result.funnelAll);setFunnelReal(result.funnelReal);setChBench(result.chBench);setDaily(result.daily);setBTable(result.bTable);setMeetByTplAll(result.meetByTplAll);setMeetByTplReal(result.meetByTplReal);setHeaderInfo(hi);
+    if(result.allTemplateNames) setAllTemplateNames(result.allTemplateNames);
   }
 
+  // Load config from Supabase on mount
   useEffect(function(){
+    supabase.from("template_config").select("template_name,category,region")
+      .then(function(res){
+        if(res.data){
+          var cfg={};
+          for(var i=0;i<res.data.length;i++){
+            var r=res.data[i];
+            cfg[r.template_name]={category:r.category||"sin_categoria",region:r.region||""};
+          }
+          setTemplateConfig(cfg);
+        }
+        setConfigLoaded(true);
+      });
+  },[]);
+
+  useEffect(function(){
+    if(!configLoaded) return;
     async function loadFromPostHog(){
       setDbLoading(true);
       setLoadError(null);
@@ -285,8 +307,26 @@ export default function Dashboard(){
         var threads=await fetchThreadsFromPostHog(stepFilter);
         var csvRows=expandThreadMessages(threads);
         setRawRows(csvRows);
-        var result=processCSVRows(csvRows);
+        var result=processCSVRows(csvRows,templateConfig);
         applyResult(result);
+        // Auto-init templateConfig on first load if empty
+        if(Object.keys(templateConfig).length===0&&result.tplStepInfo&&result.allTemplateNames){
+          var stepCatMap={1:"d0",2:"d1",3:"d3",4:"d5"};
+          var autoConfig={};
+          var upsertRows=[];
+          for(var ai=0;ai<result.allTemplateNames.length;ai++){
+            var tn=result.allTemplateNames[ai];
+            var step=result.tplStepInfo[tn];
+            if(step&&stepCatMap[step]){
+              autoConfig[tn]={category:stepCatMap[step],region:""};
+              upsertRows.push({template_name:tn,category:stepCatMap[step],region:"",updated_at:new Date().toISOString()});
+            }
+          }
+          if(Object.keys(autoConfig).length>0){
+            setTemplateConfig(autoConfig);
+            supabase.from("template_config").upsert(upsertRows).then(function(){});
+          }
+        }
       }catch(e){
         console.error("PostHog load error:",e);
         setLoadError(e.message||"Error al cargar datos de PostHog");
@@ -294,7 +334,39 @@ export default function Dashboard(){
       setDbLoading(false);
     }
     loadFromPostHog();
-  },[stepFilter]);
+  },[stepFilter,configLoaded]);
+
+  function updateTemplateConfig(tplName,field,value){
+    setTemplateConfig(function(prev){
+      var entry=prev[tplName]||{category:"sin_categoria",region:""};
+      var next=Object.assign({},prev);
+      next[tplName]=Object.assign({},entry);
+      next[tplName][field]=value;
+      supabase.from("template_config").upsert({
+        template_name:tplName,
+        category:next[tplName].category,
+        region:next[tplName].region,
+        updated_at:new Date().toISOString()
+      }).then(function(){});
+      return next;
+    });
+  }
+
+  function resetConfig(){
+    setTemplateConfig({});
+    supabase.from("template_config").delete().neq("template_name","").then(function(){});
+  }
+
+  // Reprocess when templateConfig changes (only if rawRows already loaded)
+  const templateConfigRef=useRef(templateConfig);
+  useEffect(function(){
+    if(templateConfigRef.current===templateConfig) return; // skip initial
+    templateConfigRef.current=templateConfig;
+    if(!rawRows) return;
+    var filtered=filterRowsByDate(rawRows,dateFrom,dateTo);
+    var result=processCSVRows(filtered,templateConfig);
+    applyResult(result);
+  },[templateConfig]);
 
   function handleSearch(q){
     if(!q||!q.trim()){setSearchResults(null);return;}
@@ -351,7 +423,7 @@ export default function Dashboard(){
   function applyDateFilter(from,to){
     if(!rawRows) return;
     var filtered=filterRowsByDate(rawRows,from,to);
-    var result=processCSVRows(filtered);
+    var result=processCSVRows(filtered,templateConfig);
     applyResult(result);
   }
 
@@ -375,7 +447,7 @@ export default function Dashboard(){
       <div style={{fontSize:36,marginBottom:12}}>{"!"}</div>
       <div style={{fontSize:16,color:C.red,fontWeight:600,marginBottom:8}}>Error al cargar datos</div>
       <div style={{fontSize:14,color:C.muted,lineHeight:1.6}}>{loadError}</div>
-      <button onClick={function(){setLoadError(null);setDbLoading(true);fetchThreadsFromPostHog(stepFilter).then(function(threads){var csvRows=expandThreadMessages(threads);setRawRows(csvRows);var result=processCSVRows(csvRows);applyResult(result);setDbLoading(false);}).catch(function(e){setLoadError(e.message||"Error");setDbLoading(false);});}} style={{marginTop:16,background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font}}>Reintentar</button>
+      <button onClick={function(){setLoadError(null);setDbLoading(true);fetchThreadsFromPostHog(stepFilter).then(function(threads){var csvRows=expandThreadMessages(threads);setRawRows(csvRows);var result=processCSVRows(csvRows,templateConfig);applyResult(result);setDbLoading(false);}).catch(function(e){setLoadError(e.message||"Error");setDbLoading(false);});}} style={{marginTop:16,background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font}}>Reintentar</button>
     </div>
   </div>);
 
@@ -402,7 +474,7 @@ export default function Dashboard(){
           {["\u{1F4CA} Todas","\u2705 Reales"].map(function(l,i){var a=mode===i;return <button key={i} onClick={function(){setMode(i);}} style={{background:a?(i===0?C.accent:C.green):"transparent",color:a?"#fff":C.muted,border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>{l}</button>;})}
         </div>
         <div style={{display:"flex",gap:2,background:"#F3F4F6",borderRadius:10,padding:3}}>
-          {[{id:"overview",l:"Resumen"},{id:"engagement",l:"Engagement"},{id:"templates",l:"Templates"},{id:"benchmarks",l:"Benchmarks"},{id:"lookup",l:"Buscar"}].map(function(t){
+          {[{id:"overview",l:"Resumen"},{id:"engagement",l:"Engagement"},{id:"templates",l:"Templates"},{id:"benchmarks",l:"Benchmarks"},{id:"lookup",l:"Buscar"},{id:"config",l:"Config"}].map(function(t){
             return <button key={t.id} onClick={function(){setTab(t.id);}} style={{background:tab===t.id?"#374151":"transparent",color:tab===t.id?"#fff":C.muted,border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>{t.l}</button>;
           })}
         </div>
@@ -570,7 +642,7 @@ export default function Dashboard(){
 
       {tab==="templates" && (<>
         {d.tplByStep ? (function(){
-          var stepKeys=Object.keys(d.tplByStep).sort(function(a,b){return parseInt(a)-parseInt(b);});
+          var stepKeys=Object.keys(d.tplByStep).sort(function(a,b){return (d.tplByStep[a].order||99)-(d.tplByStep[b].order||99);});
           return (<>
             <Cd style={{marginBottom:18}}><Sec>Cadencia</Sec>
               <div style={{display:"flex",alignItems:"center",gap:0}}>{stepKeys.map(function(sk,i){var sg=d.tplByStep[sk];var items=[];if(i>0)items.push(<div key={"sep"+i} style={{width:36,height:2,background:C.border,flexShrink:0}}/>);items.push(<div key={sk} style={{flex:1,background:sg.color+"08",border:"1px solid "+sg.color+"22",borderRadius:12,padding:"12px 8px",textAlign:"center"}}><div style={{fontSize:11,color:C.muted}}>{sg.day}</div><div style={{fontSize:17,fontWeight:800,color:sg.color,marginTop:4}}>{sg.label}</div><div style={{fontSize:12,color:C.muted}}>{sg.totalSent} enviados {"\u00B7"} {sg.templates.length} variante{sg.templates.length!==1?"s":""}</div></div>);return items;}).flat()}</div>
@@ -591,7 +663,7 @@ export default function Dashboard(){
                 <div style={{display:"grid",gridTemplateColumns:sg.templates.length===1?"1fr":"1fr 1fr",gap:12}}>
                   {sg.templates.map(function(t,i){var trn=parseFloat(t.rate);var tsc=trn>=20?C.green:trn>=12?C.yellow:C.red;
                     var tplItem=d.tpl.find(function(x){return x.key===t.name;});
-                    return (<Cd key={i} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={tplItem?{cursor:"pointer"}:{}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:800,fontSize:15}}>{t.displayName}</div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,color:C.muted,background:"#F3F4F6",padding:"2px 8px",borderRadius:4}}>{sg.day}</span><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span></div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
+                    return (<Cd key={i} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={tplItem?{cursor:"pointer"}:{}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:800,fontSize:15}}>{t.displayName}</div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,color:C.muted,background:"#F3F4F6",padding:"2px 8px",borderRadius:4}}>{sg.day}</span><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span>{t.region && <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.region==="br"?"#ECFDF5":"#EFF6FF",color:t.region==="br"?"#059669":"#2563EB"}}>{t.region==="br"?"BR":"LATAM"}</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
                   })}
                 </div>
               </div>);
@@ -688,6 +760,44 @@ export default function Dashboard(){
             <ConvView lead={lead} onBack={function(){setSearchSel(null);setSearchThreadData(null);}}/>
           </Cd>);
         })()}
+      </>)}
+
+      {tab==="config" && (<>
+        <Cd style={{marginBottom:22}}>
+          <Sec>Configuraci&oacute;n de Templates</Sec>
+          <div style={{fontSize:14,color:C.sub,marginBottom:18,lineHeight:1.6}}>Asigna cada template a una categor&iacute;a para agruparlos en la pesta&ntilde;a Templates. Templates marcados como <strong>Autom&aacute;tico</strong> o <strong>Campa&ntilde;a</strong> ser&aacute;n excluidos de los indicadores de Resumen.</div>
+          {allTemplateNames.length===0 && <div style={{textAlign:"center",padding:30,color:C.muted,fontSize:14}}>No hay templates cargados a&uacute;n. Carga datos primero.</div>}
+          {allTemplateNames.length>0 && (<>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {allTemplateNames.slice().sort().map(function(tplName){
+                var currentEntry=templateConfig[tplName]||{};
+                var currentCat=typeof currentEntry==="string"?currentEntry:(currentEntry.category||"sin_categoria");
+                var currentRegion=typeof currentEntry==="string"?"":(currentEntry.region||"");
+                return (<div key={tplName} style={{display:"flex",alignItems:"center",gap:14,padding:"12px 16px",background:"#F9FAFB",borderRadius:10,border:"1px solid "+C.border}}>
+                  <div style={{flex:1,fontWeight:700,fontSize:14,fontFamily:mono}}>{tplName}</div>
+                  <select value={currentCat} onChange={function(e){updateTemplateConfig(tplName,"category",e.target.value);}} style={{padding:"6px 12px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:font,background:"#FFF",color:C.text,cursor:"pointer",minWidth:200}}>
+                    <option value="sin_categoria">Sin categor&iacute;a</option>
+                    <option value="d0">D+0 — Contacto Inicial</option>
+                    <option value="d1">D+1 — Seguimiento</option>
+                    <option value="d3">D+3 — Value Nudge</option>
+                    <option value="d5">D+5 — Quick Audit</option>
+                    <option value="automatico">Autom&aacute;tico</option>
+                    <option value="campanha">Campa&ntilde;a</option>
+                  </select>
+                  <select value={currentRegion} onChange={function(e){updateTemplateConfig(tplName,"region",e.target.value);}} style={{padding:"6px 12px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:font,background:"#FFF",color:C.text,cursor:"pointer",minWidth:130}}>
+                    <option value="">Sin regi&oacute;n</option>
+                    <option value="br">BR</option>
+                    <option value="latam">LATAM</option>
+                  </select>
+                </div>);
+              })}
+            </div>
+            <div style={{marginTop:18,display:"flex",gap:12}}>
+              <button onClick={resetConfig} style={{background:"#FEF2F2",color:C.red,border:"1px solid #FECACA",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Resetear config</button>
+              <span style={{fontSize:12,color:C.muted,alignSelf:"center"}}>Resetear volver&aacute; al auto-detect por step_order en la pr&oacute;xima carga.</span>
+            </div>
+          </>)}
+        </Cd>
       </>)}
     </div>
   </div>);

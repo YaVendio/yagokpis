@@ -247,7 +247,34 @@ var TOPIC_KEYWORDS = {
   "Configuración": { e: "\u2699\uFE0F", kw: ["config", "conect", "integr", "instal", "setup", "vincul"] },
 };
 
-export function processCSVRows(rows) {
+export function processCSVRows(rows, templateConfig) {
+  var CATEGORY_META = {
+    d0: { day: "D+0", label: "Contacto Inicial", color: "#2563EB", order: 1 },
+    d1: { day: "D+1", label: "Seguimiento", color: "#7C3AED", order: 2 },
+    d3: { day: "D+3", label: "Value Nudge", color: "#0891B2", order: 3 },
+    d5: { day: "D+5", label: "Quick Audit", color: "#EA580C", order: 4 },
+    automatico: { day: "Auto", label: "Automáticos", color: "#6B7280", order: 90 },
+    campanha: { day: "Camp", label: "Campañas", color: "#D97706", order: 91 },
+    sin_categoria: { day: "—", label: "Sin categoría", color: "#9CA3AF", order: 99 },
+  };
+  var EXCLUDED_CATEGORIES = { automatico: true, campanha: true };
+
+  var tplConfig = templateConfig || {};
+  function getCategory(tplName) {
+    var cfg = tplConfig[tplName];
+    if (!cfg) return "sin_categoria";
+    if (typeof cfg === "string") return cfg; // backward compat
+    return cfg.category || "sin_categoria";
+  }
+  function getRegion(tplName) {
+    var cfg = tplConfig[tplName];
+    if (!cfg || typeof cfg === "string") return "";
+    return cfg.region || "";
+  }
+  function isExcluded(tplName) {
+    return EXCLUDED_CATEGORIES[getCategory(tplName)] === true;
+  }
+
   // Group by thread_id
   var threads = {};
   for (var i = 0; i < rows.length; i++) {
@@ -259,9 +286,13 @@ export function processCSVRows(rows) {
   }
 
   // Only count threads that received MSG1 (or a d0 template_name or step_order=1) as "contactados"
+  // Threads where ALL templates are excluded (automatico/campanha) are not counted
   var threadIds = Object.keys(threads).filter(function (tid) {
     var msgs = threads[tid];
     for (var i = 0; i < msgs.length; i++) {
+      // Skip excluded templates
+      if (msgs[i].template_name && isExcluded(msgs[i].template_name)) continue;
+
       // step_order === 1 means first contact
       if (msgs[i].step_order && parseInt(msgs[i].step_order) === 1) return true;
       // New format: template_name with day 0
@@ -282,7 +313,8 @@ export function processCSVRows(rows) {
   // Process each thread (only those that received MSG1)
   var meetings = []; // leads with phone (respondieron)
   var allTemplatesSent = {}; // MSG1: count, MSG2a: count, etc
-  var allTemplatesResp = {}; // templates where thread responded
+  var allTemplatesResp = {}; // templates where thread responded (non-excluded)
+  var allTemplatesRespExcluded = {}; // responses to excluded templates (for display only)
   var dailyMap = {};
   var hourlyAll = new Array(24).fill(0);
   var topicCounts = {};
@@ -423,8 +455,13 @@ export function processCSVRows(rows) {
       }
       if (!triggerTpl) triggerTpl = templatesSent[0];
       firstResponseTpl = triggerTpl;
-      if (!allTemplatesResp[triggerTpl]) allTemplatesResp[triggerTpl] = 0;
-      allTemplatesResp[triggerTpl]++;
+      if (!isExcluded(triggerTpl)) {
+        if (!allTemplatesResp[triggerTpl]) allTemplatesResp[triggerTpl] = 0;
+        allTemplatesResp[triggerTpl]++;
+      } else {
+        if (!allTemplatesRespExcluded[triggerTpl]) allTemplatesRespExcluded[triggerTpl] = 0;
+        allTemplatesRespExcluded[triggerTpl]++;
+      }
 
       if (isES) esResp++; else ptResp++;
     }
@@ -590,43 +627,63 @@ export function processCSVRows(rows) {
     }
   }
 
-  if (hasStepOrder) {
-    function buildStepGroups(sentMap, respMap) {
-      var steps = {};
+  // Determine if we have templateConfig categories configured
+  var hasTemplateConfig = Object.keys(tplConfig).length > 0;
+
+  if (hasStepOrder || hasTemplateConfig) {
+    function buildStepGroups(sentMap, respMap, respExcludedMap) {
+      var groups = {};
       var tplNames = Object.keys(sentMap);
       for (var ti = 0; ti < tplNames.length; ti++) {
         var tName = tplNames[ti];
-        var step = tplStepInfo[tName];
-        if (!step) continue;
-        if (!steps[step]) {
-          steps[step] = { day: stepToDay(step), label: STEP_LABELS[step] || "Step " + step, color: STEP_COLORS[step] || "#2563EB", templates: [], totalSent: 0, totalResp: 0 };
+        var cat;
+        if (hasTemplateConfig) {
+          cat = getCategory(tName);
+        } else {
+          // Fallback to step_order based category
+          var step = tplStepInfo[tName];
+          if (!step) continue;
+          var stepCatMap = {1:"d0",2:"d1",3:"d3",4:"d5"};
+          cat = stepCatMap[step] || "sin_categoria";
+        }
+        var meta = CATEGORY_META[cat];
+        if (!meta) continue;
+        if (!groups[cat]) {
+          groups[cat] = {
+            day: meta.day, label: meta.label, color: meta.color,
+            order: meta.order, templates: [], totalSent: 0, totalResp: 0
+          };
         }
         var s = sentMap[tName] || 0;
-        var r = respMap[tName] || 0;
+        // For excluded categories, use respExcludedMap; for others, use respMap
+        var r = (EXCLUDED_CATEGORIES[cat] ? (respExcludedMap[tName] || 0) : (respMap[tName] || 0));
         var lang = "es";
         if (tName.startsWith("pt_") || tName.includes("_br")) lang = "pt";
-        steps[step].templates.push({
+        groups[cat].templates.push({
           name: tName, displayName: tName, lang: lang,
+          region: getRegion(tName),
           sent: s, resp: r, rate: s > 0 ? ((r / s) * 100).toFixed(1) + "%" : "0%"
         });
-        steps[step].totalSent += s;
-        steps[step].totalResp += r;
+        groups[cat].totalSent += s;
+        groups[cat].totalResp += r;
       }
-      // Add totalRate and sort templates by sent desc
-      var stepKeys = Object.keys(steps).sort(function(a,b){return parseInt(a)-parseInt(b);});
+      // Sort by order and compute totalRate
+      var catKeys = Object.keys(groups).sort(function(a,b){
+        return (groups[a].order || 99) - (groups[b].order || 99);
+      });
       var result = {};
-      for (var si2 = 0; si2 < stepKeys.length; si2++) {
-        var sk = stepKeys[si2];
-        var sg = steps[sk];
+      for (var ci = 0; ci < catKeys.length; ci++) {
+        var ck = catKeys[ci];
+        var sg = groups[ck];
         sg.totalRate = sg.totalSent > 0 ? ((sg.totalResp / sg.totalSent) * 100).toFixed(1) + "%" : "0%";
         sg.templates.sort(function(a,b){return b.sent - a.sent;});
-        result[sk] = sg;
+        result[ck] = sg;
       }
       return result;
     }
 
-    stepGroupsAll = buildStepGroups(allTemplatesSent, allTemplatesResp);
-    stepGroupsReal = buildStepGroups(allTemplatesSent, allTemplatesRespReal);
+    stepGroupsAll = buildStepGroups(allTemplatesSent, allTemplatesResp, allTemplatesRespExcluded);
+    stepGroupsReal = buildStepGroups(allTemplatesSent, allTemplatesRespReal, allTemplatesRespExcluded);
 
     // Also build flat tplPerf for compatibility with compare mode
     var stepSorted = Object.keys(tplStepInfo).sort(function(a,b){
@@ -814,10 +871,14 @@ export function processCSVRows(rows) {
   // Leads per day for header
   var leadsPerDay = dailyArr.length > 0 ? Math.round(totalContactados / dailyArr.length) : 0;
 
+  var useStepGroups = hasStepOrder || hasTemplateConfig;
+
   return {
     rawRows: rows,
     MEETINGS: meetings,
     topicsAll: topicsArr,
+    allTemplateNames: Object.keys(allTemplatesSent),
+    tplStepInfo: tplStepInfo,
     D: {
       all: {
         resp: respondieron, rate: rate, topics: topicsArr,
@@ -827,7 +888,7 @@ export function processCSVRows(rows) {
         hours: hourlyAll,
         tpl: tplPerf,
         bcast: bcastPerf,
-        tplByStep: hasStepOrder ? stepGroupsAll : null,
+        tplByStep: useStepGroups ? stepGroupsAll : null,
       },
       real: {
         resp: realesCount, rate: rateReal, topics: topicsArrReal,
@@ -840,7 +901,7 @@ export function processCSVRows(rows) {
         hours: hourlyReal,
         tpl: tplPerfReal,
         bcast: bcastPerfReal,
-        tplByStep: hasStepOrder ? stepGroupsReal : null,
+        tplByStep: useStepGroups ? stepGroupsReal : null,
       },
     },
     funnelAll: funnelAll,
