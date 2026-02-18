@@ -14,37 +14,39 @@ var DEFAULT_MEETINGS=_RAW_MEETINGS.filter(function(m){return m.tr.indexOf("MSG1"
 var _dIgL=DEFAULT_MEETINGS.filter(function(m){return m.igL;}).length;
 var _dIgA=DEFAULT_MEETINGS.filter(function(m){return m.igA&&!m.igL;}).length;
 
-var DEFAULT_TOPICS=[{"t": "Automatizaci\u00f3n", "e": "\u{1F916}", "n": 113, "p": 96.6}, {"t": "Ventas", "e": "\u{1F4CA}", "n": 99, "p": 84.6}, {"t": "Soporte", "e": "\u{1F527}", "n": 96, "p": 82.1}, {"t": "Configuraci\u00f3n", "e": "\u2699\uFE0F", "n": 93, "p": 79.5}, {"t": "Whatsapp", "e": "\u{1F4AC}", "n": 85, "p": 72.6}, {"t": "Precios", "e": "\u{1F4B0}", "n": 58, "p": 49.6}];
+var DEFAULT_TOPICS=[{"t":"Automatizaci\u00f3n","e":"\u{1F916}","n":192,"p":71.1},{"t":"Whatsapp","e":"\u{1F4AC}","n":116,"p":43},{"t":"Soporte","e":"\u{1F527}","n":106,"p":39.3},{"t":"Configuraci\u00f3n","e":"\u2699\uFE0F","n":88,"p":32.6},{"t":"Precios","e":"\u{1F4B0}","n":87,"p":32.2},{"t":"Ventas","e":"\u{1F4CA}","n":77,"p":28.5}];
 
 var DEFAULT_D={
-  all:{resp:117,rate:"25.9%",topics:DEFAULT_TOPICS,ig:32,igR:"27.4%",igLink:_dIgL,igLinkR:(_dIgL/117*100).toFixed(1)+"%",igAt:_dIgA,igAtR:(_dIgA/117*100).toFixed(1)+"%",mc:6,mR:"5.1%",tool:67,tR:"57.3%",eng:{alto:{v:2,p:"1.7%"},medio:{v:15,p:"12.8%"},bajo:{v:53,p:"45.3%"},minimo:{v:47,p:"40.2%"}},hours:[48,74,40,17,108,45,32,11,22,22,18,39,138,118,40,118,121,82,105,60,67,51,67,70],
+  all:{resp:270,rate:"24.2%",topics:DEFAULT_TOPICS,ig:73,igR:"27.0%",igLink:_dIgL,igLinkR:(_dIgL/270*100).toFixed(1)+"%",igAt:_dIgA,igAtR:(_dIgA/270*100).toFixed(1)+"%",mc:33,mR:"12.2%",tool:170,tR:"63.0%",eng:{alto:{v:7,p:"2.6%"},medio:{v:43,p:"15.9%"},bajo:{v:123,p:"45.6%"},minimo:{v:97,p:"35.9%"}},hours:[154,90,52,36,149,49,34,13,22,25,27,45,158,138,66,138,191,157,184,93,109,113,163,94],
     tpl:[
-      {name:"MSG 1 \u2014 Yago SDR",day:"D+0",sent:452,resp:41,rate:"9.1%"},
-      {name:"MSG 2a \u2014 Sin WA",day:"D+1",sent:356,resp:30,rate:"8.4%"},
-      {name:"MSG 2b \u2014 Caso de \u00C9xito",day:"D+1",sent:15,resp:4,rate:"26.7%"},
-      {name:"MSG 3 \u2014 Value Nudge",day:"D+3",sent:232,resp:23,rate:"9.9%"},
-      {name:"MSG 4 \u2014 Quick Audit",day:"D+5",sent:109,resp:17,rate:"15.6%"},
+      {name:"msg_1_yago_sdr_1",day:"D+0",sent:562,resp:161,rate:"28.6%"},
+      {name:"msg_1_yago_sdr",day:"D+0",sent:225,resp:37,rate:"16.4%"},
+      {name:"msg_1_yago_sdr_br_1",day:"D+0",sent:153,resp:28,rate:"18.3%"},
+      {name:"leads_baja_d0_v1",day:"D+0",sent:74,resp:15,rate:"20.3%"},
+      {name:"calificados_d0__v3",day:"D+0",sent:36,resp:14,rate:"38.9%"},
+      {name:"es_caso_de_xito",day:"D+1",sent:5,resp:3,rate:"60.0%"},
     ],
-    bcast:[{name:"Emprende Show",day:"Bcast",sent:123,resp:2,rate:"1.6%"}]},
-  real:{resp:103,rate:"22.8%",topics:DEFAULT_TOPICS,ig:32,igR:"31.1%",igLink:_dIgL,igLinkR:(_dIgL/103*100).toFixed(1)+"%",igAt:_dIgA,igAtR:(_dIgA/103*100).toFixed(1)+"%",mc:6,mR:"5.8%",tool:67,tR:"65.0%",eng:{alto:{v:2,p:"1.7%"},medio:{v:15,p:"12.8%"},bajo:{v:53,p:"45.3%"},minimo:{v:47,p:"40.2%"}},hours:[48,74,40,17,108,45,32,11,22,22,18,39,138,118,40,118,121,82,105,60,67,51,67,70],
+    bcast:[]},
+  real:{resp:241,rate:"21.6%",topics:DEFAULT_TOPICS,ig:71,igR:"29.5%",igLink:_dIgL,igLinkR:(_dIgL/241*100).toFixed(1)+"%",igAt:_dIgA,igAtR:(_dIgA/241*100).toFixed(1)+"%",mc:30,mR:"12.4%",tool:149,tR:"61.8%",eng:{alto:{v:4,p:"1.7%"},medio:{v:38,p:"15.8%"},bajo:{v:113,p:"46.9%"},minimo:{v:86,p:"35.7%"}},hours:[152,86,47,26,145,49,34,13,22,25,27,45,158,131,60,138,190,153,183,92,109,92,160,92],
     tpl:[
-      {name:"MSG 1 \u2014 Yago SDR",day:"D+0",sent:452,resp:41,rate:"9.1%"},
-      {name:"MSG 2a \u2014 Sin WA",day:"D+1",sent:356,resp:30,rate:"8.4%"},
-      {name:"MSG 2b \u2014 Caso de \u00C9xito",day:"D+1",sent:15,resp:4,rate:"26.7%"},
-      {name:"MSG 3 \u2014 Value Nudge",day:"D+3",sent:232,resp:23,rate:"9.9%"},
-      {name:"MSG 4 \u2014 Quick Audit",day:"D+5",sent:109,resp:17,rate:"15.6%"},
+      {name:"msg_1_yago_sdr_1",day:"D+0",sent:562,resp:143,rate:"25.4%"},
+      {name:"msg_1_yago_sdr",day:"D+0",sent:225,resp:33,rate:"14.7%"},
+      {name:"msg_1_yago_sdr_br_1",day:"D+0",sent:153,resp:28,rate:"18.3%"},
+      {name:"calificados_d0__v3",day:"D+0",sent:36,resp:13,rate:"36.1%"},
+      {name:"leads_baja_d0_v1",day:"D+0",sent:74,resp:13,rate:"17.6%"},
+      {name:"es_caso_de_xito",day:"D+1",sent:5,resp:3,rate:"60.0%"},
     ],
-    bcast:[{name:"Emprende Show",day:"Bcast",sent:123,resp:2,rate:"1.6%"}]}
+    bcast:[]}
 };
 
-var DEFAULT_FUNNEL_ALL=[{n:"Contactados",v:452,c:C.accent},{n:"Respondieron",v:117,c:C.purple},{n:"Config. Plataf.",v:67,c:C.green},{n:"Enviaron IG",v:32,c:C.orange},{n:"Oferta Reuni\u00F3n",v:6,c:C.pink}];
-var DEFAULT_FUNNEL_REAL=[{n:"Contactados",v:452,c:C.accent},{n:"Resp. Reales",v:103,c:C.cyan},{n:"Config. Plataf.",v:67,c:C.green},{n:"Enviaron IG",v:32,c:C.orange},{n:"Oferta Reuni\u00F3n",v:6,c:C.pink}];
-var DEFAULT_CH_BENCH=[{ch:"WA Warm*",r:45,y:0},{ch:"Yago (todas)",r:25.9,y:1},{ch:"Yago (reales)",r:22.8,y:1},{ch:"LinkedIn Cold*",r:18,y:0},{ch:"WA Cold*",r:15,y:0},{ch:"SMS Mktg*",r:12,y:0},{ch:"Email Cold*",r:8.5,y:0}];
-var DEFAULT_DAILY=[{d:"04/02",l:11},{d:"05/02",l:67},{d:"06/02",l:39},{d:"07/02",l:60},{d:"08/02",l:63},{d:"09/02",l:60},{d:"10/02",l:82},{d:"11/02",l:70}];
-var DEFAULT_BTABLE=[{m:"Respuesta (todas)",y:"25.9%",b:"40-60%",d:"-14 a -34pp",s:0},{m:"Respuesta (reales)",y:"22.8%",b:"40-60%",d:"-17 a -37pp",s:0},{m:"Env\u00EDo de Instagram",y:"27.4%",b:"35-50%",d:"~-8pp",s:0},{m:"Oferta Reuni\u00F3n",y:"5.1%",b:"20-30%",d:"~-15pp",s:0},{m:"Tiempo 1a Resp.",y:"~3 min",b:"<15 min",d:"5x mejor",s:1},{m:"Msgs/Conv.",y:"13.0",b:"10-20",d:"Normal",s:1}];
-var DEFAULT_MEET_BY_TPL_ALL=[{l:"MSG1",v:41,c:C.accent},{l:"MSG2a",v:30,c:C.purple},{l:"MSG3",v:23,c:C.cyan},{l:"MSG4",v:17,c:C.orange},{l:"MSG2b",v:4,c:C.purple},{l:"MSG2c",v:2,c:C.yellow}];
-var DEFAULT_MEET_BY_TPL_REAL=[{l:"MSG1",v:37,c:C.accent},{l:"MSG2a",v:27,c:C.purple},{l:"MSG3",v:20,c:C.cyan},{l:"MSG4",v:14,c:C.orange},{l:"MSG2b",v:3,c:C.purple},{l:"MSG2c",v:2,c:C.yellow}];
-var DEFAULT_HEADER={totalContactados:452,leadsPerDay:57,dateRange:"04/02 \u2013 11/02",autoReplyCount:14,realesCount:103,esRate:"27.8",esResp:105,esTotal:378,ptRate:"16.2",ptResp:12,ptTotal:74};
+var DEFAULT_FUNNEL_ALL=[{n:"Contactados",v:1116,c:C.accent},{n:"Respondieron",v:270,c:C.purple},{n:"Config. Plataf.",v:170,c:C.green},{n:"Enviaron IG",v:73,c:C.orange},{n:"Oferta Reuni\u00F3n",v:33,c:C.pink}];
+var DEFAULT_FUNNEL_REAL=[{n:"Contactados",v:1116,c:C.accent},{n:"Resp. Reales",v:241,c:C.cyan},{n:"Config. Plataf.",v:149,c:C.green},{n:"Enviaron IG",v:71,c:C.orange},{n:"Oferta Reuni\u00F3n",v:30,c:C.pink}];
+var DEFAULT_CH_BENCH=[{ch:"WA Warm*",r:45,y:0},{ch:"Yago (todas)",r:24.2,y:1},{ch:"Yago (reales)",r:21.6,y:1},{ch:"LinkedIn Cold*",r:18,y:0},{ch:"WA Cold*",r:15,y:0},{ch:"SMS Mktg*",r:12,y:0},{ch:"Email Cold*",r:8.5,y:0}];
+var DEFAULT_DAILY=[{d:"02/03",l:88},{d:"02/04",l:56},{d:"02/05",l:69},{d:"02/06",l:39},{d:"02/07",l:60},{d:"02/08",l:63},{d:"02/09",l:60},{d:"02/10",l:82},{d:"02/11",l:79},{d:"02/12",l:99}];
+var DEFAULT_BTABLE=[{m:"Respuesta (todas)",y:"24.2%",b:"40-60%",d:"-16 a -36pp",s:0},{m:"Respuesta (reales)",y:"21.6%",b:"40-60%",d:"-18 a -38pp",s:0},{m:"Env\u00EDo de Instagram",y:"27.0%",b:"35-50%",d:"~-8pp",s:0},{m:"Oferta Reuni\u00F3n",y:"12.2%",b:"20-30%",d:"~-8pp",s:0},{m:"Tiempo 1a Resp.",y:"~3 min",b:"<15 min",d:"5x mejor",s:1},{m:"Msgs/Conv.",y:"12.7",b:"10-20",d:"Normal",s:1}];
+var DEFAULT_MEET_BY_TPL_ALL=[{l:"msg_1_yago_sdr_1",v:161,c:C.accent},{l:"msg_1_yago_sdr",v:37,c:C.accent},{l:"msg_1_yago_sdr_br_1",v:28,c:C.accent},{l:"leads_baja_d0_v1",v:15,c:C.accent},{l:"calificados_d0__v3",v:14,c:C.accent},{l:"calificados_d0__v4",v:3,c:C.accent},{l:"calificados_d0__v1__br",v:3,c:C.accent},{l:"es_caso_de_xito",v:3,c:C.purple}];
+var DEFAULT_MEET_BY_TPL_REAL=[{l:"msg_1_yago_sdr_1",v:143,c:C.accent},{l:"msg_1_yago_sdr",v:33,c:C.accent},{l:"msg_1_yago_sdr_br_1",v:28,c:C.accent},{l:"calificados_d0__v3",v:13,c:C.accent},{l:"leads_baja_d0_v1",v:13,c:C.accent},{l:"calificados_d0__v1__br",v:3,c:C.accent},{l:"es_caso_de_xito",v:3,c:C.purple}];
+var DEFAULT_HEADER={totalContactados:1116,leadsPerDay:112,dateRange:"02/03 \u2013 02/12",autoReplyCount:29,realesCount:241,esRate:"25.3",esResp:237,esTotal:935,ptRate:"18.2",ptResp:33,ptTotal:181};
 // Note: ES/PT counts based on MSG1 template language detection
 
 var tplCol={MSG1:"#2563EB",MSG2a:"#7C3AED",MSG2b:"#7C3AED",MSG2c:"#D97706",MSG3:"#0891B2",MSG4:"#EA580C"};
@@ -326,7 +328,7 @@ export default function Dashboard(){
   useEffect(function(){
     async function loadFixedCSV(){
       try{
-        var resp=await fetch("/026-02-16T14_01_.csv");
+        var resp=await fetch("/2026-02-18.csv");
         var text=await resp.text();
         var parsed=Papa.parse(text,{header:true,skipEmptyLines:true});
         var csvRows=parsed.data;
@@ -334,7 +336,7 @@ export default function Dashboard(){
         var result=processCSVRows(csvRows);
         var hi={totalContactados:result.totalContactados,leadsPerDay:result.leadsPerDay,dateRange:result.dateRange,autoReplyCount:result.autoReplyCount,realesCount:result.realesCount,esRate:result.esRate,esResp:result.esResp,esTotal:result.esTotal,ptRate:result.ptRate,ptResp:result.ptResp,ptTotal:result.ptTotal};
         setMeetings(result.MEETINGS);setTopicsAll(result.topicsAll);setDataD(result.D);setFunnelAll(result.funnelAll);setFunnelReal(result.funnelReal);setChBench(result.chBench);setDaily(result.daily);setBTable(result.bTable);setMeetByTplAll(result.meetByTplAll);setMeetByTplReal(result.meetByTplReal);setHeaderInfo(hi);
-        setCsvName("026-02-16T14_01_");
+        setCsvName("2026-02-18");
       }catch(e){console.error("Load fixed CSV error:",e);}
       setDbLoading(false);
     }
