@@ -466,6 +466,10 @@ export function processCSVRows(rows, templateConfig) {
       if (isES) esResp++; else ptResp++;
     }
 
+    // If first message was auto-reply but there were more human interactions,
+    // treat as real lead (the person engaged beyond the auto-reply)
+    if (isAuto && humanMsgCount > 1) isAuto = false;
+
     // Engagement based on qualification
     var engagement = "minimo";
     if (qual === "Alta") engagement = "alto";
