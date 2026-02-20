@@ -238,16 +238,394 @@ function detectLangFromMessages(msgs) {
   return "es";
 }
 
-var TOPIC_KEYWORDS = {
-  "Ventas": { e: "\u{1F4CA}", kw: ["venta", "vender", "ventas", "vendedor", "factur", "ingreso", "revenue", "sales"] },
-  "Soporte": { e: "\u{1F527}", kw: ["soporte", "ayuda", "problema", "error", "help", "suporte", "bug", "arreglar", "fix"] },
-  "Automatización": { e: "\u{1F916}", kw: ["automatiz", "automat", "bot", "ia", "inteligencia artificial", "ai"] },
-  "Whatsapp": { e: "\u{1F4AC}", kw: ["whatsapp", "wha", "mensaje", "mensagem", "chat"] },
-  "Precios": { e: "\u{1F4B0}", kw: ["precio", "preço", "cost", "plan", "pago", "cobr", "dinero", "dinheiro", "pagar"] },
-  "Configuración": { e: "\u2699\uFE0F", kw: ["config", "conect", "integr", "instal", "setup", "vincul"] },
+export var TOPIC_KEYWORDS = {
+  "Ventas": { e: "\u{1F4CA}", kw: ["ventas", "vender", "vendedor", "factur", "ingreso", "revenue", "sales"] },
+  "Soporte": { e: "\u{1F527}", kw: ["soporte", "suporte", "problema", "error", "bug", "no funciona", "não funciona"] },
+  "Automatización": { e: "\u{1F916}", kw: ["automatiz", "inteligencia artificial"] },
+  "Whatsapp": { e: "\u{1F4AC}", kw: ["whatsapp"] },
+  "Precios": { e: "\u{1F4B0}", kw: ["precio", "preço", "costo", "cuánto cuesta", "quanto custa", "tarifa", "mensualidad"] },
+  "Configuración": { e: "\u2699\uFE0F", kw: ["configurar", "conectar", "integrar", "instalar", "setup", "vincular"] },
 };
 
-export function processCSVRows(rows, templateConfig) {
+function detectLangFromContent(msgs) {
+  var ptIndicators = ["obrigado", "olá", "você", "preciso", "tenho", "quero", "posso", "vocês", "não", "sim", "bom dia", "boa tarde"];
+  var esIndicators = ["hola", "gracias", "necesito", "tengo", "quiero", "puedo", "ustedes", "buenos días", "buenas tardes", "por favor"];
+  var ptScore = 0, esScore = 0;
+  for (var i = 0; i < msgs.length; i++) {
+    var content = (msgs[i].message_content || "").toLowerCase();
+    if (!content) continue;
+    for (var j = 0; j < ptIndicators.length; j++) {
+      if (content.includes(ptIndicators[j])) ptScore++;
+    }
+    for (var k = 0; k < esIndicators.length; k++) {
+      if (content.includes(esIndicators[k])) esScore++;
+    }
+  }
+  return ptScore > esScore ? "pt" : "es";
+}
+
+export function processInboundRows(rows, regionFilter, lifecyclePhones) {
+  // Group by thread_id
+  var threads = {};
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var tid = r.thread_id;
+    if (!tid) continue;
+    if (!threads[tid]) threads[tid] = [];
+    threads[tid].push(r);
+  }
+
+  // Inbound = thread where the first message was sent by the lead (human)
+  // Use original row order (preserves LangGraph message order, no sort needed)
+  var threadIds = [];
+  var allTids = Object.keys(threads);
+  for (var ti = 0; ti < allTids.length; ti++) {
+    var tid0 = allTids[ti];
+    var msgs0 = threads[tid0];
+    // First row's message_type reflects the first message in the conversation
+    var firstType = msgs0[0] ? msgs0[0].message_type : null;
+    if (firstType === "human") threadIds.push(tid0);
+  }
+
+  // Unique inbound phones
+  var inboundPhones = {};
+  for (var ip = 0; ip < threadIds.length; ip++) {
+    var ipMsgs = threads[threadIds[ip]];
+    for (var ipi = 0; ipi < ipMsgs.length; ipi++) {
+      if (ipMsgs[ipi].phone_number) { inboundPhones[ipMsgs[ipi].phone_number] = true; break; }
+    }
+  }
+  var inboundPhoneKeys = Object.keys(inboundPhones);
+  var totalConversaciones = threadIds.length;
+
+  var meetings = [];
+  var dailyMap = {};
+  var hourlyAll = new Array(24).fill(0);
+  var topicCounts = {};
+  var depthCounts = { rebote: 0, corta: 0, media: 0, profunda: 0 };
+  var igCount = 0, igLinkCount = 0, igAtOnlyCount = 0;
+  var toolCount = 0, mcCount = 0;
+  var autoReplyThreads = 0;
+  var esTotal = 0, esResp = 0, ptTotal = 0, ptResp = 0;
+  var multiDayCount = 0;
+  var outcomeCount = 0;
+  var topicOutcomes = {};
+  var topicDepth = {};
+  var engagedMsgSum = 0, engagedCount = 0;
+  var signupCount = 0;
+  var signupLinkCount = 0;
+
+  for (var t = 0; t < threadIds.length; t++) {
+    var tid2 = threadIds[t];
+    var msgs = threads[tid2];
+    var phone = null;
+    var conversation = [];
+    var humanMsgCount = 0;
+    var wordCount = 0;
+    var hasIgLink = false;
+    var hasIgAt = false;
+    var hasTool = false;
+    var hasMeetingLink = false;
+    var isAuto = false;
+    var firstHumanSeen = false;
+    var firstHumanDate = null;
+    var lastHumanDate = null;
+    var hasSignupLink = false;
+
+    for (var mi = 0; mi < msgs.length; mi++) {
+      if (msgs[mi].phone_number) phone = msgs[mi].phone_number;
+    }
+
+    var lang = detectLangFromContent(msgs);
+    if (regionFilter && regionFilter !== "all") {
+      if (regionFilter === "es" && lang !== "es") continue;
+      if (regionFilter === "pt" && lang !== "pt") continue;
+    }
+    var isES = lang === "es";
+    if (isES) esTotal++; else ptTotal++;
+
+    msgs.sort(function (a, b) {
+      var da = a.message_datetime || "";
+      var db = b.message_datetime || "";
+      return da.localeCompare(db);
+    });
+
+    for (var mi2 = 0; mi2 < msgs.length; mi2++) {
+      var msg = msgs[mi2];
+      var content = msg.message_content || "";
+      var type = msg.message_type;
+      var dt = formatDatetime(msg.message_datetime);
+
+      if (content.includes("meetings.hubspot.com/")) hasMeetingLink = true;
+
+      if (type === "ai") {
+        if (/yavendio\.com|yavendió\.com|crear\s+(?:tu\s+)?cuenta|criar\s+(?:sua\s+)?conta|crea\s+una\s+cuenta|registr(?:ar|ate|o)/i.test(content)) hasSignupLink = true;
+        conversation.push([2, content, dt]);
+      } else if (type === "human") {
+        humanMsgCount++;
+        var words = content.trim().split(/\s+/).filter(function (w) { return w.length > 0; });
+        wordCount += words.length;
+
+        if (!firstHumanSeen) {
+          firstHumanSeen = true;
+          if (isAutoReply(content)) isAuto = true;
+        }
+
+        if (/instagram\.com/i.test(content)) hasIgLink = true;
+        if (/@\w+|ig\s*:/i.test(content)) hasIgAt = true;
+
+        var pd = parseDatetime(msg.message_datetime);
+        if (pd && !isNaN(pd.getTime())) {
+          hourlyAll[pd.getHours()]++;
+          if (!firstHumanDate) firstHumanDate = pd;
+          lastHumanDate = pd;
+        }
+
+        conversation.push([1, content, dt]);
+      } else if (type === "tool") {
+        hasTool = true;
+      }
+    }
+
+    var sentAt = msgs[0] && (msgs[0].template_sent_at || msgs[0].message_datetime);
+    if (sentAt) {
+      var pd2 = parseDatetime(sentAt);
+      if (pd2 && !isNaN(pd2.getTime())) {
+        var dayKey = String(pd2.getDate()).padStart(2, "0") + "/" + String(pd2.getMonth() + 1).padStart(2, "0");
+        if (!dailyMap[dayKey]) dailyMap[dayKey] = 0;
+        dailyMap[dayKey]++;
+      }
+    }
+
+    if (isAuto && humanMsgCount > 1) isAuto = false;
+
+    // Depth classification
+    var depth = "rebote";
+    if (humanMsgCount >= 10) depth = "profunda";
+    else if (humanMsgCount >= 5) depth = "media";
+    else if (humanMsgCount >= 2) depth = "corta";
+
+    // Multi-day detection
+    var isMultiDay = false;
+    if (firstHumanDate && lastHumanDate) {
+      var dayDiff = (lastHumanDate.getTime() - firstHumanDate.getTime()) / (1000 * 60 * 60 * 24);
+      if (dayDiff >= 1) isMultiDay = true;
+    }
+
+    // Outcome detection
+    var hasIg = hasIgLink || hasIgAt;
+    var hasOutcome = hasTool || hasIg || hasMeetingLink;
+
+    // For inbound, gate on humanMsgCount (lead initiated), not phone
+    if (humanMsgCount > 0) {
+      var displayId = phone || tid2;
+      if (isES) esResp++; else ptResp++;
+      depthCounts[depth]++;
+      if (hasIgLink) { igLinkCount++; igCount++; }
+      else if (hasIgAt) { igAtOnlyCount++; igCount++; }
+      if (hasTool) toolCount++;
+      if (isAuto) autoReplyThreads++;
+      if (hasMeetingLink) mcCount++;
+      if (isMultiDay) multiDayCount++;
+      if (hasOutcome) outcomeCount++;
+      var lcInfo = lifecyclePhones && phone ? lifecyclePhones[phone] : null;
+      if (lcInfo && lcInfo.firstStep1At) signupCount++;
+      if (hasSignupLink) signupLinkCount++;
+
+      if (humanMsgCount >= 2) {
+        engagedMsgSum += humanMsgCount;
+        engagedCount++;
+      }
+
+      var convText = "";
+      for (var ci = 0; ci < conversation.length; ci++) {
+        if (conversation[ci][0] === 1) {
+          convText += " " + conversation[ci][1];
+        }
+      }
+      var convLower = convText.toLowerCase();
+      for (var topicName in TOPIC_KEYWORDS) {
+        var topicDef = TOPIC_KEYWORDS[topicName];
+        for (var ki = 0; ki < topicDef.kw.length; ki++) {
+          if (convLower.includes(topicDef.kw[ki])) {
+            if (!topicCounts[topicName]) topicCounts[topicName] = 0;
+            topicCounts[topicName]++;
+
+            if (!topicOutcomes[topicName]) topicOutcomes[topicName] = { total: 0, withOutcome: 0 };
+            topicOutcomes[topicName].total++;
+            if (hasOutcome) topicOutcomes[topicName].withOutcome++;
+
+            if (!topicDepth[topicName]) topicDepth[topicName] = { rebote: 0, corta: 0, media: 0, profunda: 0 };
+            topicDepth[topicName][depth]++;
+            break;
+          }
+        }
+      }
+
+      meetings.push({
+        p: displayId,
+        ms: humanMsgCount,
+        w: wordCount,
+        au: isAuto,
+        e: depth,
+        q: "",
+        co: getCountryFlag(phone),
+        tr: [],
+        fr: null,
+        c: conversation,
+        ml: hasMeetingLink,
+        lang: lang,
+        signup: !!(lcInfo && lcInfo.firstStep1At),
+        signupLink: hasSignupLink,
+      });
+    }
+  }
+
+  // Build metrics
+  var respondieron = meetings.length;
+  var realesCount = meetings.filter(function (m) { return !m.au; }).length;
+  var engagedTotal = depthCounts.corta + depthCounts.media + depthCounts.profunda;
+  var avgDepth = engagedCount > 0 ? parseFloat((engagedMsgSum / engagedCount).toFixed(1)) : 0;
+
+  // Unique inbound leads = count of inbound phones
+  var uniqueLeadCount = inboundPhoneKeys.length;
+  var rate = totalConversaciones > 0 ? ((respondieron / totalConversaciones) * 100).toFixed(1) + "%" : "0%";
+
+  var igR = respondieron > 0 ? ((igCount / respondieron) * 100).toFixed(1) + "%" : "0%";
+  var igLinkR = respondieron > 0 ? ((igLinkCount / respondieron) * 100).toFixed(1) + "%" : "0%";
+  var igAtOnlyR = respondieron > 0 ? ((igAtOnlyCount / respondieron) * 100).toFixed(1) + "%" : "0%";
+  var tR = respondieron > 0 ? ((toolCount / respondieron) * 100).toFixed(1) + "%" : "0%";
+  var mR = respondieron > 0 ? ((mcCount / respondieron) * 100).toFixed(1) + "%" : "0%";
+
+  var topicsArr = [];
+  for (var tn in topicCounts) {
+    var cnt = topicCounts[tn];
+    var def = TOPIC_KEYWORDS[tn];
+    var to = topicOutcomes[tn] || { total: 0, withOutcome: 0 };
+    topicsArr.push({
+      t: tn, e: def.e, n: cnt,
+      p: respondieron > 0 ? parseFloat(((cnt / respondieron) * 100).toFixed(1)) : 0,
+      outcomeN: to.withOutcome,
+      outcomeP: to.total > 0 ? parseFloat(((to.withOutcome / to.total) * 100).toFixed(1)) : 0,
+    });
+  }
+  topicsArr.sort(function (a, b) { return b.n - a.n; });
+
+  function depthEntry(val, total) {
+    var tt = total || respondieron;
+    return { v: val, p: tt > 0 ? ((val / tt) * 100).toFixed(1) + "%" : "0%" };
+  }
+
+  // Daily sorted
+  var dailyArr = [];
+  var dailyKeys = Object.keys(dailyMap).sort(function (a, b) {
+    var pa = a.split("/"), pb = b.split("/");
+    var da = parseInt(pa[1]) * 100 + parseInt(pa[0]);
+    var db = parseInt(pb[1]) * 100 + parseInt(pb[0]);
+    return da - db;
+  });
+  for (var di = 0; di < dailyKeys.length; di++) {
+    dailyArr.push({ d: dailyKeys[di], l: dailyMap[dailyKeys[di]] });
+  }
+
+  var dateRange = "";
+  if (dailyKeys.length > 0) {
+    dateRange = dailyKeys[0] + " \u2013 " + dailyKeys[dailyKeys.length - 1];
+  }
+
+  // Funnel adapted for inbound
+  var CC = {
+    accent: "#2563EB", purple: "#7C3AED", green: "#059669",
+    orange: "#EA580C", pink: "#EC4899", cyan: "#0891B2",
+  };
+  // signupCount/signupLinkCount are per-thread — deduplicate to phone level for funnel
+  var signupPhoneMap = {};
+  var linkPhoneMap = {};
+  for (var si = 0; si < meetings.length; si++) {
+    if (meetings[si].signup) signupPhoneMap[meetings[si].p] = true;
+    if (meetings[si].signupLink) linkPhoneMap[meetings[si].p] = true;
+  }
+  var signupUniqueCount = Object.keys(signupPhoneMap).length;
+  var linkUniqueCount = Object.keys(linkPhoneMap).length;
+
+  var funnelAll = [
+    { n: "Leads Inbound", v: uniqueLeadCount, c: CC.accent },
+    { n: "Engajaron (2+)", v: engagedTotal, c: CC.purple },
+    { n: "Link Crear Cuenta", v: linkUniqueCount, c: CC.cyan },
+    { n: "Recibieron Step 1", v: signupUniqueCount, c: CC.green },
+  ];
+
+  // Empty benchmark and template arrays (not applicable to inbound)
+  var chBench = [];
+  var bTable = [];
+
+  var avgMsgs = respondieron > 0 ? (meetings.reduce(function (s, m) { return s + m.ms; }, 0) / respondieron).toFixed(1) : "0";
+
+  var esRate = esTotal > 0 ? ((esResp / esTotal) * 100).toFixed(1) : "0.0";
+  var ptRate = ptTotal > 0 ? ((ptResp / ptTotal) * 100).toFixed(1) : "0.0";
+
+  var leadsPerDay = dailyArr.length > 0 ? Math.round(totalConversaciones / dailyArr.length) : 0;
+
+  return {
+    rawRows: rows,
+    MEETINGS: meetings,
+    topicsAll: topicsArr,
+    allTemplateNames: [],
+    tplStepInfo: {},
+    D: {
+      all: {
+        resp: respondieron, rate: rate, topics: topicsArr,
+        ig: igCount, igR: igR, igLink: igLinkCount, igLinkR: igLinkR, igAt: igAtOnlyCount, igAtR: igAtOnlyR, mc: mcCount, mR: mR,
+        tool: toolCount, tR: tR,
+        eng: { profunda: depthEntry(depthCounts.profunda), media: depthEntry(depthCounts.media), corta: depthEntry(depthCounts.corta), rebote: depthEntry(depthCounts.rebote) },
+        hours: hourlyAll,
+        tpl: [],
+        bcast: [],
+        tplByStep: null,
+      },
+      real: {
+        resp: respondieron, rate: rate, topics: topicsArr,
+        ig: igCount, igR: igR, igLink: igLinkCount, igLinkR: igLinkR, igAt: igAtOnlyCount, igAtR: igAtOnlyR, mc: mcCount, mR: mR,
+        tool: toolCount, tR: tR,
+        eng: { profunda: depthEntry(depthCounts.profunda), media: depthEntry(depthCounts.media), corta: depthEntry(depthCounts.corta), rebote: depthEntry(depthCounts.rebote) },
+        hours: hourlyAll,
+        tpl: [],
+        bcast: [],
+        tplByStep: null,
+      },
+    },
+    funnelAll: funnelAll,
+    funnelReal: funnelAll,
+    chBench: chBench,
+    daily: dailyArr,
+    bTable: bTable,
+    meetByTplAll: [],
+    meetByTplReal: [],
+    totalContactados: totalConversaciones,
+    leadsPerDay: leadsPerDay,
+    dateRange: dateRange,
+    autoReplyCount: autoReplyThreads,
+    realesCount: realesCount,
+    esRate: esRate,
+    esResp: esResp,
+    esTotal: esTotal,
+    ptRate: ptRate,
+    ptResp: ptResp,
+    ptTotal: ptTotal,
+    depthCounts: depthCounts,
+    multiDayCount: multiDayCount,
+    outcomeCount: outcomeCount,
+    topicOutcomes: topicOutcomes,
+    topicDepth: topicDepth,
+    avgDepth: avgDepth,
+    engagedTotal: engagedTotal,
+    uniqueLeadCount: uniqueLeadCount,
+    signupCount: signupUniqueCount,
+    signupLinkCount: linkUniqueCount,
+  };
+}
+
+export function processCSVRows(rows, templateConfig, regionFilter) {
   var CATEGORY_META = {
     d0: { day: "D+0", label: "Contacto Inicial", color: "#2563EB", order: 1 },
     d1: { day: "D+1", label: "Seguimiento", color: "#7C3AED", order: 2 },
@@ -361,6 +739,10 @@ export function processCSVRows(rows, templateConfig) {
     }
 
     var lang = detectLangFromMessages(msgs);
+    if (regionFilter && regionFilter !== "all") {
+      if (regionFilter === "es" && lang !== "es") continue;
+      if (regionFilter === "pt" && lang !== "pt") continue;
+    }
     var isES = lang === "es";
     if (isES) esTotal++; else ptTotal++;
 

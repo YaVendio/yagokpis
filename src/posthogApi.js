@@ -82,6 +82,169 @@ export async function fetchThreadsFromPostHog(stepFilter) {
   return threads;
 }
 
+export async function fetchInboundThreadsFromPostHog() {
+  // Fetch ALL threads — inbound determination happens in JS by comparing
+  // first human message timestamp vs first lifecycle execution per phone
+  var query =
+    "SELECT\n" +
+    "    t.thread_id,\n" +
+    "    JSONExtractString(t.metadata, 'phone_number') AS phone_from_meta,\n" +
+    "    JSONExtractString(t.metadata, 'phone') AS phone2,\n" +
+    "    JSONExtractString(t.metadata, 'wa_id') AS wa_id,\n" +
+    "    JSONExtractString(t.metadata, 'contact_phone') AS contact_phone,\n" +
+    "    t.created_at AS thread_created_at,\n" +
+    "    toString(t.values) AS values_json\n" +
+    "FROM postgres.yago.thread t\n" +
+    "WHERE t.created_at >= '2026-02-03'\n" +
+    "ORDER BY t.thread_id\n" +
+    "LIMIT 10000";
+
+  var result = await queryPostHog(query);
+
+  var colIdx = {};
+  for (var i = 0; i < result.columns.length; i++) {
+    colIdx[result.columns[i]] = i;
+  }
+
+  var threads = [];
+  for (var j = 0; j < result.results.length; j++) {
+    var row = result.results[j];
+    var phone = row[colIdx["phone_from_meta"]] || row[colIdx["phone2"]] || row[colIdx["wa_id"]] || row[colIdx["contact_phone"]] || "";
+    threads.push({
+      thread_id: row[colIdx["thread_id"]],
+      phone_number: phone,
+      thread_created_at: row[colIdx["thread_created_at"]],
+      values_json: row[colIdx["values_json"]],
+    });
+  }
+
+  return threads;
+}
+
+export async function fetchLifecyclePhones() {
+  // Per phone: first lifecycle sent_at + first step 1 sent_at
+  var query =
+    "SELECT\n" +
+    "    le.phone_number,\n" +
+    "    MIN(le.sent_at) AS first_lifecycle_at,\n" +
+    "    MIN(CASE WHEN lfs.step_order = 1 THEN le.sent_at ELSE NULL END) AS first_step1_at\n" +
+    "FROM postgres.yago.lifecycle_executions le\n" +
+    "JOIN postgres.yago.lifecycle_flow_steps lfs ON le.step_id = lfs.id\n" +
+    "WHERE le.sent_at >= '2025-01-01'\n" +
+    "GROUP BY le.phone_number";
+
+  var result = await queryPostHog(query);
+  var phones = {};
+  for (var j = 0; j < result.results.length; j++) {
+    var row = result.results[j];
+    var phone = row[0];
+    if (phone) {
+      phones[phone] = {
+        firstAt: row[1] || null,
+        firstStep1At: row[2] || null,
+      };
+    }
+  }
+  return phones;
+}
+
+export function expandInboundThreadMessages(threads) {
+  var rows = [];
+
+  for (var i = 0; i < threads.length; i++) {
+    var t = threads[i];
+    var messages = [];
+    if (t.values_json) {
+      try {
+        var values = JSON.parse(t.values_json);
+        if (values && values.messages) { messages = values.messages; }
+      } catch (e) { /* skip */ }
+    }
+
+    var threadCreated = t.thread_created_at || "";
+
+    // Try to extract phone from messages metadata if not in thread metadata
+    var phone = t.phone_number;
+    if (!phone) {
+      for (var pi = 0; pi < messages.length; pi++) {
+        var pmsg = messages[pi];
+        if (pmsg.additional_kwargs && pmsg.additional_kwargs.metadata) {
+          var meta = pmsg.additional_kwargs.metadata;
+          phone = meta.phone_number || meta.phone || meta.wa_id || meta.contact_phone || "";
+          if (phone) break;
+        }
+      }
+    }
+
+    var hasHuman = false;
+    for (var hi = 0; hi < messages.length; hi++) {
+      if (messages[hi].type === "human") { hasHuman = true; break; }
+    }
+
+    if (messages.length === 0) {
+      rows.push({
+        thread_id: t.thread_id,
+        phone_number: "",
+        template_sent_at: threadCreated,
+        template_id: "",
+        template_name: "",
+        step_order: "",
+        lead_qualification: "",
+        message_type: "ai",
+        message_datetime: threadCreated,
+        message_content: "",
+        is_valid_response: "false",
+      });
+      continue;
+    }
+
+    for (var j = 0; j < messages.length; j++) {
+      var msg = messages[j];
+      var msgType = msg.type === "human" ? "human" : msg.type === "tool" ? "tool" : "ai";
+
+      var msgContent = "";
+      if (typeof msg.content === "string") {
+        msgContent = msg.content;
+      } else if (Array.isArray(msg.content)) {
+        msgContent = msg.content.map(function (block) {
+          if (typeof block === "string") return block;
+          if (block && block.text) return block.text;
+          return "";
+        }).join("");
+      }
+
+      var msgDatetime = "";
+      if (msg.additional_kwargs && msg.additional_kwargs.metadata && msg.additional_kwargs.metadata.timestamp) {
+        var ts = msg.additional_kwargs.metadata.timestamp;
+        if (typeof ts === "number") {
+          msgDatetime = new Date(ts * 1000).toISOString();
+        } else {
+          msgDatetime = String(ts);
+        }
+      }
+
+      // For inbound: all human messages are valid (no 7-day window)
+      var isValid = msgType === "human";
+
+      rows.push({
+        thread_id: t.thread_id,
+        phone_number: hasHuman ? (phone || "") : "",
+        template_sent_at: threadCreated,
+        template_id: "",
+        template_name: "",
+        step_order: "",
+        lead_qualification: "",
+        message_type: msgType,
+        message_datetime: msgDatetime,
+        message_content: msgContent,
+        is_valid_response: String(isValid),
+      });
+    }
+  }
+
+  return rows;
+}
+
 export function expandThreadMessages(threads) {
   // Phase 1: Parse messages for each thread and group threads by phone_number.
   // This merges all steps of the same lead into one virtual thread, reproducing
