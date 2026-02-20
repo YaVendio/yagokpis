@@ -1,24 +1,22 @@
-var POSTHOG_API_URL = "https://us.posthog.com/api/projects";
-var PROJECT_ID = import.meta.env.VITE_POSTHOG_PROJECT_ID;
-var API_KEY = import.meta.env.VITE_POSTHOG_API_KEY;
-
-export async function queryPostHog(hogqlQuery) {
-  var resp = await fetch(POSTHOG_API_URL + "/" + PROJECT_ID + "/query/", {
+export async function queryMetabase(sql) {
+  var password = sessionStorage.getItem("dashboard_password") || "";
+  var resp = await fetch("/api/metabase", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: "Bearer " + API_KEY,
+      "x-dashboard-password": password,
     },
-    body: JSON.stringify({
-      query: { kind: "HogQLQuery", query: hogqlQuery },
-    }),
+    body: JSON.stringify({ sql: sql }),
   });
+  if (resp.status === 401) {
+    window.dispatchEvent(new Event("auth-required"));
+    throw new Error("Unauthorized");
+  }
   if (!resp.ok) {
     var errText = await resp.text();
-    throw new Error("PostHog API error " + resp.status + ": " + errText);
+    throw new Error("Metabase API error " + resp.status + ": " + errText);
   }
-  var data = await resp.json();
-  return { columns: data.columns, results: data.results };
+  return await resp.json();
 }
 
 export async function fetchThreadsFromPostHog(stepFilter) {
@@ -29,12 +27,12 @@ export async function fetchThreadsFromPostHog(stepFilter) {
 
   var query =
     "WITH last_lead_qualification AS (\n" +
-    "    SELECT\n" +
+    "    SELECT DISTINCT ON (company_id)\n" +
     "        company_id,\n" +
-    "        argMax(JSONExtractString(event_data, 'qualification'), event_timestamp) AS lead_qualification\n" +
-    "    FROM postgres.yago.lifecycle_events\n" +
+    "        event_data->>'qualification' AS lead_qualification\n" +
+    "    FROM lifecycle_events\n" +
     "    WHERE event_name = 'lead_qualification'\n" +
-    "    GROUP BY company_id\n" +
+    "    ORDER BY company_id, event_timestamp DESC\n" +
     ")\n" +
     "SELECT\n" +
     "    t.thread_id,\n" +
@@ -44,11 +42,11 @@ export async function fetchThreadsFromPostHog(stepFilter) {
     "    le.template_name,\n" +
     "    lfs.step_order,\n" +
     "    llq.lead_qualification,\n" +
-    "    toString(t.values) AS values_json\n" +
-    "FROM postgres.yago.thread t\n" +
-    "JOIN postgres.yago.lifecycle_executions le\n" +
-    "    ON JSONExtractString(t.metadata, 'execution_id') = toString(le.id)\n" +
-    "JOIN postgres.yago.lifecycle_flow_steps lfs\n" +
+    '    t."values"::text AS values_json\n' +
+    "FROM thread t\n" +
+    "JOIN lifecycle_executions le\n" +
+    "    ON (t.metadata->>'execution_id') = le.id::text\n" +
+    "JOIN lifecycle_flow_steps lfs\n" +
     "    ON le.step_id = lfs.id\n" +
     "LEFT JOIN last_lead_qualification llq\n" +
     "    ON llq.company_id = le.company_id\n" +
@@ -57,7 +55,7 @@ export async function fetchThreadsFromPostHog(stepFilter) {
     stepClause +
     "\nORDER BY t.thread_id\nLIMIT 10000";
 
-  var result = await queryPostHog(query);
+  var result = await queryMetabase(query);
 
   var colIdx = {};
   for (var i = 0; i < result.columns.length; i++) {
@@ -88,18 +86,18 @@ export async function fetchInboundThreadsFromPostHog() {
   var query =
     "SELECT\n" +
     "    t.thread_id,\n" +
-    "    JSONExtractString(t.metadata, 'phone_number') AS phone_from_meta,\n" +
-    "    JSONExtractString(t.metadata, 'phone') AS phone2,\n" +
-    "    JSONExtractString(t.metadata, 'wa_id') AS wa_id,\n" +
-    "    JSONExtractString(t.metadata, 'contact_phone') AS contact_phone,\n" +
+    "    t.metadata->>'phone_number' AS phone_from_meta,\n" +
+    "    t.metadata->>'phone' AS phone2,\n" +
+    "    t.metadata->>'wa_id' AS wa_id,\n" +
+    "    t.metadata->>'contact_phone' AS contact_phone,\n" +
     "    t.created_at AS thread_created_at,\n" +
-    "    toString(t.values) AS values_json\n" +
-    "FROM postgres.yago.thread t\n" +
+    '    t."values"::text AS values_json\n' +
+    "FROM thread t\n" +
     "WHERE t.created_at >= '2026-02-03'\n" +
     "ORDER BY t.thread_id\n" +
     "LIMIT 10000";
 
-  var result = await queryPostHog(query);
+  var result = await queryMetabase(query);
 
   var colIdx = {};
   for (var i = 0; i < result.columns.length; i++) {
@@ -128,12 +126,12 @@ export async function fetchLifecyclePhones() {
     "    le.phone_number,\n" +
     "    MIN(le.sent_at) AS first_lifecycle_at,\n" +
     "    MIN(CASE WHEN lfs.step_order = 1 THEN le.sent_at ELSE NULL END) AS first_step1_at\n" +
-    "FROM postgres.yago.lifecycle_executions le\n" +
-    "JOIN postgres.yago.lifecycle_flow_steps lfs ON le.step_id = lfs.id\n" +
+    "FROM lifecycle_executions le\n" +
+    "JOIN lifecycle_flow_steps lfs ON le.step_id = lfs.id\n" +
     "WHERE le.sent_at >= '2025-01-01'\n" +
     "GROUP BY le.phone_number";
 
-  var result = await queryPostHog(query);
+  var result = await queryMetabase(query);
   var phones = {};
   for (var j = 0; j < result.results.length; j++) {
     var row = result.results[j];

@@ -244,6 +244,43 @@ var EMPTY_D={
 var EMPTY_HEADER={totalContactados:0,leadsPerDay:0,dateRange:"",autoReplyCount:0,realesCount:0,esRate:"0",esResp:0,esTotal:0,ptRate:"0",ptResp:0,ptTotal:0};
 
 export default function Dashboard(){
+  const [isAuthenticated,setIsAuthenticated]=useState(function(){return !!sessionStorage.getItem("dashboard_password");});
+  const [loginPassword,setLoginPassword]=useState("");
+  const [loginError,setLoginError]=useState("");
+  const [loginLoading,setLoginLoading]=useState(false);
+
+  useEffect(function(){
+    function onAuthRequired(){sessionStorage.removeItem("dashboard_password");setIsAuthenticated(false);setLoginError("Sesión expirada. Ingrese de nuevo.");}
+    window.addEventListener("auth-required",onAuthRequired);
+    return function(){window.removeEventListener("auth-required",onAuthRequired);};
+  },[]);
+
+  async function handleLogin(e){
+    e.preventDefault();
+    setLoginLoading(true);setLoginError("");
+    sessionStorage.setItem("dashboard_password",loginPassword);
+    try{
+      var resp=await fetch("/api/metabase",{method:"POST",headers:{"Content-Type":"application/json","x-dashboard-password":loginPassword},body:JSON.stringify({sql:"SELECT 1"})});
+      if(resp.status===401){sessionStorage.removeItem("dashboard_password");setLoginError("Contraseña incorrecta");setLoginLoading(false);return;}
+      setIsAuthenticated(true);
+    }catch(err){sessionStorage.removeItem("dashboard_password");setLoginError("Error de conexión");
+    }finally{setLoginLoading(false);}
+  }
+
+  if(!isAuthenticated) return (
+    <div style={{background:C.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:font}}>
+      <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
+      <form onSubmit={handleLogin} style={{background:C.card,border:"1px solid "+C.border,borderRadius:14,padding:40,boxShadow:"0 1px 3px #0000000a",width:360,textAlign:"center"}}>
+        <div style={{fontSize:32,marginBottom:8}}>{"🔒"}</div>
+        <div style={{fontSize:20,fontWeight:800,color:C.text,marginBottom:4}}>Yago SDR Analytics</div>
+        <div style={{fontSize:13,color:C.muted,marginBottom:24}}>Ingrese la contraseña para acceder</div>
+        <input type="password" value={loginPassword} onChange={function(ev){setLoginPassword(ev.target.value);}} placeholder="Contraseña" style={{width:"100%",padding:"12px 14px",fontSize:15,border:"1px solid "+C.border,borderRadius:8,fontFamily:font,marginBottom:12,boxSizing:"border-box",outline:"none"}}/>
+        {loginError && <div style={{color:C.red,fontSize:13,fontWeight:600,marginBottom:12}}>{loginError}</div>}
+        <button type="submit" disabled={loginLoading||!loginPassword} style={{width:"100%",padding:"12px 0",fontSize:15,fontWeight:700,color:"#fff",background:loginLoading?"#93C5FD":C.accent,border:"none",borderRadius:8,cursor:loginLoading?"wait":"pointer",fontFamily:font}}>{loginLoading?"Verificando...":"Entrar"}</button>
+      </form>
+    </div>
+  );
+
   const [tab,setTab]=useState("overview");
   const [mode,setMode]=useState(0);
   const [showM,setShowM]=useState(false);
