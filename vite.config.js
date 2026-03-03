@@ -175,8 +175,8 @@ export default defineConfig(({ mode }) => {
 
                 if (!resp.ok) {
                   var errText = await resp.text()
-                  res.statusCode = resp.status
-                  res.end(JSON.stringify({ error: 'HubSpot error: ' + errText }))
+                  res.statusCode = 502
+                  res.end(JSON.stringify({ error: 'HubSpot error (' + resp.status + '): ' + errText }))
                   return
                 }
 

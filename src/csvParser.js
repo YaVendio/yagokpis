@@ -688,6 +688,19 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
   });
   var totalContactados = threadIds.length;
 
+  // Collect all contacted phones (from all threads, not just respondents)
+  var allContactedPhones = {};
+  for (var api = 0; api < threadIds.length; api++) {
+    var apMsgs = threads[threadIds[api]];
+    for (var apj = 0; apj < apMsgs.length; apj++) {
+      if (apMsgs[apj].phone_number) {
+        var apClean = apMsgs[apj].phone_number.replace(/\D/g, "");
+        if (apClean) allContactedPhones[apClean] = true;
+        break;
+      }
+    }
+  }
+
   // Process each thread (only those that received MSG1)
   var meetings = []; // leads with phone (respondieron)
   var allTemplatesSent = {}; // MSG1: count, MSG2a: count, etc
@@ -1308,6 +1321,7 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
     ptRate: ptRate,
     ptResp: ptResp,
     ptTotal: ptTotal,
+    allContactedPhones: allContactedPhones,
   };
 }
 

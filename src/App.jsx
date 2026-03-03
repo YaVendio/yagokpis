@@ -7,7 +7,7 @@ import { supabase } from "./supabase";
 import InfoTip from "./components/InfoTip";
 import TIPS from "./tooltips";
 import { fetchCampaigns, fetchCampaignGroups, fetchCampaignLeads, formatDateForApi } from "./gruposApi";
-import { fetchAllContacts, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones } from "./hubspotApi";
+import { fetchAllContacts, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones } from "./hubspotApi";
 
 var font="'Source Sans 3', sans-serif";
 var mono="'JetBrains Mono', monospace";
@@ -58,7 +58,7 @@ var tplNm={MSG1:"MSG 1 \u2014 Yago SDR (D+0)",MSG2a:"MSG 2a \u2014 Sin WA (D+1)"
 
 function Bd({children,color}){return <span style={{background:color+"15",color:color,padding:"4px 12px",borderRadius:9999,fontSize:12,fontWeight:700,border:"1px solid "+color+"20",letterSpacing:0.3}}>{children}</span>;}
 function Sec({children,tipKey}){return <div style={{fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700,marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+C.border+"66",display:"flex",alignItems:"center"}}>{children}{tipKey && <InfoTip data={TIPS[tipKey]}/>}</div>;}
-function Cd({children,style,onClick}){var _h=useState(false),hov=_h[0],sH=_h[1];return <div onClick={onClick} onMouseEnter={function(){sH(true);}} onMouseLeave={function(){sH(false);}} style={{background:C.card,border:"1px solid "+(hov?C.accent+"44":C.border),borderRadius:16,padding:20,boxShadow:hov?"0 8px 25px #0000000f":"0 1px 3px #0000000a",transform:hov?"translateY(-1px)":"none",transition:"box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease",...style}}>{children}</div>;}
+function Cd({children,style,onClick,draggable,onDragStart,onDragOver,onDragLeave,onDrop,onDragEnd}){var _h=useState(false),hov=_h[0],sH=_h[1];return <div onClick={onClick} draggable={draggable} onDragStart={onDragStart} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} onDragEnd={onDragEnd} onMouseEnter={function(){sH(true);}} onMouseLeave={function(){sH(false);}} style={{background:C.card,border:"1px solid "+(hov?C.accent+"44":C.border),borderRadius:16,padding:20,boxShadow:hov?"0 8px 25px #0000000f":"0 1px 3px #0000000a",transform:hov?"translateY(-1px)":"none",transition:"box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease",...style}}>{children}</div>;}
 
 function qualLabel(q){if(!q)return{t:"Sin calificaci\u00F3n",c:C.muted};var lo=q.toLowerCase();if(lo==="alta")return{t:"Alta",c:C.green};if(lo==="media"||lo==="m\u00E9dia")return{t:"Media",c:C.accent};if(lo==="baja"||lo==="baixa")return{t:"Baja",c:C.yellow};return{t:q,c:C.muted};}
 
@@ -276,6 +276,7 @@ export default function Dashboard(){
   const [meetByTplAll,setMeetByTplAll]=useState([]);
   const [meetByTplReal,setMeetByTplReal]=useState([]);
   const [headerInfo,setHeaderInfo]=useState(EMPTY_HEADER);
+  const [allContactedPhones,setAllContactedPhones]=useState({});
   const [selTpl,setSelTpl]=useState(null);
   const [searchQuery,setSearchQuery]=useState("");
   const [searchResults,setSearchResults]=useState(null);
@@ -293,6 +294,9 @@ export default function Dashboard(){
   const [regionFilter,setRegionFilter]=useState("all");
   const [abSelectMode,setAbSelectMode]=useState(false);
   const [abSelected,setAbSelected]=useState([]);
+  const [showTplConfig,setShowTplConfig]=useState(false);
+  const [openArchivedStep,setOpenArchivedStep]=useState(null);
+  const [dragTpl,setDragTpl]=useState(null);
 
   // Grupos tab state
   const [gruposLoading,setGruposLoading]=useState(false);
@@ -317,6 +321,7 @@ export default function Dashboard(){
   const [crmCrossRef,setCrmCrossRef]=useState(null);
   const [crmCrossLoading,setCrmCrossLoading]=useState(false);
   const [crmInited,setCrmInited]=useState(false);
+  const [crmMeetingPhones,setCrmMeetingPhones]=useState(null);
 
   useEffect(function(){
     function onAuthRequired(){sessionStorage.removeItem("dashboard_password");setIsAuthenticated(false);setLoginError("Sesión expirada. Ingrese de nuevo.");}
@@ -334,9 +339,23 @@ export default function Dashboard(){
     if(tab==="crm"&&!crmInited&&!crmLoading&&!crmError){initCrm();}
   },[tab]);
 
+  // Auto-load CRM contacts+meetings on dashboard init for overview cross-reference
+  useEffect(function(){
+    if(!crmInited&&!crmLoading&&!crmError){initCrm();}
+  },[]);
+
+  // Compute meeting phones when CRM data is loaded
+  useEffect(function(){
+    if(crmMeetings.length>0&&crmContacts.length>0){
+      var phones=getMeetingContactPhones(crmMeetings,crmContacts);
+      setCrmMeetingPhones(phones);
+    }
+  },[crmMeetings,crmContacts]);
+
   function applyResult(result){
     var hi={totalContactados:result.totalContactados,leadsPerDay:result.leadsPerDay,dateRange:result.dateRange,autoReplyCount:result.autoReplyCount,realesCount:result.realesCount,esRate:result.esRate,esResp:result.esResp,esTotal:result.esTotal,ptRate:result.ptRate,ptResp:result.ptResp,ptTotal:result.ptTotal};
     setMeetings(result.MEETINGS);setTopicsAll(result.topicsAll);setDataD(result.D);setFunnelAll(result.funnelAll);setFunnelReal(result.funnelReal);setChBench(result.chBench);setDaily(result.daily);setBTable(result.bTable);setMeetByTplAll(result.meetByTplAll);setMeetByTplReal(result.meetByTplReal);setHeaderInfo(hi);
+    if(result.allContactedPhones) setAllContactedPhones(result.allContactedPhones);
     if(result.allTemplateNames) setAllTemplateNames(result.allTemplateNames);
     if(result.depthCounts){
       setInboundExtra({depthCounts:result.depthCounts,multiDayCount:result.multiDayCount,outcomeCount:result.outcomeCount,topicOutcomes:result.topicOutcomes,topicDepth:result.topicDepth,avgDepth:result.avgDepth,engagedTotal:result.engagedTotal,uniqueLeadCount:result.uniqueLeadCount,signupCount:result.signupCount,signupLinkCount:result.signupLinkCount});
@@ -713,7 +732,7 @@ export default function Dashboard(){
   function switchPanel(newPanel){
     if(newPanel===panel) return;
     // If switching to inbound and current tab is not supported, reset to overview
-    if(newPanel==="inbound"&&(tab==="templates"||tab==="benchmarks"||tab==="config")){
+    if(newPanel==="inbound"&&tab==="templates"){
       setTab("overview");
     }
     setPanel(newPanel);
@@ -811,12 +830,12 @@ export default function Dashboard(){
 
     <div style={{background:"linear-gradient(135deg, #FFF 0%, #F8FAFF 100%)",borderBottom:"1px solid "+C.border,padding:"16px 28px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
       <div style={{display:"flex",alignItems:"center",gap:14}}>
-        <h1 style={{margin:0,fontSize:22,fontWeight:900}}><span style={{background:"linear-gradient(135deg, #2563EB, #7C3AED)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>YAGO</span> <span style={{color:C.muted,fontWeight:400}}>SDR</span></h1>
+        <h1 style={{margin:0,fontSize:22,fontWeight:900}}><span style={{background:"linear-gradient(135deg, #2563EB, #7C3AED)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>YAGO</span> <span style={{color:C.muted,fontWeight:400}}>KPI{"'"}s</span></h1>
         <div style={{width:1,height:24,background:C.border}}/>
         <span style={{fontSize:13,color:C.muted,background:"#F3F4F6",padding:"4px 10px",borderRadius:6,fontWeight:600}}>{headerInfo.dateRange} {"\u00B7"} {tc} leads</span>
       </div>
       <div style={{display:"flex",gap:2,background:"#F3F4F6",borderRadius:10,padding:3,boxShadow:"inset 0 1px 2px #00000008"}}>
-        {[{id:"overview",l:"Resumen"},{id:"engagement",l:"Engagement"},{id:"templates",l:"Templates",ib:true},{id:"benchmarks",l:"Benchmarks",ib:true},{id:"grupos",l:"Grupos"},{id:"crm",l:"CRM"},{id:"lookup",l:"Buscar"},{id:"config",l:"Config",ib:true}].map(function(t){
+        {[{id:"overview",l:"Resumen"},{id:"engagement",l:"Engagement"},{id:"templates",l:"Templates",ib:true},{id:"grupos",l:"Grupos"},{id:"crm",l:"CRM"},{id:"lookup",l:"Buscar"},].map(function(t){
           var disabled=t.ib&&panel==="inbound";
           var active=tab===t.id&&!disabled;
           return <button key={t.id} onClick={disabled?undefined:function(){setTab(t.id);}} style={{background:active?C.card:"transparent",color:disabled?C.border:active?C.text:C.muted,border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:disabled?"default":"pointer",fontFamily:font,boxShadow:active?"0 1px 3px #0000000f":"none"}}>{t.l}</button>;
@@ -916,27 +935,83 @@ export default function Dashboard(){
             </Cd>
           </div>
         </>) : (<>
-          {/* Outbound: original KPI cards */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))",gap:12,marginBottom:22}}>
-            {[{l:"Contactados",v:String(tc),s:lpd+"/d\u00EDa",cv:cd?String(cd.resp!==undefined?cd.totalContactados:""):null,ic:"\u{1F4E9}",icC:C.accent,tip:"contactados"},{l:"Respuesta",v:d.rate,s:d.resp+" leads",b:45,ck:2,cv:cd?cd.rate:null,ic:"\u{1F4CA}",icC:C.purple,tip:"respuestaRate"},{l:"Instagram",v:d.igLinkR,s:d.igLink+" leads con link",ig2:d.igAt,cv:cd?cd.igLinkR:null,ic:"\u{1F4F8}",icC:C.orange,tip:"instagram"},{l:"Config. Plataf.",v:d.tR,s:d.tool+" leads",cv:cd?cd.tR:null,ic:"\u2699\uFE0F",icC:C.cyan,tip:"configPlataforma"},{l:"Oferta Reuni\u00F3n",v:d.mR,s:d.mc+" leads",ck:1,cv:cd?cd.mR:null,ic:"\u{1F4C5}",icC:C.pink,tip:"ofertaReunion"}].map(function(k,i){
-              var diff=k.b?(parseFloat(k.v)-k.b).toFixed(1):null;
-              return (<Cd key={i} onClick={k.ck===1?function(){setShowM(true);}:k.ck===2?function(){setShowA(true);}:undefined} style={Object.assign({position:"relative",overflow:"hidden"},k.ck===1?{cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, #FFF 0%, #FFF5F7 100%)"}:k.ck===2?{cursor:"pointer",border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, #FFF 0%, #F5F3FF 100%)"}:{})}>
-                <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{k.ic}</div>
-                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
-                  <div style={{width:32,height:32,borderRadius:10,background:k.icC+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{k.ic}</div>
-                  <span style={{fontSize:13,color:C.muted,fontWeight:600}}>{k.l}</span>
-                  <InfoTip data={TIPS[k.tip]}/>
-                </div>
-                <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1}}>{k.v}<Delta current={k.v} previous={k.cv}/></div>
-                <div style={{fontSize:13,color:C.muted,marginTop:4}}>{k.s}</div>
-                {diff && <div style={{marginTop:6,fontSize:12,fontWeight:700,color:diff>0?C.green:C.red}}>{diff>0?"\u25B2":"\u25BC"} {Math.abs(diff)}pp vs WA Warm</div>}
-                {k.cv && <div style={{marginTop:4,fontSize:11,color:C.purple,fontWeight:600}}>Anterior: {k.cv}</div>}
-                {k.ig2!==undefined && <div style={{marginTop:6,fontSize:12,color:C.orange,fontWeight:600,borderTop:"1px solid "+C.border,paddingTop:6}}>{"Solo @: "+k.ig2+" leads"}</div>}
-                {k.ck===1 && <div style={{fontSize:11,color:C.pink,fontWeight:700,marginTop:6}}>{"\u{1F4C5} Ver contactos y conversaciones \u2192"}</div>}
-                {k.ck===2 && <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:6}}>{"\u{1F4AC} Ver todas las conversaciones \u2192"}</div>}
-              </Cd>);
-            })}
+          {/* Outbound: 4 KPI funnel cards */}
+          {(function(){
+            var respCount=d.resp;
+            var respRate=tc>0?((respCount/tc)*100).toFixed(1):"0";
+            var twoMsgCount=meetings.filter(function(m){return m.ms>=2;}).length;
+            var twoMsgPct=respCount>0?((twoMsgCount/respCount)*100).toFixed(1):"0";
+            var ofertaCount=d.mc;
+            var ofertaVsResp=respCount>0?((ofertaCount/respCount)*100).toFixed(1):"0";
+            var ofertaVsTotal=tc>0?((ofertaCount/tc)*100).toFixed(1):"0";
+            var actualMeetCount=0;
+            if(crmMeetingPhones){
+              var contactedSet=allContactedPhones;
+              var meetPhoneKeys=Object.keys(crmMeetingPhones);
+              for(var ami=0;ami<meetPhoneKeys.length;ami++){
+                if(contactedSet[meetPhoneKeys[ami]])actualMeetCount++;
+              }
+            }
+            var actualVsOferta=ofertaCount>0?((actualMeetCount/ofertaCount)*100).toFixed(1):"0";
+            var actualVsTotal=tc>0?((actualMeetCount/tc)*100).toFixed(1):"0";
+            return (
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:12,marginBottom:22}}>
+            {/* Card 1: Contactados */}
+            <Cd onClick={function(){setShowA(true);}} style={{position:"relative",overflow:"hidden",cursor:"pointer",border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, #FFF 0%, #EFF6FF 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4E9}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4E9}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Contactados</span>
+                <InfoTip data={TIPS.contactados}/>
+              </div>
+              <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1}}>{tc}</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:4}}>{lpd}/d{"\u00ED"}a</div>
+              <div style={{fontSize:11,color:C.accent,fontWeight:700,marginTop:6}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
+            </Cd>
+            {/* Card 2: Respuestas */}
+            <Cd onClick={function(){setShowA(true);}} style={{position:"relative",overflow:"hidden",cursor:"pointer",border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, #FFF 0%, #F5F3FF 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4CA}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4CA}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Respuestas</span>
+                <InfoTip data={TIPS.respuestaRate}/>
+              </div>
+              <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1}}>{respCount}</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:4}}>{respRate}% de los contactados</div>
+              <div style={{marginTop:6,fontSize:12,color:C.purple,fontWeight:600,borderTop:"1px solid "+C.border,paddingTop:6}}>{twoMsgCount} con 2+ msgs ({twoMsgPct}%)</div>
+              <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:4}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
+            </Cd>
+            {/* Card 3: Oferta de Reunión */}
+            <Cd onClick={function(){setShowM(true);}} style={{position:"relative",overflow:"hidden",cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, #FFF 0%, #FFF5F7 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4C5}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.pink+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4C5}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Oferta Reuni{"\u00F3"}n</span>
+                <InfoTip data={TIPS.ofertaReunion}/>
+              </div>
+              <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1}}>{ofertaCount}</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:4}}>{ofertaVsResp}% de respuestas {"\u00B7"} {ofertaVsTotal}% del total</div>
+              <div style={{fontSize:11,color:C.pink,fontWeight:700,marginTop:6}}>{"\u{1F4C5} Ver contactos \u2192"}</div>
+            </Cd>
+            {/* Card 4: Reunión Confirmada (HubSpot cross-reference) */}
+            <Cd style={{position:"relative",overflow:"hidden",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, #FFF 0%, #ECFDF5 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u2705"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Reuni{"\u00F3"}n Confirmada</span>
+              </div>
+              {crmMeetingPhones?(<>
+                <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.green}}>{actualMeetCount}</div>
+                <div style={{fontSize:13,color:C.muted,marginTop:4}}>{actualVsOferta}% de ofertas {"\u00B7"} {actualVsTotal}% del total</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>Cruce con HubSpot Meetings</div>
+              </>):(<>
+                <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:4}}>{crmLoading?"Cargando HubSpot...":"Esperando datos HubSpot"}</div>
+              </>)}
+            </Cd>
           </div>
+            );
+          })()}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:22}}>
             <Cd><Sec tipKey="funnel">Embudo de Conversi&oacute;n</Sec>
               {funnel.map(function(f,i){var w=Math.max((f.v/(tc||1))*100,4);var prev=i>0?((f.v/(funnel[i-1].v||1))*100).toFixed(0):null;
@@ -951,6 +1026,18 @@ export default function Dashboard(){
           <Cd><Sec tipKey="esVsPt">{"\u{1F1EA}\u{1F1F8} vs \u{1F1E7}\u{1F1F7}"}</Sec><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><div style={{background:C.lBlue,borderRadius:12,padding:16,textAlign:"center"}}><div style={{fontSize:12,color:C.accent,fontWeight:700}}>{"\u{1F1EA}\u{1F1F8} ESPA\u00D1OL"}</div><div style={{fontSize:34,fontWeight:900,color:C.accent,fontFamily:mono}}>{headerInfo.esRate}%</div><div style={{fontSize:13,color:C.muted}}>{headerInfo.esResp} de {headerInfo.esTotal}</div></div><div style={{background:C.lGreen,borderRadius:12,padding:16,textAlign:"center"}}><div style={{fontSize:12,color:C.green,fontWeight:700}}>{"\u{1F1E7}\u{1F1F7} PORTUGU\u00C9S"}</div><div style={{fontSize:34,fontWeight:900,color:C.green,fontFamily:mono}}>{headerInfo.ptRate}%</div><div style={{fontSize:13,color:C.muted}}>{headerInfo.ptResp} de {headerInfo.ptTotal}</div></div></div></Cd>
           <Cd><Sec tipKey="leadsPorDia">Leads por D{"\u00ED"}a</Sec><ResponsiveContainer width="100%" height={160}><AreaChart data={daily} margin={{left:-15,right:5,top:5,bottom:0}}><defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.accent} stopOpacity={0.2}/><stop offset="100%" stopColor={C.accent} stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border}/><XAxis dataKey="d" tick={{fontSize:12,fill:C.muted}}/><YAxis tick={{fontSize:12,fill:C.muted}}/><Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13}}/><Area type="monotone" dataKey="l" stroke={C.accent} fill="url(#ag)" strokeWidth={2}/></AreaChart></ResponsiveContainer></Cd>
         </div>
+
+        {/* Benchmarks section (outbound only) */}
+        {!isInb && (<>
+        <Cd style={{marginTop:22,marginBottom:22,overflowX:"auto"}}><Sec tipKey="benchmarkComparacion">{"Comparaci\u00F3n vs Benchmarks (Warm Leads)"}</Sec>
+          <div style={{fontSize:13,color:C.muted,marginBottom:14}}>{"Leads que se registraron en la plataforma = warm/opt-in. Benchmarks: Twilio, Meta, Respond.io, ChatArchitect (2024-2025)."}</div>
+          <table style={{width:"100%",borderCollapse:"separate",borderSpacing:"0 4px",fontSize:14}}><thead><tr>{["M\u00E9trica","Yago","Benchmark","\u0394",""].map(function(h,i){return <th key={i} style={{padding:"10px 14px",textAlign:"left",color:C.muted,fontWeight:700,fontSize:12,textTransform:"uppercase",borderBottom:"2px solid "+C.border}}>{h}</th>;})}</tr></thead>
+          <tbody>{bTable.map(function(r,i){return(<tr key={i} style={{background:i%2===0?"#F9FAFB":"transparent"}}><td style={{padding:"12px 14px",fontWeight:600,borderRadius:"8px 0 0 8px"}}>{r.m}</td><td style={{padding:"12px 14px",fontWeight:800,fontFamily:mono,fontSize:15}}>{r.y}</td><td style={{padding:"12px 14px",color:C.muted}}>{r.b}</td><td style={{padding:"12px 14px",fontWeight:700,fontFamily:mono,color:r.s?C.green:C.red}}>{r.d}</td><td style={{padding:"12px 14px",borderRadius:"0 8px 8px 0"}}><Bd color={r.s?C.green:C.red}>{r.s?"\u2713 ARRIBA":"\u2717 ABAJO"}</Bd></td></tr>);})}</tbody></table>
+        </Cd>
+        <Cd><div style={{fontSize:18,fontWeight:900,marginBottom:18,display:"flex",alignItems:"center"}}>{"\u{1F4CB} Veredicto"}<InfoTip data={TIPS.veredicto}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:20}}>
+          {[{t:"\u2713 FORTALEZAS",c:C.green,i:["Resp. <6 min \u2014 2.5x mejor que benchmark","75% engagement medio o alto","28 msgs/conv \u2014 conversaciones profundas","Cada template captura leads nuevos"]},{t:"\u2717 GAPS",c:C.red,i:["23.6% real vs 40-60% warm benchmark","24.6% auto-replies inflando m\u00E9tricas","Caso \u00C9xito solo 4% de la base","Solo 3% llega a reuni\u00F3n (bench: 20-30%)"]},{t:"\u2192 ACCIONES",c:C.yellow,i:["Filtrar auto-replies","Escalar Caso de \u00C9xito","Mover CTA reuni\u00F3n a MSG 3","Enviar 14-18h"]}].map(function(col,i){return(<div key={i}><div style={{fontSize:14,color:col.c,fontWeight:800,marginBottom:10}}>{col.t}</div>{col.i.map(function(item,j){return <div key={j} style={{fontSize:14,color:C.sub,lineHeight:2,paddingLeft:12,borderLeft:"3px solid "+col.c+"33"}}>{item}</div>;})}</div>);})}
+        </div></Cd>
+        </>)}
       </>);})()}
 
       {tab==="engagement" && (function(){
@@ -1238,6 +1325,7 @@ export default function Dashboard(){
                 <span style={{fontSize:15,fontWeight:800,color:C.purple}}>Test A/B</span>
                 {w>=0 && <span style={{fontSize:12,fontWeight:700,color:C.green,background:C.lGreen,padding:"2px 10px",borderRadius:6}}>+{diff}pp</span>}
               </div>
+              <button onClick={function(){for(var ri=0;ri<pair.length;ri++){updateTemplateConfig(pair[ri],"ab_group",null);}}} style={{background:"none",border:"none",fontSize:18,color:C.muted,cursor:"pointer",padding:"2px 6px",borderRadius:6,lineHeight:1}} title="Eliminar test A/B">{"\u00D7"}</button>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:0}}>
               {[0,1].map(function(idx){
@@ -1267,8 +1355,8 @@ export default function Dashboard(){
             <Cd style={{marginBottom:18}}><Sec tipKey="cadencia">Cadencia</Sec>
               <div style={{display:"flex",alignItems:"center",gap:0}}>{stepKeys.map(function(sk,i){var sg=d.tplByStep[sk];var items=[];if(i>0)items.push(<div key={"sep"+i} style={{width:36,height:2,background:C.border,flexShrink:0}}/>);items.push(<div key={sk} style={{flex:1,background:sg.color+"08",border:"1px solid "+sg.color+"22",borderRadius:12,padding:"12px 8px",textAlign:"center"}}><div style={{fontSize:11,color:C.muted}}>{sg.day}</div><div style={{fontSize:17,fontWeight:800,color:sg.color,marginTop:4}}>{sg.label}</div><div style={{fontSize:12,color:C.muted}}>{sg.totalSent} enviados {"\u00B7"} {sg.templates.length} variante{sg.templates.length!==1?"s":""}</div></div>);return items;}).flat()}</div>
             </Cd>
-            <Sec tipKey="templatePerformance">Performance por Step</Sec>
-            {stepKeys.map(function(sk){var sg=d.tplByStep[sk];var visTpls=sg.templates.filter(function(t){return !_isH(t.name);}).sort(function(a,b){var sa=_so(a.name);var sb=_so(b.name);if(sa!==sb)return sa-sb;return a.name.localeCompare(b.name);});if(visTpls.length===0)return null;var rn=parseFloat(sg.totalRate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+C.border+"66"}}><div style={{display:"flex",alignItems:"center",gap:0,fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700}}>Performance por Step<InfoTip data={TIPS.templatePerformance}/></div><button onClick={function(){setShowTplConfig(true);}} title="Configuraci\u00F3n de templates" style={{background:"none",border:"none",cursor:"pointer",color:C.muted,padding:4,borderRadius:6,display:"flex",alignItems:"center",transition:"color 0.15s"}} onMouseEnter={function(e){e.currentTarget.style.color=C.accent;}} onMouseLeave={function(e){e.currentTarget.style.color=C.muted;}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button></div>
+            {stepKeys.map(function(sk){var sg=d.tplByStep[sk];var visTpls=sg.templates.filter(function(t){return !_isH(t.name);}).sort(function(a,b){var sa=_so(a.name);var sb=_so(b.name);if(sa!==sb)return sa-sb;return a.name.localeCompare(b.name);});var hidTpls=sg.templates.filter(function(t){return _isH(t.name);});if(visTpls.length===0&&hidTpls.length===0)return null;var rn=parseFloat(sg.totalRate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;
               return (<div key={sk} style={{marginBottom:22}}>
                 <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,padding:"10px 16px",background:sg.color+"08",borderRadius:10,border:"1px solid "+sg.color+"22"}}>
                   <div style={{flex:1}}>
@@ -1280,12 +1368,26 @@ export default function Dashboard(){
                     <div style={{fontSize:13,color:C.muted}}>{sg.totalResp} de {sg.totalSent}</div>
                   </div>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:visTpls.length===1?"1fr":"1fr 1fr",gap:12}}>
+                {visTpls.length>0 && <div style={{display:"grid",gridTemplateColumns:visTpls.length===1?"1fr":"1fr 1fr",gap:12}}>
                   {visTpls.map(function(t,i){var trn=parseFloat(t.rate);var tsc=trn>=20?C.green:trn>=12?C.yellow:C.red;
                     var tplItem=d.tpl.find(function(x){return x.key===t.name;});
-                    return (<Cd key={i} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={tplItem?{cursor:"pointer"}:{}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:15}}>{t.displayName}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",fontSize:14,cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0}}>{"\uD83D\uDC41"}</button></div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,color:C.muted,background:"#F3F4F6",padding:"2px 8px",borderRadius:4}}>{sg.day}</span><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span>{t.region && <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.region==="br"?"#ECFDF5":"#EFF6FF",color:t.region==="br"?"#059669":"#2563EB"}}>{t.region==="br"?"BR":"LATAM"}</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
+                    var _tName=t.name;
+                    return (<Cd key={_tName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_tName,step:sk});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_tName||dragTpl.step!==sk)return;var fromIdx=visTpls.findIndex(function(x){return x.name===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<visTpls.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(visTpls[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={Object.assign({},{cursor:tplItem?"pointer":"grab"},dragTpl&&dragTpl.name===_tName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:15}}>{t.displayName}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span>{t.region && <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.region==="br"?"#ECFDF5":"#EFF6FF",color:t.region==="br"?"#059669":"#2563EB"}}>{t.region==="br"?"BR":"LATAM"}</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
                   })}
-                </div>
+                </div>}
+                {hidTpls.length>0 && (<div style={{marginTop:10}}>
+                  <button onClick={function(){setOpenArchivedStep(function(prev){return prev===sk?null:sk;});}} style={{background:"none",border:"1px solid "+C.border,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer",color:C.muted,fontFamily:font,display:"flex",alignItems:"center",gap:6}}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    {hidTpls.length} archivado{hidTpls.length!==1?"s":""}
+                    <span style={{fontSize:10,transition:"transform 0.2s",display:"inline-block",transform:openArchivedStep===sk?"rotate(180deg)":"rotate(0deg)"}}>{"\u25BC"}</span>
+                  </button>
+                  {openArchivedStep===sk && (<div style={{marginTop:8,display:"flex",flexDirection:"column",gap:6}}>
+                    {hidTpls.map(function(ht,hi){return (<div key={hi} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",background:"#F9FAFB",borderRadius:8,border:"1px solid "+C.border,opacity:0.7}}>
+                      <span style={{fontSize:13,fontWeight:600,fontFamily:mono,color:C.sub}}>{ht.displayName||ht.name}</span>
+                      <button onClick={function(){updateTemplateConfig(ht.name,"hidden",false);}} style={{background:C.lBlue,color:C.accent,border:"1px solid "+C.accent+"33",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Desarchivar</button>
+                    </div>);})}
+                  </div>)}
+                </div>)}
               </div>);
             })}
           </>);
@@ -1293,12 +1395,25 @@ export default function Dashboard(){
           <Cd style={{marginBottom:18}}><Sec tipKey="cadencia">Cadencia</Sec>
             <div style={{display:"flex",alignItems:"center",gap:0}}>{[{l:"MSG 1",s:"Yago SDR",d:"D+0",c:C.accent},0,{l:"MSG 2",s:"Sin WA / Caso \u00C9xito",d:"D+1",c:C.purple},0,{l:"MSG 3",s:"Value Nudge",d:"D+3",c:C.cyan},0,{l:"MSG 4",s:"Quick Audit",d:"D+5",c:C.orange}].map(function(s,i){if(!s)return <div key={i} style={{width:36,height:2,background:C.border,flexShrink:0}}/>;return(<div key={i} style={{flex:1,background:s.c+"08",border:"1px solid "+s.c+"22",borderRadius:12,padding:"12px 8px",textAlign:"center"}}><div style={{fontSize:11,color:C.muted}}>{s.d}</div><div style={{fontSize:17,fontWeight:800,color:s.c,marginTop:4}}>{s.l}</div><div style={{fontSize:12,color:C.muted}}>{s.s}</div></div>);})}</div>
           </Cd>
-          <Sec tipKey="templatePerformance">Performance por Template</Sec>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:22}}>
-            {d.tpl.slice().filter(function(t){return !_isH(t.key||t.name);}).sort(function(a,b){var sa=_so(a.key||a.name);var sb=_so(b.key||b.name);if(sa!==sb)return sa-sb;return(a.name||"").localeCompare(b.name||"");}).map(function(t,i){var rn=parseFloat(t.rate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;
-              return (<Cd key={i} onClick={function(){setSelTpl(t);}} style={{cursor:"pointer"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:16}}>{t.name}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.key||t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",fontSize:14,cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0}}>{"\uD83D\uDC41"}</button></div><span style={{fontSize:12,color:C.muted,background:"#F3F4F6",padding:"2px 8px",borderRadius:4}}>{t.day}</span></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:13,color:C.muted}}>{t.resp} de {t.sent}</div></div></div><div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div></Cd>);
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+C.border+"66"}}><div style={{display:"flex",alignItems:"center",gap:0,fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700}}>Performance por Template<InfoTip data={TIPS.templatePerformance}/></div><button onClick={function(){setShowTplConfig(true);}} title="Configuraci\u00F3n de templates" style={{background:"none",border:"none",cursor:"pointer",color:C.muted,padding:4,borderRadius:6,display:"flex",alignItems:"center",transition:"color 0.15s"}} onMouseEnter={function(e){e.currentTarget.style.color=C.accent;}} onMouseLeave={function(e){e.currentTarget.style.color=C.muted;}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button></div>
+          {(function(){var _flatVis=d.tpl.slice().filter(function(t){return !_isH(t.key||t.name);}).sort(function(a,b){var sa=_so(a.key||a.name);var sb=_so(b.key||b.name);if(sa!==sb)return sa-sb;return(a.name||"").localeCompare(b.name||"");});return (<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:22}}>
+            {_flatVis.map(function(t,i){var rn=parseFloat(t.rate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;var _fName=t.key||t.name;
+              return (<Cd key={_fName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_fName,step:"_flat"});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_fName||dragTpl.step!=="_flat")return;var fromIdx=_flatVis.findIndex(function(x){return(x.key||x.name)===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<_flatVis.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(_flatVis[wi].key||_flatVis[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={function(){setSelTpl(t);}} style={Object.assign({cursor:"pointer"},dragTpl&&dragTpl.name===_fName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:16}}>{t.name}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.key||t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><span style={{fontSize:12,color:C.muted,background:"#F3F4F6",padding:"2px 8px",borderRadius:4}}>{t.day}</span></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:13,color:C.muted}}>{t.resp} de {t.sent}</div></div></div><div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div></Cd>);
             })}
-          </div>
+          </div>);})()}
+          {(function(){var _flatHid=d.tpl.slice().filter(function(t){return _isH(t.key||t.name);});if(_flatHid.length===0)return null;return (<div style={{marginTop:10,marginBottom:22}}>
+            <button onClick={function(){setOpenArchivedStep(function(prev){return prev==="_flat"?null:"_flat";});}} style={{background:"none",border:"1px solid "+C.border,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer",color:C.muted,fontFamily:font,display:"flex",alignItems:"center",gap:6}}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+              {_flatHid.length} archivado{_flatHid.length!==1?"s":""}
+              <span style={{fontSize:10,transition:"transform 0.2s",display:"inline-block",transform:openArchivedStep==="_flat"?"rotate(180deg)":"rotate(0deg)"}}>{"\u25BC"}</span>
+            </button>
+            {openArchivedStep==="_flat" && (<div style={{marginTop:8,display:"flex",flexDirection:"column",gap:6}}>
+              {_flatHid.map(function(ht,hi){return (<div key={hi} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",background:"#F9FAFB",borderRadius:8,border:"1px solid "+C.border,opacity:0.7}}>
+                <span style={{fontSize:13,fontWeight:600,fontFamily:mono,color:C.sub}}>{ht.name}</span>
+                <button onClick={function(){updateTemplateConfig(ht.key||ht.name,"hidden",false);}} style={{background:C.lBlue,color:C.accent,border:"1px solid "+C.accent+"33",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Desarchivar</button>
+              </div>);})}
+            </div>)}
+          </div>);})()}
         </>)}
         {_allAbKeys.length>0 && (<div style={{marginBottom:22}}>
           <Sec>Tests A/B</Sec>
@@ -1319,17 +1434,6 @@ export default function Dashboard(){
           <div style={{fontSize:22,color:C.pink}}>{"\u2192"}</div>
         </div>
       </>);})()}
-
-      {tab==="benchmarks" && (<>
-        <Cd style={{marginBottom:22,overflowX:"auto"}}><Sec tipKey="benchmarkComparacion">{"Comparaci\u00F3n vs Benchmarks (Warm Leads)"}</Sec>
-          <div style={{fontSize:13,color:C.muted,marginBottom:14}}>{"Leads que se registraron en la plataforma = warm/opt-in. Benchmarks: Twilio, Meta, Respond.io, ChatArchitect (2024-2025)."}</div>
-          <table style={{width:"100%",borderCollapse:"separate",borderSpacing:"0 4px",fontSize:14}}><thead><tr>{["M\u00E9trica","Yago","Benchmark","\u0394",""].map(function(h,i){return <th key={i} style={{padding:"10px 14px",textAlign:"left",color:C.muted,fontWeight:700,fontSize:12,textTransform:"uppercase",borderBottom:"2px solid "+C.border}}>{h}</th>;})}</tr></thead>
-          <tbody>{bTable.map(function(r,i){return(<tr key={i} style={{background:i%2===0?"#F9FAFB":"transparent"}}><td style={{padding:"12px 14px",fontWeight:600,borderRadius:"8px 0 0 8px"}}>{r.m}</td><td style={{padding:"12px 14px",fontWeight:800,fontFamily:mono,fontSize:15}}>{r.y}</td><td style={{padding:"12px 14px",color:C.muted}}>{r.b}</td><td style={{padding:"12px 14px",fontWeight:700,fontFamily:mono,color:r.s?C.green:C.red}}>{r.d}</td><td style={{padding:"12px 14px",borderRadius:"0 8px 8px 0"}}><Bd color={r.s?C.green:C.red}>{r.s?"\u2713 ARRIBA":"\u2717 ABAJO"}</Bd></td></tr>);})}</tbody></table>
-        </Cd>
-        <Cd><div style={{fontSize:18,fontWeight:900,marginBottom:18,display:"flex",alignItems:"center"}}>{"\u{1F4CB} Veredicto"}<InfoTip data={TIPS.veredicto}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:20}}>
-          {[{t:"\u2713 FORTALEZAS",c:C.green,i:["Resp. <6 min \u2014 2.5x mejor que benchmark","75% engagement medio o alto","28 msgs/conv \u2014 conversaciones profundas","Cada template captura leads nuevos"]},{t:"\u2717 GAPS",c:C.red,i:["23.6% real vs 40-60% warm benchmark","24.6% auto-replies inflando m\u00E9tricas","Caso \u00C9xito solo 4% de la base","Solo 3% llega a reuni\u00F3n (bench: 20-30%)"]},{t:"\u2192 ACCIONES",c:C.yellow,i:["Filtrar auto-replies","Escalar Caso de \u00C9xito","Mover CTA reuni\u00F3n a MSG 3","Enviar 14-18h"]}].map(function(col,i){return(<div key={i}><div style={{fontSize:14,color:col.c,fontWeight:800,marginBottom:10}}>{col.t}</div>{col.i.map(function(item,j){return <div key={j} style={{fontSize:14,color:C.sub,lineHeight:2,paddingLeft:12,borderLeft:"3px solid "+col.c+"33"}}>{item}</div>;})}</div>);})}
-        </div></Cd>
-      </>)}
 
       {tab==="grupos" && (<>
         {/* Selector + Filtros */}
@@ -1731,9 +1835,8 @@ export default function Dashboard(){
         })()}
       </>)}
 
-      {tab==="config" && (function(){
+      {showTplConfig && (function(){
         var mk=mode===0?"all":"real";var abD=dataD[mk];
-        // Collect A/B groups
         var abGroups={};
         var cfgKeys=Object.keys(templateConfig);
         for(var gi=0;gi<cfgKeys.length;gi++){
@@ -1772,121 +1875,123 @@ export default function Dashboard(){
           }
           return {sent:0,resp:0,rate:"0.0%"};
         }
-        return (<>
-        <Cd style={{marginBottom:22}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:0}}>
-            <Sec>Configuraci&oacute;n de Templates</Sec>
-            {allTemplateNames.length>0 && (
-              abSelectMode
-                ? <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{fontSize:13,color:C.accent,fontWeight:600}}>Selecciona 2 templates para comparar</span>
-                    <button onClick={function(){setAbSelectMode(false);setAbSelected([]);}} style={{background:"#F3F4F6",border:"1px solid "+C.border,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",color:C.muted,fontFamily:font}}>Cancelar</button>
-                  </div>
-                : <button onClick={function(){setAbSelectMode(true);setAbSelected([]);}} style={{background:C.lPurple,color:C.purple,border:"1px solid "+C.purple+"33",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap"}}>+ Crear Test A/B</button>
-            )}
-          </div>
-          <div style={{fontSize:14,color:C.sub,marginBottom:18,lineHeight:1.6}}>Asigna cada template a una categor&iacute;a para agruparlos en la pesta&ntilde;a Templates. Templates marcados como <strong>Autom&aacute;tico</strong> o <strong>Campa&ntilde;a</strong> ser&aacute;n excluidos de los indicadores de Resumen.</div>
-          {allTemplateNames.length===0 && <div style={{textAlign:"center",padding:30,color:C.muted,fontSize:14}}>No hay templates cargados a&uacute;n. Carga datos primero.</div>}
-          {allTemplateNames.length>0 && (<>
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {allTemplateNames.slice().sort(function(a,b){var sa=(templateConfig[a]&&templateConfig[a].sort_order)||0;var sb=(templateConfig[b]&&templateConfig[b].sort_order)||0;if(sa!==sb)return sa-sb;return a.localeCompare(b);}).map(function(tplName){
-                var currentEntry=templateConfig[tplName]||{};
-                var currentCat=typeof currentEntry==="string"?currentEntry:(currentEntry.category||"sin_categoria");
-                var currentRegion=typeof currentEntry==="string"?"":(currentEntry.region||"");
-                var hasAbGroup=currentEntry.ab_group;
-                var isAbSel=abSelected.indexOf(tplName)>=0;
-                var isHidden=currentEntry.hidden||false;
-                return (<div key={tplName} onClick={abSelectMode?function(){handleAbToggle(tplName);}:undefined} style={{display:"flex",alignItems:"center",gap:14,padding:"12px 16px",background:isAbSel?"#EDE9FE":hasAbGroup?"#FAFAFE":"#F9FAFB",borderRadius:10,border:"1px solid "+(isAbSel?C.purple+"66":hasAbGroup?C.purple+"33":C.border),cursor:abSelectMode?"pointer":"default",transition:"all 0.15s ease",opacity:isHidden?0.5:1}}>
-                  {abSelectMode && (
-                    <div style={{width:20,height:20,borderRadius:6,border:"2px solid "+(isAbSel?C.purple:C.border),background:isAbSel?C.purple:"#FFF",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s ease"}}>
-                      {isAbSel && <span style={{color:"#FFF",fontSize:12,fontWeight:800}}>{"\u2713"}</span>}
-                    </div>
-                  )}
-                  <div style={{display:"flex",flexDirection:"column",gap:2,flexShrink:0}}>
-                    <button onClick={function(e){e.stopPropagation();updateTemplateConfig(tplName,"sort_order",(currentEntry.sort_order||0)-1);}} style={{background:"none",border:"1px solid "+C.border,borderRadius:4,width:22,height:18,fontSize:10,cursor:"pointer",color:C.muted,display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>{"\u25B2"}</button>
-                    <button onClick={function(e){e.stopPropagation();updateTemplateConfig(tplName,"sort_order",(currentEntry.sort_order||0)+1);}} style={{background:"none",border:"1px solid "+C.border,borderRadius:4,width:22,height:18,fontSize:10,cursor:"pointer",color:C.muted,display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>{"\u25BC"}</button>
-                  </div>
-                  <button onClick={function(e){e.stopPropagation();updateTemplateConfig(tplName,"hidden",!isHidden);}} title={isHidden?"Mostrar template":"Ocultar template"} style={{background:"none",border:"none",fontSize:16,cursor:"pointer",padding:"2px 4px",color:isHidden?C.muted:C.accent,flexShrink:0,opacity:isHidden?0.5:0.8}}>{isHidden?"\uD83D\uDE48":"\uD83D\uDC41"}</button>
-                  <div style={{flex:1,fontWeight:700,fontSize:14,fontFamily:mono,display:"flex",alignItems:"center",gap:8}}>
-                    {tplName}
-                    {hasAbGroup && <span style={{background:C.purple+"18",color:C.purple,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,letterSpacing:0.5}}>A/B</span>}
-                    {isHidden && <span style={{background:C.red+"15",color:C.red,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,letterSpacing:0.5}}>Oculto</span>}
-                  </div>
-                  <select value={currentCat} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"category",e.target.value);}} style={{padding:"6px 12px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:font,background:"#FFF",color:C.text,cursor:"pointer",minWidth:200}}>
-                    <option value="sin_categoria">Sin categor&iacute;a</option>
-                    <option value="d0">D+0 — Contacto Inicial</option>
-                    <option value="d1">D+1 — Seguimiento</option>
-                    <option value="d3">D+3 — Value Nudge</option>
-                    <option value="d5">D+5 — Quick Audit</option>
-                    <option value="automatico">Autom&aacute;tico</option>
-                    <option value="campanha">Campa&ntilde;a</option>
-                  </select>
-                  <select value={currentRegion} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"region",e.target.value);}} style={{padding:"6px 12px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:font,background:"#FFF",color:C.text,cursor:"pointer",minWidth:130}}>
-                    <option value="">Sin regi&oacute;n</option>
-                    <option value="br">BR</option>
-                    <option value="latam">LATAM</option>
-                  </select>
-                </div>);
-              })}
-            </div>
-
-            {/* A/B Comparison Cards */}
-            {Object.keys(abGroups).length>0 && (
-              <div style={{marginTop:24}}>
-                <Sec>Tests A/B Activos</Sec>
-                <div style={{display:"flex",flexDirection:"column",gap:16}}>
-                  {Object.keys(abGroups).map(function(gId){
-                    var pair=abGroups[gId];
-                    if(pair.length<2) return null;
-                    var stA=getTplStats(pair[0]);
-                    var stB=getTplStats(pair[1]);
-                    var rateA=parseFloat(stA.rate)||0;
-                    var rateB=parseFloat(stB.rate)||0;
-                    var diff=Math.abs(rateA-rateB).toFixed(1);
-                    var winner=rateA>rateB?0:(rateB>rateA?1:-1);
-                    var maxRate=Math.max(rateA,rateB,1);
-                    return (<div key={gId} style={{background:"#FFF",border:"1px solid "+C.purple+"33",borderRadius:14,padding:0,overflow:"hidden"}}>
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 20px",background:C.lPurple,borderBottom:"1px solid "+C.purple+"22"}}>
-                        <div style={{display:"flex",alignItems:"center",gap:8}}>
-                          <span style={{fontSize:15,fontWeight:800,color:C.purple}}>Test A/B</span>
-                          {winner>=0 && <span style={{fontSize:12,fontWeight:700,color:C.green,background:C.lGreen,padding:"2px 10px",borderRadius:6}}>+{diff}pp</span>}
-                        </div>
-                        <button onClick={function(){removeAbGroup(gId);}} style={{background:"none",border:"none",fontSize:18,color:C.muted,cursor:"pointer",padding:"2px 6px",borderRadius:6,lineHeight:1}} title="Eliminar test A/B">{"\u00D7"}</button>
+        return (<div onClick={function(e){if(e.target===e.currentTarget){setShowTplConfig(false);setAbSelectMode(false);setAbSelected([]);}}} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.4)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",animation:"fadeInModal 0.2s ease"}}>
+          <div style={{background:C.card,borderRadius:16,padding:28,width:"90%",maxWidth:900,maxHeight:"85vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.15)",animation:"scaleInModal 0.2s ease"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+              <div style={{fontSize:18,fontWeight:800,color:C.text}}>Configuraci&oacute;n de Templates</div>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                {allTemplateNames.length>0 && (
+                  abSelectMode
+                    ? <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{fontSize:13,color:C.accent,fontWeight:600}}>Selecciona 2 templates para comparar</span>
+                        <button onClick={function(){setAbSelectMode(false);setAbSelected([]);}} style={{background:"#F3F4F6",border:"1px solid "+C.border,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",color:C.muted,fontFamily:font}}>Cancelar</button>
                       </div>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:0}}>
-                        {[0,1].map(function(idx){
-                          var st=idx===0?stA:stB;
-                          var rate=idx===0?rateA:rateB;
-                          var isWinner=winner===idx;
-                          var label=idx===0?"A":"B";
-                          return (<div key={idx} style={{padding:"16px 20px",borderRight:idx===0?"1px solid "+C.purple+"15":"none",position:"relative"}}>
-                            {isWinner && <div style={{position:"absolute",top:8,right:12,background:C.green,color:"#FFF",fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:6,letterSpacing:0.5}}>GANADOR</div>}
-                            <div style={{fontSize:11,fontWeight:800,color:C.purple,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>{label}</div>
-                            <div style={{fontSize:13,fontWeight:700,fontFamily:mono,color:C.text,marginBottom:12,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{pair[idx]}</div>
-                            <div style={{display:"flex",gap:16,marginBottom:10}}>
-                              <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Enviados</div><div style={{fontSize:18,fontWeight:800,color:C.text,fontFamily:mono}}>{st.sent||0}</div></div>
-                              <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Respuestas</div><div style={{fontSize:18,fontWeight:800,color:C.text,fontFamily:mono}}>{st.resp||0}</div></div>
-                              <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Tasa</div><div style={{fontSize:18,fontWeight:800,color:isWinner?C.green:C.text,fontFamily:mono}}>{st.rate||"0.0%"}</div></div>
-                            </div>
-                            <div style={{background:"#F3F4F6",borderRadius:6,height:8,overflow:"hidden"}}>
-                              <div style={{height:"100%",borderRadius:6,background:isWinner?C.green:C.accent,width:(maxRate>0?(rate/maxRate*100):0)+"%",transition:"width 0.3s ease"}}></div>
-                            </div>
-                          </div>);
-                        })}
-                      </div>
-                    </div>);
-                  })}
-                </div>
+                    : <button onClick={function(){setAbSelectMode(true);setAbSelected([]);}} style={{background:C.lPurple,color:C.purple,border:"1px solid "+C.purple+"33",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap"}}>+ Crear Test A/B</button>
+                )}
+                <button onClick={function(){setShowTplConfig(false);setAbSelectMode(false);setAbSelected([]);}} style={{background:"none",border:"none",fontSize:22,color:C.muted,cursor:"pointer",padding:"2px 6px",borderRadius:6,lineHeight:1}} title="Cerrar">{"\u00D7"}</button>
               </div>
-            )}
-
-            <div style={{marginTop:18,display:"flex",gap:12}}>
-              <button onClick={resetConfig} style={{background:"#FEF2F2",color:C.red,border:"1px solid #FECACA",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Resetear config</button>
-              <span style={{fontSize:12,color:C.muted,alignSelf:"center"}}>Resetear volver&aacute; al auto-detect por step_order en la pr&oacute;xima carga.</span>
             </div>
-          </>)}
-        </Cd>
-      </>);
+            <div style={{fontSize:14,color:C.sub,marginBottom:18,lineHeight:1.6}}>Asigna cada template a una categor&iacute;a para agruparlos en la vista de Templates. Templates marcados como <strong>Autom&aacute;tico</strong> o <strong>Campa&ntilde;a</strong> ser&aacute;n excluidos de los indicadores de Resumen.</div>
+            {allTemplateNames.length===0 && <div style={{textAlign:"center",padding:30,color:C.muted,fontSize:14}}>No hay templates cargados a&uacute;n. Carga datos primero.</div>}
+            {allTemplateNames.length>0 && (<>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {allTemplateNames.slice().sort(function(a,b){var sa=(templateConfig[a]&&templateConfig[a].sort_order)||0;var sb=(templateConfig[b]&&templateConfig[b].sort_order)||0;if(sa!==sb)return sa-sb;return a.localeCompare(b);}).map(function(tplName){
+                  var currentEntry=templateConfig[tplName]||{};
+                  var currentCat=typeof currentEntry==="string"?currentEntry:(currentEntry.category||"sin_categoria");
+                  var currentRegion=typeof currentEntry==="string"?"":(currentEntry.region||"");
+                  var hasAbGroup=currentEntry.ab_group;
+                  var isAbSel=abSelected.indexOf(tplName)>=0;
+                  var isHidden=currentEntry.hidden||false;
+                  return (<div key={tplName} onClick={abSelectMode?function(){handleAbToggle(tplName);}:undefined} style={{display:"flex",alignItems:"center",gap:14,padding:"12px 16px",background:isAbSel?"#EDE9FE":hasAbGroup?"#FAFAFE":"#F9FAFB",borderRadius:10,border:"1px solid "+(isAbSel?C.purple+"66":hasAbGroup?C.purple+"33":C.border),cursor:abSelectMode?"pointer":"default",transition:"all 0.15s ease",opacity:isHidden?0.5:1}}>
+                    {abSelectMode && (
+                      <div style={{width:20,height:20,borderRadius:6,border:"2px solid "+(isAbSel?C.purple:C.border),background:isAbSel?C.purple:"#FFF",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s ease"}}>
+                        {isAbSel && <span style={{color:"#FFF",fontSize:12,fontWeight:800}}>{"\u2713"}</span>}
+                      </div>
+                    )}
+                    <div style={{display:"flex",flexDirection:"column",gap:2,flexShrink:0}}>
+                      <button onClick={function(e){e.stopPropagation();updateTemplateConfig(tplName,"sort_order",(currentEntry.sort_order||0)-1);}} style={{background:"none",border:"1px solid "+C.border,borderRadius:4,width:22,height:18,fontSize:10,cursor:"pointer",color:C.muted,display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>{"\u25B2"}</button>
+                      <button onClick={function(e){e.stopPropagation();updateTemplateConfig(tplName,"sort_order",(currentEntry.sort_order||0)+1);}} style={{background:"none",border:"1px solid "+C.border,borderRadius:4,width:22,height:18,fontSize:10,cursor:"pointer",color:C.muted,display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>{"\u25BC"}</button>
+                    </div>
+                    <button onClick={function(e){e.stopPropagation();updateTemplateConfig(tplName,"hidden",!isHidden);}} title={isHidden?"Mostrar template":"Ocultar template"} style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:isHidden?C.muted:C.accent,flexShrink:0,opacity:isHidden?0.5:0.8,display:"flex",alignItems:"center"}}>{isHidden?<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button>
+                    <div style={{flex:1,fontWeight:700,fontSize:14,fontFamily:mono,display:"flex",alignItems:"center",gap:8}}>
+                      {tplName}
+                      {hasAbGroup && <span style={{background:C.purple+"18",color:C.purple,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,letterSpacing:0.5}}>A/B</span>}
+                      {isHidden && <span style={{background:C.red+"15",color:C.red,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,letterSpacing:0.5}}>Oculto</span>}
+                    </div>
+                    <select value={currentCat} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"category",e.target.value);}} style={{padding:"6px 12px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:font,background:"#FFF",color:C.text,cursor:"pointer",minWidth:200}}>
+                      <option value="sin_categoria">Sin categor&iacute;a</option>
+                      <option value="d0">D+0 — Contacto Inicial</option>
+                      <option value="d1">D+1 — Seguimiento</option>
+                      <option value="d3">D+3 — Value Nudge</option>
+                      <option value="d5">D+5 — Quick Audit</option>
+                      <option value="automatico">Autom&aacute;tico</option>
+                      <option value="campanha">Campa&ntilde;a</option>
+                    </select>
+                    <select value={currentRegion} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"region",e.target.value);}} style={{padding:"6px 12px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:font,background:"#FFF",color:C.text,cursor:"pointer",minWidth:130}}>
+                      <option value="">Sin regi&oacute;n</option>
+                      <option value="br">BR</option>
+                      <option value="latam">LATAM</option>
+                    </select>
+                  </div>);
+                })}
+              </div>
+
+              {Object.keys(abGroups).length>0 && (
+                <div style={{marginTop:24}}>
+                  <Sec>Tests A/B Activos</Sec>
+                  <div style={{display:"flex",flexDirection:"column",gap:16}}>
+                    {Object.keys(abGroups).map(function(gId){
+                      var pair=abGroups[gId];
+                      if(pair.length<2) return null;
+                      var stA=getTplStats(pair[0]);
+                      var stB=getTplStats(pair[1]);
+                      var rateA=parseFloat(stA.rate)||0;
+                      var rateB=parseFloat(stB.rate)||0;
+                      var diff=Math.abs(rateA-rateB).toFixed(1);
+                      var winner=rateA>rateB?0:(rateB>rateA?1:-1);
+                      var maxRate=Math.max(rateA,rateB,1);
+                      return (<div key={gId} style={{background:"#FFF",border:"1px solid "+C.purple+"33",borderRadius:14,padding:0,overflow:"hidden"}}>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 20px",background:C.lPurple,borderBottom:"1px solid "+C.purple+"22"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{fontSize:15,fontWeight:800,color:C.purple}}>Test A/B</span>
+                            {winner>=0 && <span style={{fontSize:12,fontWeight:700,color:C.green,background:C.lGreen,padding:"2px 10px",borderRadius:6}}>+{diff}pp</span>}
+                          </div>
+                          <button onClick={function(){removeAbGroup(gId);}} style={{background:"none",border:"none",fontSize:18,color:C.muted,cursor:"pointer",padding:"2px 6px",borderRadius:6,lineHeight:1}} title="Eliminar test A/B">{"\u00D7"}</button>
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:0}}>
+                          {[0,1].map(function(idx){
+                            var st=idx===0?stA:stB;
+                            var rate=idx===0?rateA:rateB;
+                            var isWinner=winner===idx;
+                            var label=idx===0?"A":"B";
+                            return (<div key={idx} style={{padding:"16px 20px",borderRight:idx===0?"1px solid "+C.purple+"15":"none",position:"relative"}}>
+                              {isWinner && <div style={{position:"absolute",top:8,right:12,background:C.green,color:"#FFF",fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:6,letterSpacing:0.5}}>GANADOR</div>}
+                              <div style={{fontSize:11,fontWeight:800,color:C.purple,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>{label}</div>
+                              <div style={{fontSize:13,fontWeight:700,fontFamily:mono,color:C.text,marginBottom:12,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{pair[idx]}</div>
+                              <div style={{display:"flex",gap:16,marginBottom:10}}>
+                                <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Enviados</div><div style={{fontSize:18,fontWeight:800,color:C.text,fontFamily:mono}}>{st.sent||0}</div></div>
+                                <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Respuestas</div><div style={{fontSize:18,fontWeight:800,color:C.text,fontFamily:mono}}>{st.resp||0}</div></div>
+                                <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Tasa</div><div style={{fontSize:18,fontWeight:800,color:isWinner?C.green:C.text,fontFamily:mono}}>{st.rate||"0.0%"}</div></div>
+                              </div>
+                              <div style={{background:"#F3F4F6",borderRadius:6,height:8,overflow:"hidden"}}>
+                                <div style={{height:"100%",borderRadius:6,background:isWinner?C.green:C.accent,width:(maxRate>0?(rate/maxRate*100):0)+"%",transition:"width 0.3s ease"}}></div>
+                              </div>
+                            </div>);
+                          })}
+                        </div>
+                      </div>);
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div style={{marginTop:18,display:"flex",gap:12}}>
+                <button onClick={resetConfig} style={{background:"#FEF2F2",color:C.red,border:"1px solid #FECACA",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Resetear config</button>
+                <span style={{fontSize:12,color:C.muted,alignSelf:"center"}}>Resetear volver&aacute; al auto-detect por step_order en la pr&oacute;xima carga.</span>
+              </div>
+            </>)}
+          </div>
+        </div>);
       })()}
     </div>
   </div>);

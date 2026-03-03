@@ -37,7 +37,8 @@ export default async function handler(req, res) {
 
     if (!resp.ok) {
       var errText = await resp.text();
-      return res.status(resp.status).json({ error: "HubSpot error: " + errText });
+      // Return 502 for upstream errors so client doesn't confuse with dashboard 401
+      return res.status(502).json({ error: "HubSpot error (" + resp.status + "): " + errText });
     }
 
     var data = await resp.json();

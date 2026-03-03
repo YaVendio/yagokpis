@@ -9,12 +9,15 @@ export async function callHubSpot(endpoint, params) {
     body: JSON.stringify({ endpoint: endpoint, params: params || {} }),
   });
   if (resp.status === 401) {
+    // 401 = dashboard password wrong (not HubSpot auth — that comes as 502)
     window.dispatchEvent(new Event("auth-required"));
     throw new Error("Unauthorized");
   }
   if (!resp.ok) {
     var errText = await resp.text();
-    throw new Error("HubSpot API error " + resp.status + ": " + errText);
+    // Parse error body for a better message
+    try { var errJson = JSON.parse(errText); errText = errJson.error || errText; } catch(e) {}
+    throw new Error("HubSpot API error: " + errText);
   }
   return await resp.json();
 }
@@ -43,6 +46,7 @@ export async function fetchAllMeetings() {
     var params = {
       limit: "100",
       properties: "hs_meeting_title,hs_meeting_start_time,hs_meeting_end_time,hs_meeting_outcome",
+      associations: "contacts",
     };
     if (after) params.after = after;
     var data = await callHubSpot("/crm/v3/objects/meetings", params);
@@ -51,6 +55,32 @@ export async function fetchAllMeetings() {
     after = data.paging.next.after;
   }
   return all;
+}
+
+export function getMeetingContactPhones(meetings, contacts) {
+  // Build contact ID -> phone map
+  var contactPhoneMap = {};
+  for (var i = 0; i < contacts.length; i++) {
+    var c = contacts[i];
+    var ph = c.properties && c.properties.phone;
+    if (ph) {
+      var clean = ph.replace(/\D/g, "");
+      if (clean) contactPhoneMap[c.id] = clean;
+    }
+  }
+  // For each meeting, collect associated contact phones
+  var meetingPhones = {};
+  for (var j = 0; j < meetings.length; j++) {
+    var m = meetings[j];
+    var assoc = m.associations && m.associations.contacts && m.associations.contacts.results;
+    if (!assoc) continue;
+    for (var k = 0; k < assoc.length; k++) {
+      var contactId = assoc[k].id;
+      var phone = contactPhoneMap[contactId];
+      if (phone) meetingPhones[phone] = true;
+    }
+  }
+  return meetingPhones;
 }
 
 export async function fetchAllDeals() {
