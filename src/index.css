@@ -1,3 +1,61 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --color-background: #fafafa;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f4f4f5;
+  --color-border: #e4e4e7;
+  --color-text: #09090b;
+  --color-text-sub: #3f3f46;
+  --color-text-muted: #71717a;
+
+  --color-accent: #2563eb;
+  --color-accent-light: #eff6ff;
+  --color-green: #059669;
+  --color-green-light: #ecfdf5;
+  --color-red: #dc2626;
+  --color-red-light: #fef2f2;
+  --color-yellow: #d97706;
+  --color-yellow-light: #fffbeb;
+  --color-purple: #7c3aed;
+  --color-purple-light: #f5f3ff;
+  --color-cyan: #0891b2;
+  --color-orange: #ea580c;
+  --color-pink: #ec4899;
+}
+
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+  --color-background: #09090b;
+  --color-surface: #18181b;
+  --color-surface-alt: #27272a;
+  --color-border: #3f3f46;
+  --color-text: #fafafa;
+  --color-text-sub: #d4d4d8;
+  --color-text-muted: #a1a1aa;
+
+  --color-accent: #3b82f6;
+  --color-accent-light: #172554;
+  --color-green: #10b981;
+  --color-green-light: #052e16;
+  --color-red: #ef4444;
+  --color-red-light: #450a0a;
+  --color-yellow: #f59e0b;
+  --color-yellow-light: #422006;
+  --color-purple: #8b5cf6;
+  --color-purple-light: #2e1065;
+  --color-cyan: #22d3ee;
+  --color-orange: #fb923c;
+  --color-pink: #f472b6;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -5,6 +63,32 @@
 }
 
 body {
+  background-color: var(--color-background);
+  color: var(--color-text);
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Custom utility for glass effect */
+@utility glass {
+  background: color-mix(in srgb, var(--color-surface) 80%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
