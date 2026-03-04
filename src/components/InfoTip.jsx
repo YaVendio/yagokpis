@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 
-export default function InfoTip({ data }) {
+export default function InfoTip({ data, dark }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const tipRef = useRef(null);
@@ -29,6 +29,19 @@ export default function InfoTip({ data }) {
 
   if (!data) return null;
 
+  var bg = dark ? "#1A1D27" : "#FFF";
+  var border = dark ? "#2D3140" : "#E5E7EB";
+  var text = dark ? "#E5E7EB" : "#374151";
+  var title = dark ? "#E5E7EB" : "#111827";
+  var desc = dark ? "#B0B5C3" : "#4B5563";
+  var muted = dark ? "#808696" : "#6B7280";
+  var source = dark ? "#606676" : "#9CA3AF";
+  var codeBg = dark ? "#252836" : "#F3F4F6";
+  var codeBorder = dark ? "#2D3140" : "#F3F4F6";
+  var iBg = dark ? "#2A2D50" : "#E0E7FF";
+  var iColor = dark ? "#818CF8" : "#4F46E5";
+  var iBorder = dark ? "#3730A3" : "#C7D2FE";
+
   return (
     <span
       ref={ref}
@@ -41,9 +54,9 @@ export default function InfoTip({ data }) {
         style={{
           display: "inline-flex", alignItems: "center", justifyContent: "center",
           width: 18, height: 18, borderRadius: "50%",
-          background: "#E0E7FF", color: "#4F46E5",
+          background: iBg, color: iColor,
           fontSize: 11, fontWeight: 800, lineHeight: 1,
-          border: "1px solid #C7D2FE",
+          border: "1px solid " + iBorder,
           transition: "all 0.15s ease",
           ...(open ? { background: "#4F46E5", color: "#FFF", borderColor: "#4F46E5" } : {})
         }}
@@ -60,16 +73,16 @@ export default function InfoTip({ data }) {
             transform: "translateX(-50%)",
             marginLeft: pos.left,
             width: 320,
-            background: "#FFF",
-            border: "1px solid #E5E7EB",
+            background: bg,
+            border: "1px solid " + border,
             borderRadius: 14,
             padding: "16px 18px",
-            boxShadow: "0 12px 40px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
+            boxShadow: dark ? "0 20px 60px rgba(0,0,0,0.45), 0 4px 16px rgba(0,0,0,0.30)" : "0 20px 60px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.10)",
             zIndex: 1000,
             animation: "fadeInTip 0.18s ease-out",
             fontSize: 13,
             lineHeight: 1.55,
-            color: "#374151",
+            color: text,
             fontWeight: 400,
             textTransform: "none",
             letterSpacing: 0,
@@ -79,36 +92,36 @@ export default function InfoTip({ data }) {
           onClick={function (e) { e.stopPropagation(); }}
         >
           {data.title && (
-            <div style={{ fontSize: 14, fontWeight: 800, color: "#111827", marginBottom: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: title, marginBottom: 8 }}>
               {data.title}
             </div>
           )}
           {data.description && (
-            <div style={{ marginBottom: 10, color: "#4B5563" }}>
+            <div style={{ marginBottom: 10, color: desc }}>
               {data.description}
             </div>
           )}
           {data.formula && (
             <div style={{
-              background: "#F3F4F6", borderRadius: 8, padding: "8px 12px",
+              background: codeBg, borderRadius: 8, padding: "8px 12px",
               fontFamily: "'JetBrains Mono', monospace", fontSize: 12,
-              color: "#4F46E5", marginBottom: 10, fontWeight: 600
+              color: iColor, marginBottom: 10, fontWeight: 600
             }}>
               {data.formula}
             </div>
           )}
           {data.why && (
             <div style={{ marginBottom: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: muted, textTransform: "uppercase", letterSpacing: 0.5 }}>
                 Por qu&eacute; importa
               </span>
-              <div style={{ marginTop: 3, color: "#374151" }}>{data.why}</div>
+              <div style={{ marginTop: 3, color: text }}>{data.why}</div>
             </div>
           )}
           {data.source && (
             <div style={{
-              fontSize: 11, color: "#9CA3AF", marginTop: 8,
-              paddingTop: 8, borderTop: "1px solid #F3F4F6"
+              fontSize: 11, color: source, marginTop: 8,
+              paddingTop: 8, borderTop: "1px solid " + codeBorder
             }}>
               Fuente: {data.source}
             </div>

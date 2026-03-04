@@ -8,7 +8,7 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  var { endpoint, params } = req.body || {};
+  var { endpoint, params, body } = req.body || {};
   if (!endpoint) {
     return res.status(400).json({ error: "Missing endpoint" });
   }
@@ -20,20 +20,26 @@ export default async function handler(req, res) {
 
   try {
     var url = "https://api.hubapi.com" + endpoint;
-    if (params && Object.keys(params).length > 0) {
+    var fetchOpts = {
+      method: "GET",
+      headers: {
+        "Authorization": "Bearer " + token,
+        "Accept": "application/json",
+      },
+    };
+
+    if (body) {
+      fetchOpts.method = "POST";
+      fetchOpts.headers["Content-Type"] = "application/json";
+      fetchOpts.body = JSON.stringify(body);
+    } else if (params && Object.keys(params).length > 0) {
       var qs = Object.entries(params)
         .map(function (pair) { return encodeURIComponent(pair[0]) + "=" + encodeURIComponent(pair[1]); })
         .join("&");
       url += "?" + qs;
     }
 
-    var resp = await fetch(url, {
-      method: "GET",
-      headers: {
-        "Authorization": "Bearer " + token,
-        "Accept": "application/json",
-      },
-    });
+    var resp = await fetch(url, fetchOpts);
 
     if (!resp.ok) {
       var errText = await resp.text();

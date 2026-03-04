@@ -7,11 +7,14 @@ import { supabase } from "./supabase";
 import InfoTip from "./components/InfoTip";
 import TIPS from "./tooltips";
 import { fetchCampaigns, fetchCampaignGroups, fetchCampaignLeads, formatDateForApi } from "./gruposApi";
-import { fetchAllContacts, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones } from "./hubspotApi";
+import { fetchAllContacts, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones, fetchMeetingsSince, fetchContactsByIds, fetchDealsSince } from "./hubspotApi";
 
 var font="'Source Sans 3', sans-serif";
 var mono="'JetBrains Mono', monospace";
-var C={bg:"#FAFBFC",card:"#FFF",border:"#E5E7EB",text:"#111827",sub:"#374151",muted:"#6B7280",accent:"#2563EB",green:"#059669",red:"#DC2626",yellow:"#D97706",purple:"#7C3AED",cyan:"#0891B2",orange:"#EA580C",pink:"#EC4899",lBlue:"#EFF6FF",lGreen:"#ECFDF5",lRed:"#FEF2F2",lPurple:"#F5F3FF"};
+var _CLight={bg:"#FAFBFC",card:"#FFF",border:"#E5E7EB",text:"#111827",sub:"#374151",muted:"#6B7280",accent:"#2563EB",green:"#059669",red:"#DC2626",yellow:"#D97706",purple:"#7C3AED",cyan:"#0891B2",orange:"#EA580C",pink:"#EC4899",lBlue:"#EFF6FF",lGreen:"#ECFDF5",lRed:"#FEF2F2",lPurple:"#F5F3FF",lYellow:"#FFFBEB",lOrange:"#FFF7ED",inputBg:"#FFF",rowBg:"#F9FAFB",rowAlt:"#F3F4F6",bubbleOut:"#DCF8C6",gradFrom:"#FFF",gradTo:"#F8FAFF",abSelBg:"#EDE9FE",abRowBg:"#FAFAFE",barTrack:"#F3F4F6",redBorder:"#FECACA",white:"#FFF"};
+var _CDark={bg:"#0F1117",card:"#1A1D27",border:"#2D3140",text:"#E5E7EB",sub:"#B0B5C3",muted:"#808696",accent:"#3B82F6",green:"#10B981",red:"#EF4444",yellow:"#F59E0B",purple:"#8B5CF6",cyan:"#06B6D4",orange:"#F97316",pink:"#F472B6",lBlue:"#1E2A40",lGreen:"#122B25",lRed:"#2D1B1B",lPurple:"#221F33",lYellow:"#2B2714",lOrange:"#2B2114",inputBg:"#252836",rowBg:"#1E2029",rowAlt:"#252836",bubbleOut:"#1A3A2A",gradFrom:"#13151D",gradTo:"#181B25",abSelBg:"#2A2540",abRowBg:"#1F1E2A",barTrack:"#252836",redBorder:"#5C2020",white:"#E5E7EB"};
+var C=_CLight;
+var _isDark=false;
 
 // Filter default meetings to only those that received MSG1, and compute ml/igL/igA flags
 var DEFAULT_MEETINGS=_RAW_MEETINGS.filter(function(m){return m.tr.indexOf("MSG1")>=0;}).map(function(m){var hasMl=false,hasIgL=false,hasIgA=false;for(var i=0;i<m.c.length;i++){if(m.c[i][0]===2&&m.c[i][1]&&m.c[i][1].indexOf("meetings.hubspot.com/")>=0)hasMl=true;if(m.c[i][0]===1&&m.c[i][1]){if(/instagram\.com/i.test(m.c[i][1]))hasIgL=true;if(/@\w+|ig\s*:/i.test(m.c[i][1]))hasIgA=true;}}return Object.assign({},m,{ml:hasMl,igL:hasIgL,igA:hasIgA});});
@@ -43,8 +46,8 @@ var DEFAULT_D={
     bcast:[]}
 };
 
-var DEFAULT_FUNNEL_ALL=[{n:"Contactados",v:1116,c:C.accent},{n:"Respondieron",v:270,c:C.purple},{n:"Config. Plataf.",v:170,c:C.green},{n:"Enviaron IG",v:73,c:C.orange},{n:"Oferta Reuni\u00F3n",v:33,c:C.pink}];
-var DEFAULT_FUNNEL_REAL=[{n:"Contactados",v:1116,c:C.accent},{n:"Resp. Reales",v:241,c:C.cyan},{n:"Config. Plataf.",v:149,c:C.green},{n:"Enviaron IG",v:71,c:C.orange},{n:"Oferta Reuni\u00F3n",v:30,c:C.pink}];
+var DEFAULT_FUNNEL_ALL=[{n:"Contactados",v:1116,c:C.accent},{n:"Respondieron",v:270,c:C.purple},{n:"Oferta Reuni\u00F3n",v:33,c:C.pink}];
+var DEFAULT_FUNNEL_REAL=[{n:"Contactados",v:1116,c:C.accent},{n:"Resp. Reales",v:241,c:C.cyan},{n:"Oferta Reuni\u00F3n",v:30,c:C.pink}];
 var DEFAULT_CH_BENCH=[{ch:"WA Warm*",r:45,y:0},{ch:"Yago (todas)",r:24.2,y:1},{ch:"Yago (reales)",r:21.6,y:1},{ch:"LinkedIn Cold*",r:18,y:0},{ch:"WA Cold*",r:15,y:0},{ch:"SMS Mktg*",r:12,y:0},{ch:"Email Cold*",r:8.5,y:0}];
 var DEFAULT_DAILY=[{d:"02/03",l:88},{d:"02/04",l:56},{d:"02/05",l:69},{d:"02/06",l:39},{d:"02/07",l:60},{d:"02/08",l:63},{d:"02/09",l:60},{d:"02/10",l:82},{d:"02/11",l:79},{d:"02/12",l:99}];
 var DEFAULT_BTABLE=[{m:"Respuesta (todas)",y:"24.2%",b:"40-60%",d:"-16 a -36pp",s:0},{m:"Respuesta (reales)",y:"21.6%",b:"40-60%",d:"-18 a -38pp",s:0},{m:"Env\u00EDo de Instagram",y:"27.0%",b:"35-50%",d:"~-8pp",s:0},{m:"Oferta Reuni\u00F3n",y:"12.2%",b:"20-30%",d:"~-8pp",s:0},{m:"Tiempo 1a Resp.",y:"~3 min",b:"<15 min",d:"5x mejor",s:1},{m:"Msgs/Conv.",y:"12.7",b:"10-20",d:"Normal",s:1}];
@@ -57,7 +60,7 @@ var tplCol={MSG1:"#2563EB",MSG2a:"#7C3AED",MSG2b:"#7C3AED",MSG2c:"#D97706",MSG3:
 var tplNm={MSG1:"MSG 1 \u2014 Yago SDR (D+0)",MSG2a:"MSG 2a \u2014 Sin WA (D+1)",MSG2b:"MSG 2b \u2014 Caso de \u00C9xito (D+1)",MSG2c:"Emprende Show (Broadcast)",MSG3:"MSG 3 \u2014 Value Nudge (D+3)",MSG4:"MSG 4 \u2014 Quick Audit (D+5)"};
 
 function Bd({children,color}){return <span style={{background:color+"15",color:color,padding:"4px 12px",borderRadius:9999,fontSize:12,fontWeight:700,border:"1px solid "+color+"20",letterSpacing:0.3}}>{children}</span>;}
-function Sec({children,tipKey}){return <div style={{fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700,marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+C.border+"66",display:"flex",alignItems:"center"}}>{children}{tipKey && <InfoTip data={TIPS[tipKey]}/>}</div>;}
+function Sec({children,tipKey}){return <div style={{fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700,marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+C.border+"66",display:"flex",alignItems:"center"}}>{children}{tipKey && <InfoTip dark={_isDark} data={TIPS[tipKey]}/>}</div>;}
 function Cd({children,style,onClick,draggable,onDragStart,onDragOver,onDragLeave,onDrop,onDragEnd}){var _h=useState(false),hov=_h[0],sH=_h[1];return <div onClick={onClick} draggable={draggable} onDragStart={onDragStart} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} onDragEnd={onDragEnd} onMouseEnter={function(){sH(true);}} onMouseLeave={function(){sH(false);}} style={{background:C.card,border:"1px solid "+(hov?C.accent+"44":C.border),borderRadius:16,padding:20,boxShadow:hov?"0 8px 25px #0000000f":"0 1px 3px #0000000a",transform:hov?"translateY(-1px)":"none",transition:"box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease",...style}}>{children}</div>;}
 
 function qualLabel(q){if(!q)return{t:"Sin calificaci\u00F3n",c:C.muted};var lo=q.toLowerCase();if(lo==="alta")return{t:"Alta",c:C.green};if(lo==="media"||lo==="m\u00E9dia")return{t:"Media",c:C.accent};if(lo==="baja"||lo==="baixa")return{t:"Baja",c:C.yellow};return{t:q,c:C.muted};}
@@ -67,7 +70,7 @@ function ConvView({lead,onBack}){
   var ql=qualLabel(lead.q);
   return (<div style={{maxHeight:"78vh",overflowY:"auto"}}>
     <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:0,position:"sticky",top:0,background:C.card,padding:"12px 0",zIndex:2,borderBottom:"1px solid "+C.border}}>
-      <button onClick={onBack} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"8px 14px",fontSize:13,cursor:"pointer",fontWeight:700,color:C.muted}}>{"\u2190 Volver"}</button>
+      <button onClick={onBack} style={{background:C.rowAlt,border:"none",borderRadius:8,padding:"8px 14px",fontSize:13,cursor:"pointer",fontWeight:700,color:C.muted}}>{"\u2190 Volver"}</button>
       <div style={{flex:1}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           <span style={{fontSize:18}}>{lead.co}</span>
@@ -93,20 +96,20 @@ function ConvView({lead,onBack}){
             {dt && <div style={{fontSize:11,color:C.muted,marginTop:3}}>{dt}</div>}
           </div>);
         }
-        if(m[0]===1) return (<div key={i} style={{alignSelf:"flex-end",background:"#DCF8C6",borderRadius:"16px 16px 4px 16px",padding:"10px 14px",fontSize:14,color:"#111",maxWidth:"72%",lineHeight:1.6,whiteSpace:"pre-wrap"}}>
-          {m[1]}{dt && <div style={{fontSize:10,color:"#6B7280",marginTop:4,textAlign:"right"}}>{dt}</div>}
+        if(m[0]===1) return (<div key={i} style={{alignSelf:"flex-end",background:C.bubbleOut,borderRadius:"16px 16px 4px 16px",padding:"10px 14px",fontSize:14,color:C.text,maxWidth:"72%",lineHeight:1.6,whiteSpace:"pre-wrap"}}>
+          {m[1]}{dt && <div style={{fontSize:10,color:C.muted,marginTop:4,textAlign:"right"}}>{dt}</div>}
         </div>);
         if(m[0]===2){
           var txt=m[1];
           if(!txt||txt.trim()==="") return null;
-          return (<div key={i} style={{alignSelf:"flex-start",background:C.lBlue,borderRadius:"16px 16px 16px 4px",padding:"10px 14px",fontSize:14,color:"#111",maxWidth:"72%",lineHeight:1.6,whiteSpace:"pre-wrap"}}>
+          return (<div key={i} style={{alignSelf:"flex-start",background:C.lBlue,borderRadius:"16px 16px 16px 4px",padding:"10px 14px",fontSize:14,color:C.text,maxWidth:"72%",lineHeight:1.6,whiteSpace:"pre-wrap"}}>
             <div style={{fontSize:10,fontWeight:700,color:C.accent,marginBottom:4}}>{"\u{1F916} YAGO"}</div>
-            {txt}{dt && <div style={{fontSize:10,color:"#6B7280",marginTop:4}}>{dt}</div>}
+            {txt}{dt && <div style={{fontSize:10,color:C.muted,marginTop:4}}>{dt}</div>}
           </div>);
         }
         return null;
       })}
-      {lead.c.length>=80 && <div style={{textAlign:"center",fontSize:13,color:C.muted,padding:16,background:"#F9FAFB",borderRadius:8,margin:"8px 0"}}>{"\u26A0 Conversaci\u00F3n truncada (primeros 80 mensajes)"}</div>}
+      {lead.c.length>=80 && <div style={{textAlign:"center",fontSize:13,color:C.muted,padding:16,background:C.rowBg,borderRadius:8,margin:"8px 0"}}>{"\u26A0 Conversaci\u00F3n truncada (primeros 80 mensajes)"}</div>}
     </div>
   </div>);
 }
@@ -126,12 +129,12 @@ function MeetModal({leads,onClose,mode,title}){
             <div style={{fontSize:19,fontWeight:900}}>{title||"\u{1F4C5} Leads con Oferta de Reuni\u00F3n"}</div>
             <div style={{fontSize:14,color:C.muted,marginTop:2}}>{filtered.length} leads {"\u00B7"} Click en un contacto para ver la conversación</div>
           </div>
-          <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:36,height:36,fontSize:18,cursor:"pointer",color:C.muted,fontWeight:700}}>{"\u2715"}</button>
+          <button onClick={onClose} style={{background:C.rowAlt,border:"none",borderRadius:8,width:36,height:36,fontSize:18,cursor:"pointer",color:C.muted,fontWeight:700}}>{"\u2715"}</button>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {filtered.map(function(l,i){
             var ql=qualLabel(l.q);
-            return (<div key={i} onClick={function(){setSel(i);}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:"#F9FAFB",borderRadius:12,cursor:"pointer",border:"2px solid transparent"}}>
+            return (<div key={i} onClick={function(){setSel(i);}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:C.rowBg,borderRadius:12,cursor:"pointer",border:"2px solid transparent"}}>
               <span style={{fontSize:20}}>{l.co}</span>
               <div style={{flex:1}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -183,12 +186,12 @@ function TplModal({tpl,leads,mode,onClose}){
           <div>
             <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
               <span style={{fontSize:19,fontWeight:900}}>{tpl.name}</span>
-              <span style={{fontSize:12,color:C.muted,background:"#F3F4F6",padding:"2px 8px",borderRadius:4}}>{tpl.day}</span>
+              <span style={{fontSize:12,color:C.muted,background:C.rowAlt,padding:"2px 8px",borderRadius:4}}>{tpl.day}</span>
               <Bd color={sc}>{tpl.rate}</Bd>
             </div>
             <div style={{fontSize:13,color:C.muted,marginTop:4}}>{filtered.length} leads respondieron a este template</div>
           </div>
-          <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:36,height:36,fontSize:18,cursor:"pointer",color:C.muted,fontWeight:700}}>{"\u2715"}</button>
+          <button onClick={onClose} style={{background:C.rowAlt,border:"none",borderRadius:8,width:36,height:36,fontSize:18,cursor:"pointer",color:C.muted,fontWeight:700}}>{"\u2715"}</button>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:18}}>
           {[{l:"Enviados",v:tpl.sent,c:C.accent},{l:"Respondieron",v:tpl.resp,c:C.purple},{l:"Tasa",v:tpl.rate,c:sc}].map(function(s,i){return (<div key={i} style={{background:s.c+"08",borderRadius:10,padding:"10px 14px",textAlign:"center",border:"1px solid "+s.c+"18"}}>
@@ -198,14 +201,14 @@ function TplModal({tpl,leads,mode,onClose}){
         </div>
         {cleanContent && <div style={{marginBottom:18}}>
           <div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Contenido del template</div>
-          <div style={{background:"#F9FAFB",border:"1px solid "+C.border,borderRadius:12,padding:"14px 18px",fontSize:14,color:C.sub,lineHeight:1.7,whiteSpace:"pre-wrap",maxHeight:200,overflowY:"auto"}}>{cleanContent}</div>
+          <div style={{background:C.rowBg,border:"1px solid "+C.border,borderRadius:12,padding:"14px 18px",fontSize:14,color:C.sub,lineHeight:1.7,whiteSpace:"pre-wrap",maxHeight:200,overflowY:"auto"}}>{cleanContent}</div>
         </div>}
         {filtered.length>0 && <div>
           <div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Leads que respondieron ({filtered.length})</div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             {filtered.map(function(l,i){
               var ql=qualLabel(l.q);
-              return (<div key={i} onClick={function(){setSel(i);}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:"#F9FAFB",borderRadius:12,cursor:"pointer",border:"2px solid transparent"}}>
+              return (<div key={i} onClick={function(){setSel(i);}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:C.rowBg,borderRadius:12,cursor:"pointer",border:"2px solid transparent"}}>
                 <span style={{fontSize:20}}>{l.co}</span>
                 <div style={{flex:1}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -248,6 +251,11 @@ var EMPTY_D={
 var EMPTY_HEADER={totalContactados:0,leadsPerDay:0,dateRange:"",autoReplyCount:0,realesCount:0,esRate:"0",esResp:0,esTotal:0,ptRate:"0",ptResp:0,ptTotal:0};
 
 export default function Dashboard(){
+  const [darkMode,setDarkMode]=useState(function(){try{return localStorage.getItem("yago_dark")==="1";}catch(e){return false;}});
+  C=darkMode?_CDark:_CLight;
+  _isDark=darkMode;
+  useEffect(function(){document.body.style.background=C.bg;if(darkMode){document.body.classList.add("dark-mode");}else{document.body.classList.remove("dark-mode");}},[darkMode]);
+
   const [isAuthenticated,setIsAuthenticated]=useState(function(){return !!sessionStorage.getItem("dashboard_password");});
   const [loginPassword,setLoginPassword]=useState("");
   const [loginError,setLoginError]=useState("");
@@ -334,12 +342,7 @@ export default function Dashboard(){
     if(tab==="grupos"&&gruposCampaigns.length===0&&!gruposLoading&&!gruposError){initGrupos();}
   },[tab]);
 
-  // Auto-init CRM tab when selected for the first time
-  useEffect(function(){
-    if(tab==="crm"&&!crmInited&&!crmLoading&&!crmError){initCrm();}
-  },[tab]);
-
-  // Auto-load CRM contacts+meetings on dashboard init for overview cross-reference
+  // Auto-load CRM data once on mount (used by both overview and CRM tab)
   useEffect(function(){
     if(!crmInited&&!crmLoading&&!crmError){initCrm();}
   },[]);
@@ -366,13 +369,13 @@ export default function Dashboard(){
 
   // Load config from Supabase on mount
   useEffect(function(){
-    supabase.from("template_config").select("template_name,category,region,ab_group,sort_order,hidden")
+    supabase.from("template_config").select("template_name,category,region,ab_group,sort_order,hidden,qualification")
       .then(function(res){
         if(res.data){
           var cfg={};
           for(var i=0;i<res.data.length;i++){
             var r=res.data[i];
-            cfg[r.template_name]={category:r.category||"sin_categoria",region:r.region||"",ab_group:r.ab_group||null,sort_order:r.sort_order||0,hidden:r.hidden||false};
+            cfg[r.template_name]={category:r.category||"sin_categoria",region:r.region||"",ab_group:r.ab_group||null,sort_order:r.sort_order||0,hidden:r.hidden||false,qualification:r.qualification||"general"};
           }
           setTemplateConfig(cfg);
         }
@@ -400,8 +403,9 @@ export default function Dashboard(){
             var tn=result.allTemplateNames[ai];
             var step=result.tplStepInfo[tn];
             if(step&&stepCatMap[step]){
-              autoConfig[tn]={category:stepCatMap[step],region:"",ab_group:null,sort_order:0,hidden:false};
-              upsertRows.push({template_name:tn,category:stepCatMap[step],region:"",ab_group:null,sort_order:0,hidden:false,updated_at:new Date().toISOString()});
+              var _q=_deduceQual(tn);
+              autoConfig[tn]={category:stepCatMap[step],region:"",ab_group:null,sort_order:0,hidden:false,qualification:_q};
+              upsertRows.push({template_name:tn,category:stepCatMap[step],region:"",ab_group:null,sort_order:0,hidden:false,qualification:_q,updated_at:new Date().toISOString()});
             }
           }
           if(Object.keys(autoConfig).length>0){
@@ -448,7 +452,7 @@ export default function Dashboard(){
         <div style={{fontSize:32,marginBottom:8}}>{"🔒"}</div>
         <div style={{fontSize:20,fontWeight:800,color:C.text,marginBottom:4}}>Yago SDR Analytics</div>
         <div style={{fontSize:13,color:C.muted,marginBottom:24}}>Ingrese la contraseña para acceder</div>
-        <input type="password" value={loginPassword} onChange={function(ev){setLoginPassword(ev.target.value);}} placeholder="Contraseña" style={{width:"100%",padding:"12px 14px",fontSize:15,border:"1px solid "+C.border,borderRadius:8,fontFamily:font,marginBottom:12,boxSizing:"border-box",outline:"none"}}/>
+        <input type="password" value={loginPassword} onChange={function(ev){setLoginPassword(ev.target.value);}} placeholder="Contraseña" style={{width:"100%",padding:"12px 14px",fontSize:15,border:"1px solid "+C.border,borderRadius:8,fontFamily:font,marginBottom:12,boxSizing:"border-box",outline:"none",background:C.inputBg,color:C.text}}/>
         {loginError && <div style={{color:C.red,fontSize:13,fontWeight:600,marginBottom:12}}>{loginError}</div>}
         <button type="submit" disabled={loginLoading||!loginPassword} style={{width:"100%",padding:"12px 0",fontSize:15,fontWeight:700,color:"#fff",background:loginLoading?"#93C5FD":C.accent,border:"none",borderRadius:8,cursor:loginLoading?"wait":"pointer",fontFamily:font}}>{loginLoading?"Verificando...":"Entrar"}</button>
       </form>
@@ -457,7 +461,7 @@ export default function Dashboard(){
 
   function updateTemplateConfig(tplName,field,value){
     setTemplateConfig(function(prev){
-      var entry=prev[tplName]||{category:"sin_categoria",region:"",ab_group:null,sort_order:0,hidden:false};
+      var entry=prev[tplName]||{category:"sin_categoria",region:"",ab_group:null,sort_order:0,hidden:false,qualification:"general"};
       var next=Object.assign({},prev);
       next[tplName]=Object.assign({},entry);
       next[tplName][field]=value;
@@ -468,6 +472,7 @@ export default function Dashboard(){
         ab_group:next[tplName].ab_group||null,
         sort_order:next[tplName].sort_order||0,
         hidden:next[tplName].hidden||false,
+        qualification:next[tplName].qualification||"general",
         updated_at:new Date().toISOString()
       }).then(function(){});
       return next;
@@ -477,6 +482,13 @@ export default function Dashboard(){
   function resetConfig(){
     setTemplateConfig({});
     supabase.from("template_config").delete().neq("template_name","").then(function(){});
+  }
+
+  function _deduceQual(name){
+    var lo=name.toLowerCase();
+    if(/no[_\s]?calificado|no[_\s]?qualificado|leads_baja|leads_baixa/.test(lo))return "no_calificado";
+    if(/calificado|qualificado/.test(lo))return "calificado";
+    return "general";
   }
 
   function handleSearch(q){
@@ -644,22 +656,42 @@ export default function Dashboard(){
   }
 
   // --- CRM (HubSpot) tab functions ---
+  var CRM_SINCE="2026-02-02";
   async function initCrm(){
     setCrmLoading(true);setCrmError(null);
     try{
-      var [contacts,meetings,deals,pipelines]=await Promise.all([
-        fetchAllContacts(),fetchAllMeetings(),fetchAllDeals(),fetchDealPipelines()
-      ]);
-      setCrmContacts(contacts);setCrmMeetings(meetings);setCrmDeals(deals);setCrmPipelines(pipelines);setCrmInited(true);
-    }catch(e){setCrmError(e.message);}
+      console.log("[CRM] Fetching HubSpot since",CRM_SINCE,"...");
+      // Sequential calls to avoid HubSpot rate limits
+      var meetingsRes=await fetchMeetingsSince(CRM_SINCE);
+      console.log("[CRM] Meetings:",meetingsRes.length);
+      var dealsRes=await fetchDealsSince(CRM_SINCE);
+      console.log("[CRM] Deals:",dealsRes.length);
+      var pipelines=await fetchDealPipelines();
+      console.log("[CRM] Pipelines loaded");
+      // Collect unique contact IDs from meeting associations and batch-fetch only those
+      var contactIdSet={};
+      for(var i=0;i<meetingsRes.length;i++){
+        var assoc=meetingsRes[i].associations&&meetingsRes[i].associations.contacts&&meetingsRes[i].associations.contacts.results;
+        if(assoc){for(var j=0;j<assoc.length;j++){contactIdSet[assoc[j].id]=true;}}
+      }
+      var contactIds=Object.keys(contactIdSet);
+      var contactsRes=[];
+      if(contactIds.length>0){
+        contactsRes=await fetchContactsByIds(contactIds);
+        console.log("[CRM] Contacts (from meetings):",contactsRes.length);
+      }
+      setCrmContacts(contactsRes);setCrmMeetings(meetingsRes);setCrmDeals(dealsRes);setCrmPipelines(pipelines);setCrmInited(true);
+      console.log("[CRM] Done. Meetings:",meetingsRes.length,"Contacts:",contactsRes.length,"Deals:",dealsRes.length);
+    }catch(e){console.error("[CRM] Error:",e);setCrmError(e.message);}
     finally{setCrmLoading(false);}
   }
 
   async function loadCrmCrossReference(){
     setCrmCrossLoading(true);setCrmError(null);
     try{
-      // 1. HubSpot phones
-      var hsPhones=extractHubSpotPhones(crmContacts);
+      // 1. HubSpot phones — fetch ALL contacts for full cross-reference
+      var allCrmContacts=await fetchAllContacts();
+      var hsPhones=extractHubSpotPhones(allCrmContacts);
 
       // 2. MeuGrupoVip phones — reuse gruposEntryLeads if available
       var grupoPhones={};
@@ -803,7 +835,7 @@ export default function Dashboard(){
   if(loadError) return (<div style={{background:C.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:font}}>
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
     <div style={{textAlign:"center",maxWidth:500}}>
-      <div style={{width:48,height:48,borderRadius:"50%",background:"#FEF2F2",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}><span style={{fontSize:24,color:C.red}}>!</span></div>
+      <div style={{width:48,height:48,borderRadius:"50%",background:C.lRed,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}><span style={{fontSize:24,color:C.red}}>!</span></div>
       <div style={{fontSize:18,fontWeight:700,color:C.text,marginBottom:6}}>Error al cargar datos</div>
       <div style={{fontSize:14,color:C.muted,lineHeight:1.6,marginBottom:16}}>{loadError}</div>
       <button onClick={function(){setLoadError(null);setDbLoading(true);fetchThreadsFromPostHog(stepFilter).then(function(threads){var csvRows=expandThreadMessages(threads);setRawRows(csvRows);var result=processCSVRows(csvRows,templateConfig,regionFilter);applyResult(result);setDbLoading(false);}).catch(function(e){setLoadError(e.message||"Error");setDbLoading(false);});}} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font}}>Reintentar</button>
@@ -828,50 +860,55 @@ export default function Dashboard(){
       return <MeetModal leads={filtered} mode={mode} onClose={function(){setTopicModal(null);}} title={(tkw?tkw.e+" ":"")+"T\u00F3pico: "+topicModal+" ("+filtered.length+" leads)"}/>;
     })()}
 
-    <div style={{background:"linear-gradient(135deg, #FFF 0%, #F8FAFF 100%)",borderBottom:"1px solid "+C.border,padding:"16px 28px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+    <div style={{background:"linear-gradient(135deg, "+C.gradFrom+" 0%, "+C.gradTo+" 100%)",borderBottom:"1px solid "+C.border,padding:"16px 28px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
       <div style={{display:"flex",alignItems:"center",gap:14}}>
         <h1 style={{margin:0,fontSize:22,fontWeight:900}}><span style={{background:"linear-gradient(135deg, #2563EB, #7C3AED)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>YAGO</span> <span style={{color:C.muted,fontWeight:400}}>KPI{"'"}s</span></h1>
         <div style={{width:1,height:24,background:C.border}}/>
-        <span style={{fontSize:13,color:C.muted,background:"#F3F4F6",padding:"4px 10px",borderRadius:6,fontWeight:600}}>{headerInfo.dateRange} {"\u00B7"} {tc} leads</span>
+        <span style={{fontSize:13,color:C.muted,background:C.rowAlt,padding:"4px 10px",borderRadius:6,fontWeight:600}}>{headerInfo.dateRange} {"\u00B7"} {tc} leads</span>
       </div>
-      <div style={{display:"flex",gap:2,background:"#F3F4F6",borderRadius:10,padding:3,boxShadow:"inset 0 1px 2px #00000008"}}>
-        {[{id:"overview",l:"Resumen"},{id:"engagement",l:"Engagement"},{id:"templates",l:"Templates",ib:true},{id:"grupos",l:"Grupos"},{id:"crm",l:"CRM"},{id:"lookup",l:"Buscar"},].map(function(t){
-          var disabled=t.ib&&panel==="inbound";
-          var active=tab===t.id&&!disabled;
-          return <button key={t.id} onClick={disabled?undefined:function(){setTab(t.id);}} style={{background:active?C.card:"transparent",color:disabled?C.border:active?C.text:C.muted,border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:disabled?"default":"pointer",fontFamily:font,boxShadow:active?"0 1px 3px #0000000f":"none"}}>{t.l}</button>;
-        })}
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <div style={{display:"flex",gap:2,background:C.rowAlt,borderRadius:10,padding:3,boxShadow:"inset 0 1px 2px #00000008"}}>
+          {[{id:"overview",l:"Resumen"},{id:"engagement",l:"Engagement"},{id:"templates",l:"Templates",ib:true},{id:"grupos",l:"Grupos"},{id:"crm",l:"CRM"},{id:"lookup",l:"Buscar"},].map(function(t){
+            var disabled=t.ib&&panel==="inbound";
+            var active=tab===t.id&&!disabled;
+            return <button key={t.id} onClick={disabled?undefined:function(){setTab(t.id);}} style={{background:active?C.card:"transparent",color:disabled?C.border:active?C.text:C.muted,border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:disabled?"default":"pointer",fontFamily:font,boxShadow:active?"0 1px 3px #0000000f":"none"}}>{t.l}</button>;
+          })}
+        </div>
+        <button onClick={function(){var next=!darkMode;setDarkMode(next);try{localStorage.setItem("yago_dark",next?"1":"0");}catch(e){}}} title={darkMode?"Modo claro":"Modo oscuro"} style={{background:"none",border:"1px solid "+C.border,borderRadius:8,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:C.muted,flexShrink:0}}>
+          {darkMode?<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>}
+        </button>
       </div>
     </div>
 
     <div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
-      <div style={{display:"flex",background:"#F3F4F6",borderRadius:10,padding:3,gap:2,boxShadow:"inset 0 1px 2px #00000008"}}>
+      <div style={{display:"flex",background:C.rowAlt,borderRadius:10,padding:3,gap:2,boxShadow:"inset 0 1px 2px #00000008"}}>
         {[{id:"outbound",l:"Outbound",c:C.accent},{id:"inbound",l:"Inbound",c:"#7C3AED"}].map(function(p){var a=panel===p.id;return <button key={p.id} onClick={function(){switchPanel(p.id);}} style={{background:a?p.c:"transparent",color:a?"#fff":C.muted,border:"none",borderRadius:8,padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>{p.l}</button>;})}
       </div>
-      {panel==="outbound" && <div style={{display:"flex",background:"#F3F4F6",borderRadius:10,padding:3,gap:2,boxShadow:"inset 0 1px 2px #00000008"}}>
+      {panel==="outbound" && <div style={{display:"flex",background:C.rowAlt,borderRadius:10,padding:3,gap:2,boxShadow:"inset 0 1px 2px #00000008"}}>
         {[{l:"Todas",c:C.accent},{l:"Reales",c:C.green}].map(function(o,i){var a=mode===i;return <button key={i} onClick={function(){setMode(i);}} style={{background:a?o.c:"transparent",color:a?"#fff":C.muted,border:"none",borderRadius:8,padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>{o.l}</button>;})}
       </div>}
       <div style={{width:1,height:24,background:C.border}}/>
-      {panel==="outbound" && <select value={stepFilter||""} onChange={function(ev){var v=ev.target.value;setStepFilter(v||null);setDateFrom("");setDateTo("");}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:"#F9FAFB",color:C.text,fontFamily:font,cursor:"pointer"}}>
+      {panel==="outbound" && <select value={stepFilter||""} onChange={function(ev){var v=ev.target.value;setStepFilter(v||null);setDateFrom("");setDateTo("");}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
         <option value="">Todos los steps</option>
         <option value="1">Step 1 (D+0)</option>
         <option value="2">Step 2 (D+1)</option>
         <option value="3">Step 3 (D+3)</option>
         <option value="4">Step 4 (D+5)</option>
       </select>}
-      <select value={regionFilter} onChange={onRegionChange} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:"#F9FAFB",color:C.text,fontFamily:font,cursor:"pointer"}}>
+      <select value={regionFilter} onChange={onRegionChange} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
         <option value="all">LATAM + BR</option>
         <option value="es">LATAM (ES)</option>
         <option value="pt">Brasil (PT)</option>
       </select>
       <div style={{display:"flex",alignItems:"center",gap:6}}>
         <span style={{fontSize:12,color:C.muted}}>De</span>
-        <input type="date" value={dateFrom} onChange={onDateFromChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:"#F9FAFB",outline:"none"}}/>
+        <input type="date" value={dateFrom} onChange={onDateFromChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:6}}>
         <span style={{fontSize:12,color:C.muted}}>Hasta</span>
-        <input type="date" value={dateTo} onChange={onDateToChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:"#F9FAFB",outline:"none"}}/>
+        <input type="date" value={dateTo} onChange={onDateToChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
       </div>
-      {(dateFrom||dateTo) && <button onClick={clearDateFilter} style={{background:"#FEF2F2",color:C.red,border:"1px solid #FECACA",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Limpiar</button>}
+      {(dateFrom||dateTo) && <button onClick={clearDateFilter} style={{background:C.lRed,color:C.red,border:"1px solid "+C.redBorder,borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Limpiar</button>}
       {(dateFrom||dateTo) && <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6}}>{tc} leads en período</span>}
     </div>
 
@@ -884,21 +921,21 @@ export default function Dashboard(){
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))",gap:14,marginBottom:22}}>
             <Cd onClick={function(){setShowA(true);}} style={{cursor:"pointer",border:"2px solid "+C.purple+"44",position:"relative",overflow:"hidden"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4AC}"}</div>
-              <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4AC}"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Leads Inbound</span><InfoTip data={TIPS.contactados}/></div>
+              <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4AC}"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Leads Inbound</span><InfoTip dark={_isDark} data={TIPS.contactados}/></div>
               <div style={{fontSize:36,fontWeight:900,fontFamily:mono,marginTop:6,lineHeight:1}}>{ix.uniqueLeadCount}</div>
               <div style={{fontSize:13,color:C.muted,marginTop:4}}>{lpd}/d{"\u00ED"}a {"\u00B7"} {tc} conversaciones</div>
               <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:6}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
             </Cd>
             <Cd style={{position:"relative",overflow:"hidden"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4CA}"}</div>
-              <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4CA}"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Engagement</span><InfoTip data={TIPS.engagementDistribucion}/></div>
+              <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4CA}"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Engagement</span><InfoTip dark={_isDark} data={TIPS.engagementDistribucion}/></div>
               <div style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.accent,marginTop:6,lineHeight:1}}>{d.resp>0?((ix.engagedTotal/d.resp)*100).toFixed(1):"0"}%</div>
               <div style={{fontSize:13,color:C.muted,marginTop:4}}>{ix.engagedTotal} con 2+ msgs</div>
               <div style={{fontSize:12,fontWeight:600,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}><span style={{color:C.red}}>{ix.depthCounts.rebote} rebotes</span> {"\u00B7"} <span style={{color:C.accent}}>{ix.avgDepth} msgs/conv</span></div>
             </Cd>
             <Cd style={{position:"relative",overflow:"hidden"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u2705"}</div>
-              <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Conversi{"\u00F3"}n Signup</span><InfoTip data={TIPS.conversionSignup}/></div>
+              <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Conversi{"\u00F3"}n Signup</span><InfoTip dark={_isDark} data={TIPS.conversionSignup}/></div>
               <div style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.green,marginTop:6,lineHeight:1}}>{ix.signupLinkCount}</div>
               <div style={{fontSize:13,color:C.muted,marginTop:4}}>recibieron link crear cuenta</div>
               <div style={{fontSize:12,color:C.green,fontWeight:600,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{ix.signupCount} recibieron Step 1 ({ix.uniqueLeadCount>0?((ix.signupCount/ix.uniqueLeadCount)*100).toFixed(1):"0"}%)</div>
@@ -909,7 +946,7 @@ export default function Dashboard(){
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:22}}>
             <Cd><Sec tipKey="funnel">Embudo de Conversi&oacute;n</Sec>
               {funnel.map(function(f,i){var base=funnel[0].v||1;var w=Math.max((f.v/base)*100,3);var prev=i>0?((f.v/(funnel[i-1].v||1))*100).toFixed(0):null;
-                return (<div key={i} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:C.sub,fontWeight:500}}><span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:6,background:f.c+"18",color:f.c,fontSize:11,fontWeight:800,marginRight:6}}>{i+1}</span>{f.n}</span><div><span style={{fontSize:17,fontWeight:800,fontFamily:mono}}>{f.v}</span><span style={{fontSize:13,color:C.muted,marginLeft:6}}>{(f.v/base*100).toFixed(1)}%</span>{prev && <span style={{fontSize:12,color:parseFloat(prev)>=50?C.green:parseFloat(prev)>=20?C.yellow:C.red,marginLeft:6}}>({prev}%{"\u2193"})</span>}</div></div><div style={{height:24,background:"#F3F4F6",borderRadius:6,overflow:"hidden"}}><div style={{height:"100%",width:w+"%",background:"linear-gradient(90deg, "+f.c+" 0%, "+f.c+"CC 100%)",borderRadius:6,transition:"width 0.5s ease"}}/></div></div>);})}
+                return (<div key={i} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:C.sub,fontWeight:500}}><span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:6,background:f.c+"18",color:f.c,fontSize:11,fontWeight:800,marginRight:6}}>{i+1}</span>{f.n}</span><div><span style={{fontSize:17,fontWeight:800,fontFamily:mono}}>{f.v}</span><span style={{fontSize:13,color:C.muted,marginLeft:6}}>{(f.v/base*100).toFixed(1)}%</span>{prev && <span style={{fontSize:12,color:parseFloat(prev)>=50?C.green:parseFloat(prev)>=20?C.yellow:C.red,marginLeft:6}}>({prev}%{"\u2193"})</span>}</div></div><div style={{height:24,background:C.rowAlt,borderRadius:6,overflow:"hidden"}}><div style={{height:"100%",width:w+"%",background:"linear-gradient(90deg, "+f.c+" 0%, "+f.c+"CC 100%)",borderRadius:6,transition:"width 0.5s ease"}}/></div></div>);})}
             </Cd>
 
             {/* Topics ranking */}
@@ -925,7 +962,7 @@ export default function Dashboard(){
                         <span style={{fontSize:14,fontWeight:700}}>{tp.t}</span>
                         <span style={{fontSize:14,fontWeight:800,fontFamily:mono,color:bC}}>{tp.n} <span style={{fontSize:12,fontWeight:600,color:C.muted}}>({tp.p}%)</span></span>
                       </div>
-                      <div style={{height:6,background:"#F3F4F6",borderRadius:3,overflow:"hidden"}}>
+                      <div style={{height:6,background:C.rowAlt,borderRadius:3,overflow:"hidden"}}>
                         <div style={{height:"100%",width:tp.p+"%",background:bC,borderRadius:3,opacity:0.7}}/>
                       </div>
                     </div>
@@ -944,12 +981,30 @@ export default function Dashboard(){
             var ofertaCount=d.mc;
             var ofertaVsResp=respCount>0?((ofertaCount/respCount)*100).toFixed(1):"0";
             var ofertaVsTotal=tc>0?((ofertaCount/tc)*100).toFixed(1):"0";
+            // Filter HS meetings by active date period
+            var periodMeetPhones=null;
+            if(crmMeetings.length>0&&crmContacts.length>0){
+              var fromD2=dateFrom?new Date(dateFrom+"T00:00:00"):null;
+              var toD2=dateTo?new Date(dateTo+"T23:59:59"):null;
+              var filtMeetings=crmMeetings;
+              if(fromD2||toD2){
+                filtMeetings=crmMeetings.filter(function(m){
+                  var st=m.properties&&m.properties.hs_meeting_start_time;
+                  if(!st)return false;var md=new Date(st);
+                  if(fromD2&&md<fromD2)return false;
+                  if(toD2&&md>toD2)return false;
+                  return true;
+                });
+              }
+              periodMeetPhones=getMeetingContactPhones(filtMeetings,crmContacts);
+            }
+            // Cross only leads with ml:true (received meeting link) against HS meetings
             var actualMeetCount=0;
-            if(crmMeetingPhones){
-              var contactedSet=allContactedPhones;
-              var meetPhoneKeys=Object.keys(crmMeetingPhones);
-              for(var ami=0;ami<meetPhoneKeys.length;ami++){
-                if(contactedSet[meetPhoneKeys[ami]])actualMeetCount++;
+            if(periodMeetPhones){
+              var ofertaLeadsArr=meetings.filter(function(l){return l.ml;});
+              for(var ami=0;ami<ofertaLeadsArr.length;ami++){
+                var olPhone=(ofertaLeadsArr[ami].p||"").replace(/\D/g,"");
+                if(olPhone&&periodMeetPhones[olPhone])actualMeetCount++;
               }
             }
             var actualVsOferta=ofertaCount>0?((actualMeetCount/ofertaCount)*100).toFixed(1):"0";
@@ -957,24 +1012,24 @@ export default function Dashboard(){
             return (
           <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:12,marginBottom:22}}>
             {/* Card 1: Contactados */}
-            <Cd onClick={function(){setShowA(true);}} style={{position:"relative",overflow:"hidden",cursor:"pointer",border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, #FFF 0%, #EFF6FF 100%)"}}>
-              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4E9}"}</div>
+            <Cd onClick={function(){setShowA(true);}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, #FFF 0%, #EFF6FF 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4E9}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4E9}"}</div>
                 <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Contactados</span>
-                <InfoTip data={TIPS.contactados}/>
+                <InfoTip dark={_isDark} data={TIPS.contactados}/>
               </div>
               <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1}}>{tc}</div>
               <div style={{fontSize:13,color:C.muted,marginTop:4}}>{lpd}/d{"\u00ED"}a</div>
               <div style={{fontSize:11,color:C.accent,fontWeight:700,marginTop:6}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
             </Cd>
             {/* Card 2: Respuestas */}
-            <Cd onClick={function(){setShowA(true);}} style={{position:"relative",overflow:"hidden",cursor:"pointer",border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, #FFF 0%, #F5F3FF 100%)"}}>
-              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4CA}"}</div>
+            <Cd onClick={function(){setShowA(true);}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, #FFF 0%, #F5F3FF 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4CA}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4CA}"}</div>
                 <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Respuestas</span>
-                <InfoTip data={TIPS.respuestaRate}/>
+                <InfoTip dark={_isDark} data={TIPS.respuestaRate}/>
               </div>
               <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1}}>{respCount}</div>
               <div style={{fontSize:13,color:C.muted,marginTop:4}}>{respRate}% de los contactados</div>
@@ -982,25 +1037,25 @@ export default function Dashboard(){
               <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:4}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
             </Cd>
             {/* Card 3: Oferta de Reunión */}
-            <Cd onClick={function(){setShowM(true);}} style={{position:"relative",overflow:"hidden",cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, #FFF 0%, #FFF5F7 100%)"}}>
-              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4C5}"}</div>
+            <Cd onClick={function(){setShowM(true);}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, #FFF 0%, #FFF5F7 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4C5}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.pink+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4C5}"}</div>
                 <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Oferta Reuni{"\u00F3"}n</span>
-                <InfoTip data={TIPS.ofertaReunion}/>
+                <InfoTip dark={_isDark} data={TIPS.ofertaReunion}/>
               </div>
               <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1}}>{ofertaCount}</div>
               <div style={{fontSize:13,color:C.muted,marginTop:4}}>{ofertaVsResp}% de respuestas {"\u00B7"} {ofertaVsTotal}% del total</div>
               <div style={{fontSize:11,color:C.pink,fontWeight:700,marginTop:6}}>{"\u{1F4C5} Ver contactos \u2192"}</div>
             </Cd>
             {/* Card 4: Reunión Confirmada (HubSpot cross-reference) */}
-            <Cd style={{position:"relative",overflow:"hidden",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, #FFF 0%, #ECFDF5 100%)"}}>
-              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u2705"}</div>
+            <Cd style={{position:"relative",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, #FFF 0%, #ECFDF5 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u2705"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div>
                 <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Reuni{"\u00F3"}n Confirmada</span>
               </div>
-              {crmMeetingPhones?(<>
+              {periodMeetPhones?(<>
                 <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.green}}>{actualMeetCount}</div>
                 <div style={{fontSize:13,color:C.muted,marginTop:4}}>{actualVsOferta}% de ofertas {"\u00B7"} {actualVsTotal}% del total</div>
                 <div style={{fontSize:11,color:C.muted,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>Cruce con HubSpot Meetings</div>
@@ -1014,11 +1069,25 @@ export default function Dashboard(){
           })()}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:22}}>
             <Cd><Sec tipKey="funnel">Embudo de Conversi&oacute;n</Sec>
-              {funnel.map(function(f,i){var w=Math.max((f.v/(tc||1))*100,4);var prev=i>0?((f.v/(funnel[i-1].v||1))*100).toFixed(0):null;
-                return (<div key={i} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:C.sub,fontWeight:500}}><span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:6,background:f.c+"18",color:f.c,fontSize:11,fontWeight:800,marginRight:6}}>{i+1}</span>{f.n}</span><div><span style={{fontSize:17,fontWeight:800,fontFamily:mono}}>{f.v}</span><span style={{fontSize:13,color:C.muted,marginLeft:6}}>{(f.v/(tc||1)*100).toFixed(1)}%</span>{prev && <span style={{fontSize:12,color:C.red,marginLeft:6}}>({prev}%{"\u2193"})</span>}</div></div><div style={{height:24,background:"#F3F4F6",borderRadius:6,overflow:"hidden"}}><div style={{height:"100%",width:w+"%",background:"linear-gradient(90deg, "+f.c+" 0%, "+f.c+"CC 100%)",borderRadius:6,transition:"width 0.5s ease"}}/></div></div>);})}
+              {(function(){
+                // Filter HS meetings by active date period for funnel
+                var actualMC=0;
+                if(crmMeetings.length>0&&crmContacts.length>0){
+                  var fromD3=dateFrom?new Date(dateFrom+"T00:00:00"):null;
+                  var toD3=dateTo?new Date(dateTo+"T23:59:59"):null;
+                  var filtM2=crmMeetings;
+                  if(fromD3||toD3){filtM2=crmMeetings.filter(function(m){var st=m.properties&&m.properties.hs_meeting_start_time;if(!st)return false;var md=new Date(st);if(fromD3&&md<fromD3)return false;if(toD3&&md>toD3)return false;return true;});}
+                  var fMeetPhones=getMeetingContactPhones(filtM2,crmContacts);
+                  var fOferta=meetings.filter(function(l){return l.ml;});
+                  for(var mi2=0;mi2<fOferta.length;mi2++){var fp=(fOferta[mi2].p||"").replace(/\D/g,"");if(fp&&fMeetPhones[fp])actualMC++;}
+                }
+                var funnelFull=funnel.concat([{n:"Reuni\u00F3n Confirmada",v:actualMC,c:C.green}]);
+                return funnelFull.map(function(f,i){var w=Math.max((f.v/(tc||1))*100,4);var prev=i>0?((f.v/(funnelFull[i-1].v||1))*100).toFixed(0):null;
+                return (<div key={i} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:C.sub,fontWeight:500}}><span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:6,background:f.c+"18",color:f.c,fontSize:11,fontWeight:800,marginRight:6}}>{i+1}</span>{f.n}</span><div><span style={{fontSize:17,fontWeight:800,fontFamily:mono}}>{f.v}</span><span style={{fontSize:13,color:C.muted,marginLeft:6}}>{(f.v/(tc||1)*100).toFixed(1)}%</span>{prev && <span style={{fontSize:12,color:parseFloat(prev)>=50?C.green:parseFloat(prev)>=20?C.yellow:C.red,marginLeft:6}}>({prev}%{"\u2193"})</span>}</div></div><div style={{height:24,background:C.rowAlt,borderRadius:6,overflow:"hidden"}}><div style={{height:"100%",width:w+"%",background:"linear-gradient(90deg, "+f.c+" 0%, "+f.c+"CC 100%)",borderRadius:6,transition:"width 0.5s ease"}}/></div></div>);});
+              })()}
             </Cd>
             <Cd><Sec tipKey="yagoVsMercado">Yago vs Mercado</Sec>
-              {chBench.map(function(b,i){return (<div key={i} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:b.y?C.text:C.muted,fontWeight:b.y?700:400}}>{b.ch}</span><span style={{fontSize:15,fontWeight:800,color:b.y?C.accent:C.muted,fontFamily:mono}}>{b.r}%</span></div><div style={{height:8,background:"#F3F4F6",borderRadius:4}}><div style={{height:"100%",width:(b.r/45)*100+"%",background:b.y?C.accent:C.muted,borderRadius:4,opacity:b.y?0.8:0.3}}/></div></div>);})}
+              {chBench.map(function(b,i){return (<div key={i} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:b.y?C.text:C.muted,fontWeight:b.y?700:400}}>{b.ch}</span><span style={{fontSize:15,fontWeight:800,color:b.y?C.accent:C.muted,fontFamily:mono}}>{b.r}%</span></div><div style={{height:8,background:C.rowAlt,borderRadius:4}}><div style={{height:"100%",width:(b.r/45)*100+"%",background:b.y?C.accent:C.muted,borderRadius:4,opacity:b.y?0.8:0.3}}/></div></div>);})}
             </Cd>
           </div>
         </>)}
@@ -1032,11 +1101,8 @@ export default function Dashboard(){
         <Cd style={{marginTop:22,marginBottom:22,overflowX:"auto"}}><Sec tipKey="benchmarkComparacion">{"Comparaci\u00F3n vs Benchmarks (Warm Leads)"}</Sec>
           <div style={{fontSize:13,color:C.muted,marginBottom:14}}>{"Leads que se registraron en la plataforma = warm/opt-in. Benchmarks: Twilio, Meta, Respond.io, ChatArchitect (2024-2025)."}</div>
           <table style={{width:"100%",borderCollapse:"separate",borderSpacing:"0 4px",fontSize:14}}><thead><tr>{["M\u00E9trica","Yago","Benchmark","\u0394",""].map(function(h,i){return <th key={i} style={{padding:"10px 14px",textAlign:"left",color:C.muted,fontWeight:700,fontSize:12,textTransform:"uppercase",borderBottom:"2px solid "+C.border}}>{h}</th>;})}</tr></thead>
-          <tbody>{bTable.map(function(r,i){return(<tr key={i} style={{background:i%2===0?"#F9FAFB":"transparent"}}><td style={{padding:"12px 14px",fontWeight:600,borderRadius:"8px 0 0 8px"}}>{r.m}</td><td style={{padding:"12px 14px",fontWeight:800,fontFamily:mono,fontSize:15}}>{r.y}</td><td style={{padding:"12px 14px",color:C.muted}}>{r.b}</td><td style={{padding:"12px 14px",fontWeight:700,fontFamily:mono,color:r.s?C.green:C.red}}>{r.d}</td><td style={{padding:"12px 14px",borderRadius:"0 8px 8px 0"}}><Bd color={r.s?C.green:C.red}>{r.s?"\u2713 ARRIBA":"\u2717 ABAJO"}</Bd></td></tr>);})}</tbody></table>
+          <tbody>{bTable.map(function(r,i){return(<tr key={i} style={{background:i%2===0?C.rowBg:"transparent"}}><td style={{padding:"12px 14px",fontWeight:600,borderRadius:"8px 0 0 8px"}}>{r.m}</td><td style={{padding:"12px 14px",fontWeight:800,fontFamily:mono,fontSize:15}}>{r.y}</td><td style={{padding:"12px 14px",color:C.muted}}>{r.b}</td><td style={{padding:"12px 14px",fontWeight:700,fontFamily:mono,color:r.s?C.green:C.red}}>{r.d}</td><td style={{padding:"12px 14px",borderRadius:"0 8px 8px 0"}}><Bd color={r.s?C.green:C.red}>{r.s?"\u2713 ARRIBA":"\u2717 ABAJO"}</Bd></td></tr>);})}</tbody></table>
         </Cd>
-        <Cd><div style={{fontSize:18,fontWeight:900,marginBottom:18,display:"flex",alignItems:"center"}}>{"\u{1F4CB} Veredicto"}<InfoTip data={TIPS.veredicto}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:20}}>
-          {[{t:"\u2713 FORTALEZAS",c:C.green,i:["Resp. <6 min \u2014 2.5x mejor que benchmark","75% engagement medio o alto","28 msgs/conv \u2014 conversaciones profundas","Cada template captura leads nuevos"]},{t:"\u2717 GAPS",c:C.red,i:["23.6% real vs 40-60% warm benchmark","24.6% auto-replies inflando m\u00E9tricas","Caso \u00C9xito solo 4% de la base","Solo 3% llega a reuni\u00F3n (bench: 20-30%)"]},{t:"\u2192 ACCIONES",c:C.yellow,i:["Filtrar auto-replies","Escalar Caso de \u00C9xito","Mover CTA reuni\u00F3n a MSG 3","Enviar 14-18h"]}].map(function(col,i){return(<div key={i}><div style={{fontSize:14,color:col.c,fontWeight:800,marginBottom:10}}>{col.t}</div>{col.i.map(function(item,j){return <div key={j} style={{fontSize:14,color:C.sub,lineHeight:2,paddingLeft:12,borderLeft:"3px solid "+col.c+"33"}}>{item}</div>;})}</div>);})}
-        </div></Cd>
         </>)}
       </>);})()}
 
@@ -1051,9 +1117,9 @@ export default function Dashboard(){
         if(isInb&&ix){
           var depthItems=[
             {k:"rebote",n:"Rebote: 1 msg",c:C.red,bg:"#FEF2F2",ic:"\u{1F4A4}"},
-            {k:"corta",n:"Corta: 2-4 msgs",c:C.yellow,bg:"#FFFBEB",ic:"\u{1F610}"},
+            {k:"corta",n:"Corta: 2-4 msgs",c:C.yellow,bg:C.lYellow,ic:"\u{1F610}"},
             {k:"media",n:"Media: 5-9 msgs",c:C.accent,bg:"#EFF6FF",ic:"\u{1F44D}"},
-            {k:"profunda",n:"Profunda: 10+ msgs",c:C.green,bg:"#ECFDF5",ic:"\u{1F525}"}
+            {k:"profunda",n:"Profunda: 10+ msgs",c:C.green,bg:C.lGreen,ic:"\u{1F525}"}
           ];
           var depthLabels={profunda:"Profunda (10+)",media:"Media (5-9)",corta:"Corta (2-4)",rebote:"Rebote (1 msg)"};
           /* Conversion step helpers */
@@ -1083,10 +1149,10 @@ export default function Dashboard(){
                     <div style={{display:"flex",alignItems:"baseline",gap:8}}>
                       <span style={{fontSize:20,fontWeight:900,fontFamily:mono,color:st.c}}>{st.v}</span>
                       <span style={{fontSize:12,color:C.muted}}>({absRate}%)</span>
-                      {stepRate && <span style={{fontSize:12,fontWeight:700,color:parseFloat(stepRate)>=50?C.green:parseFloat(stepRate)>=20?C.yellow:C.red,background:parseFloat(stepRate)>=50?"#ECFDF5":parseFloat(stepRate)>=20?"#FFFBEB":"#FEF2F2",padding:"2px 8px",borderRadius:4}}>{stepRate}% del paso anterior</span>}
+                      {stepRate && <span style={{fontSize:12,fontWeight:700,color:parseFloat(stepRate)>=50?C.green:parseFloat(stepRate)>=20?C.yellow:C.red,background:parseFloat(stepRate)>=50?C.lGreen:parseFloat(stepRate)>=20?C.lYellow:"#FEF2F2",padding:"2px 8px",borderRadius:4}}>{stepRate}% del paso anterior</span>}
                     </div>
                   </div>
-                  <div style={{height:18,background:"#F3F4F6",borderRadius:6,overflow:"hidden"}}>
+                  <div style={{height:18,background:C.rowAlt,borderRadius:6,overflow:"hidden"}}>
                     <div style={{height:"100%",width:w+"%",background:st.c,borderRadius:6,opacity:0.8,transition:"width 0.3s"}}/>
                   </div>
                 </div>);
@@ -1109,7 +1175,7 @@ export default function Dashboard(){
                   );})
                   }
                 </div>
-                <div style={{display:"flex",gap:0,height:12,borderRadius:6,overflow:"hidden",background:"#F3F4F6"}}>
+                <div style={{display:"flex",gap:0,height:12,borderRadius:6,overflow:"hidden",background:C.rowAlt}}>
                   {depthItems.map(function(e,i){var w=parseFloat((d.eng[e.k]||{p:"0"}).p)||0;return w>0?<div key={i} style={{width:w+"%",background:e.c,height:"100%",transition:"width 0.3s"}} title={depthLabels[e.k]+": "+w+"%"}/>:null;})
                   }
                 </div>
@@ -1120,7 +1186,7 @@ export default function Dashboard(){
               <div style={{display:"flex",flexDirection:"column",gap:16}}>
                 <Cd style={{background:C.lBlue,border:"1px solid "+C.accent+"20",flex:1}}>
                   <div style={{fontSize:40,marginBottom:6,opacity:0.8}}>{"\u{1F504}"}</div>
-                  <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1,display:"flex",alignItems:"center"}}>Leads Recurrentes<InfoTip data={TIPS.leadsRecurrentes}/></div>
+                  <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1,display:"flex",alignItems:"center"}}>Leads Recurrentes<InfoTip dark={_isDark} data={TIPS.leadsRecurrentes}/></div>
                   <div style={{display:"flex",alignItems:"baseline",gap:6,marginTop:4}}>
                     <span style={{fontSize:32,fontWeight:900,fontFamily:mono,color:C.accent}}>{ix.multiDayCount}</span>
                     <span style={{fontSize:14,fontWeight:700,color:C.accent}}>({d.resp>0?((ix.multiDayCount/d.resp)*100).toFixed(1):"0"}%)</span>
@@ -1129,7 +1195,7 @@ export default function Dashboard(){
                 </Cd>
                 <Cd style={{background:C.lGreen,border:"1px solid "+C.green+"20",flex:1}}>
                   <div style={{fontSize:40,marginBottom:6,opacity:0.8}}>{"\u{1F3AF}"}</div>
-                  <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1,display:"flex",alignItems:"center"}}>Con Resultado<InfoTip data={TIPS.conResultado}/></div>
+                  <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1,display:"flex",alignItems:"center"}}>Con Resultado<InfoTip dark={_isDark} data={TIPS.conResultado}/></div>
                   <div style={{display:"flex",alignItems:"baseline",gap:6,marginTop:4}}>
                     <span style={{fontSize:32,fontWeight:900,fontFamily:mono,color:C.green}}>{ix.outcomeCount}</span>
                     <span style={{fontSize:14,fontWeight:700,color:C.green}}>({d.resp>0?((ix.outcomeCount/d.resp)*100).toFixed(1):"0"}%)</span>
@@ -1215,7 +1281,7 @@ export default function Dashboard(){
           ].map(function(k,i){return (
             <Cd key={i} style={{position:"relative",overflow:"hidden"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.06}}>{k.ic}</div>
-              <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1,display:"flex",alignItems:"center"}}>{k.l}{k.tip && <InfoTip data={TIPS[k.tip]}/>}</div>
+              <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1,display:"flex",alignItems:"center"}}>{k.l}{k.tip && <InfoTip dark={_isDark} data={TIPS[k.tip]}/>}</div>
               <div style={{fontSize:34,fontWeight:900,fontFamily:mono,color:k.c,marginTop:8,lineHeight:1}}>{k.v}</div>
               <div style={{fontSize:13,color:C.muted,marginTop:6}}>{k.sub}</div>
             </Cd>
@@ -1228,9 +1294,9 @@ export default function Dashboard(){
           <Sec tipKey="engagementDistribucion">{"Distribuci\u00F3n de Engagement ("+d.resp+" leads)"}</Sec>
           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:18}}>
             {[
-              {k:"alto",n:"Alto",c:C.green,bg:"#ECFDF5"},
+              {k:"alto",n:"Alto",c:C.green,bg:C.lGreen},
               {k:"medio",n:"Medio",c:C.accent,bg:"#EFF6FF"},
-              {k:"bajo",n:"Bajo",c:C.yellow,bg:"#FFFBEB"},
+              {k:"bajo",n:"Bajo",c:C.yellow,bg:C.lYellow},
               {k:"minimo",n:"M\u00EDnimo",c:C.red,bg:"#FEF2F2"}
             ].map(function(e,i){var eng=d.eng[e.k];return (
               <div key={i} style={{background:e.bg,borderRadius:12,padding:"16px 14px",textAlign:"center",border:"1px solid "+e.c+"20"}}>
@@ -1242,7 +1308,7 @@ export default function Dashboard(){
             );})
             }
           </div>
-          <div style={{display:"flex",gap:0,height:14,borderRadius:7,overflow:"hidden",background:"#F3F4F6"}}>
+          <div style={{display:"flex",gap:0,height:14,borderRadius:7,overflow:"hidden",background:C.rowAlt}}>
             {[
               {k:"alto",c:C.green},{k:"medio",c:C.accent},{k:"bajo",c:C.yellow},{k:"minimo",c:C.red}
             ].map(function(e,i){var w=parseFloat(d.eng[e.k].p)||0;return w>0?<div key={i} style={{width:w+"%",background:e.c,height:"100%",transition:"width 0.3s"}} title={engLabels[e.k]+": "+w+"%"}/>:null;})
@@ -1266,7 +1332,7 @@ export default function Dashboard(){
                     </div>
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{flex:1,height:8,background:"#F3F4F6",borderRadius:4,overflow:"hidden"}}>
+                    <div style={{flex:1,height:8,background:C.rowAlt,borderRadius:4,overflow:"hidden"}}>
                       <div style={{height:"100%",width:tp.p+"%",background:bC,borderRadius:4,opacity:0.8}}/>
                     </div>
                     <span style={{fontSize:15,fontWeight:800,fontFamily:mono,color:bC,minWidth:48,textAlign:"right"}}>{tp.p}%</span>
@@ -1315,11 +1381,13 @@ export default function Dashboard(){
         function _gts(name){if(!_abD||!_abD.tpl)return{sent:0,resp:0,rate:"0.0%"};for(var i=0;i<_abD.tpl.length;i++){if(_abD.tpl[i].name===name||_abD.tpl[i].key===name)return _abD.tpl[i];}return{sent:0,resp:0,rate:"0.0%"};}
         function _isH(n){var e=templateConfig[n];return e&&e.hidden;}
         function _so(n){var e=templateConfig[n];return(e&&e.sort_order)||0;}
+        function _getQ(n){var e=templateConfig[n];return(e&&e.qualification)||_deduceQual(n);}
+        var _qualGroups=[{key:"calificado",label:"Calificados",color:C.green},{key:"no_calificado",label:"No Calificados",color:C.orange},{key:"general",label:"General",color:C.accent}];
         function _abCard(gId){
           var pair=_abGrp[gId];var stA=_gts(pair[0]);var stB=_gts(pair[1]);
           var rA=parseFloat(stA.rate)||0;var rB=parseFloat(stB.rate)||0;
           var diff=Math.abs(rA-rB).toFixed(1);var w=rA>rB?0:(rB>rA?1:-1);var mx=Math.max(rA,rB,1);
-          return (<div key={gId} style={{background:"#FFF",border:"1px solid "+C.purple+"33",borderRadius:14,padding:0,overflow:"hidden"}}>
+          return (<div key={gId} style={{background:C.inputBg,border:"1px solid "+C.purple+"33",borderRadius:14,padding:0,overflow:"hidden"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 20px",background:C.lPurple,borderBottom:"1px solid "+C.purple+"22"}}>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 <span style={{fontSize:15,fontWeight:800,color:C.purple}}>Test A/B</span>
@@ -1339,7 +1407,7 @@ export default function Dashboard(){
                     <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Respuestas</div><div style={{fontSize:18,fontWeight:800,color:C.text,fontFamily:mono}}>{st.resp||0}</div></div>
                     <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Tasa</div><div style={{fontSize:18,fontWeight:800,color:isW?C.green:C.text,fontFamily:mono}}>{st.rate||"0.0%"}</div></div>
                   </div>
-                  <div style={{background:"#F3F4F6",borderRadius:6,height:8,overflow:"hidden"}}>
+                  <div style={{background:C.rowAlt,borderRadius:6,height:8,overflow:"hidden"}}>
                     <div style={{height:"100%",borderRadius:6,background:isW?C.green:C.accent,width:(mx>0?(rate/mx*100):0)+"%",transition:"width 0.3s ease"}}></div>
                   </div>
                 </div>);
@@ -1351,12 +1419,14 @@ export default function Dashboard(){
         return (<>
         {d.tplByStep ? (function(){
           var stepKeys=Object.keys(d.tplByStep).sort(function(a,b){return (d.tplByStep[a].order||99)-(d.tplByStep[b].order||99);});
+          var _renderedAb={};
           return (<>
-            <Cd style={{marginBottom:18}}><Sec tipKey="cadencia">Cadencia</Sec>
-              <div style={{display:"flex",alignItems:"center",gap:0}}>{stepKeys.map(function(sk,i){var sg=d.tplByStep[sk];var items=[];if(i>0)items.push(<div key={"sep"+i} style={{width:36,height:2,background:C.border,flexShrink:0}}/>);items.push(<div key={sk} style={{flex:1,background:sg.color+"08",border:"1px solid "+sg.color+"22",borderRadius:12,padding:"12px 8px",textAlign:"center"}}><div style={{fontSize:11,color:C.muted}}>{sg.day}</div><div style={{fontSize:17,fontWeight:800,color:sg.color,marginTop:4}}>{sg.label}</div><div style={{fontSize:12,color:C.muted}}>{sg.totalSent} enviados {"\u00B7"} {sg.templates.length} variante{sg.templates.length!==1?"s":""}</div></div>);return items;}).flat()}</div>
-            </Cd>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+C.border+"66"}}><div style={{display:"flex",alignItems:"center",gap:0,fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700}}>Performance por Step<InfoTip data={TIPS.templatePerformance}/></div><button onClick={function(){setShowTplConfig(true);}} title="Configuraci\u00F3n de templates" style={{background:"none",border:"none",cursor:"pointer",color:C.muted,padding:4,borderRadius:6,display:"flex",alignItems:"center",transition:"color 0.15s"}} onMouseEnter={function(e){e.currentTarget.style.color=C.accent;}} onMouseLeave={function(e){e.currentTarget.style.color=C.muted;}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button></div>
-            {stepKeys.map(function(sk){var sg=d.tplByStep[sk];var visTpls=sg.templates.filter(function(t){return !_isH(t.name);}).sort(function(a,b){var sa=_so(a.name);var sb=_so(b.name);if(sa!==sb)return sa-sb;return a.name.localeCompare(b.name);});var hidTpls=sg.templates.filter(function(t){return _isH(t.name);});if(visTpls.length===0&&hidTpls.length===0)return null;var rn=parseFloat(sg.totalRate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+C.border+"66"}}><div style={{display:"flex",alignItems:"center",gap:0,fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700}}>Performance por Step<InfoTip dark={_isDark} data={TIPS.templatePerformance}/></div><button onClick={function(){setShowTplConfig(true);}} title="Configuraci\u00F3n de templates" style={{background:"none",border:"none",cursor:"pointer",color:C.muted,padding:4,borderRadius:6,display:"flex",alignItems:"center",transition:"color 0.15s"}} onMouseEnter={function(e){e.currentTarget.style.color=C.accent;}} onMouseLeave={function(e){e.currentTarget.style.color=C.muted;}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button></div>
+            {stepKeys.map(function(sk){var sg=d.tplByStep[sk];var visTpls=sg.templates.filter(function(t){return !_isH(t.name);}).sort(function(a,b){var sa=_so(a.name);var sb=_so(b.name);if(sa!==sb)return sa-sb;return a.name.localeCompare(b.name);});var hidTpls=sg.templates.filter(function(t){return _isH(t.name);});
+              var stepTplNames={};for(var sti=0;sti<sg.templates.length;sti++)stepTplNames[sg.templates[sti].name]=true;
+              var stepAbKeys=_allAbKeys.filter(function(gId){if(_renderedAb[gId])return false;var pair=_abGrp[gId];return pair&&pair.length>=2&&stepTplNames[pair[0]]&&stepTplNames[pair[1]];});
+              for(var sai=0;sai<stepAbKeys.length;sai++)_renderedAb[stepAbKeys[sai]]=true;
+              if(visTpls.length===0&&hidTpls.length===0&&stepAbKeys.length===0)return null;var rn=parseFloat(sg.totalRate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;
               return (<div key={sk} style={{marginBottom:22}}>
                 <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,padding:"10px 16px",background:sg.color+"08",borderRadius:10,border:"1px solid "+sg.color+"22"}}>
                   <div style={{flex:1}}>
@@ -1368,13 +1438,35 @@ export default function Dashboard(){
                     <div style={{fontSize:13,color:C.muted}}>{sg.totalResp} de {sg.totalSent}</div>
                   </div>
                 </div>
-                {visTpls.length>0 && <div style={{display:"grid",gridTemplateColumns:visTpls.length===1?"1fr":"1fr 1fr",gap:12}}>
-                  {visTpls.map(function(t,i){var trn=parseFloat(t.rate);var tsc=trn>=20?C.green:trn>=12?C.yellow:C.red;
-                    var tplItem=d.tpl.find(function(x){return x.key===t.name;});
-                    var _tName=t.name;
-                    return (<Cd key={_tName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_tName,step:sk});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_tName||dragTpl.step!==sk)return;var fromIdx=visTpls.findIndex(function(x){return x.name===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<visTpls.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(visTpls[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={Object.assign({},{cursor:tplItem?"pointer":"grab"},dragTpl&&dragTpl.name===_tName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:15}}>{t.displayName}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span>{t.region && <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.region==="br"?"#ECFDF5":"#EFF6FF",color:t.region==="br"?"#059669":"#2563EB"}}>{t.region==="br"?"BR":"LATAM"}</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
-                  })}
+                {stepAbKeys.length>0 && <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:12}}>
+                  {stepAbKeys.map(function(gId){return _abCard(gId);})}
                 </div>}
+                {visTpls.length>0 && (function(){
+                  var hasMultipleQuals=_qualGroups.filter(function(qg){return visTpls.some(function(t){return _getQ(t.name)===qg.key;});}).length>1;
+                  if(!hasMultipleQuals){return (<div style={{display:"grid",gridTemplateColumns:visTpls.length===1?"1fr":"1fr 1fr",gap:12}}>
+                    {visTpls.map(function(t,i){var trn=parseFloat(t.rate);var tsc=trn>=20?C.green:trn>=12?C.yellow:C.red;
+                      var tplItem=d.tpl.find(function(x){return x.key===t.name;});var _tName=t.name;
+                      return (<Cd key={_tName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_tName,step:sk});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_tName||dragTpl.step!==sk)return;var fromIdx=visTpls.findIndex(function(x){return x.name===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<visTpls.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(visTpls[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={Object.assign({},{cursor:tplItem?"pointer":"grab"},dragTpl&&dragTpl.name===_tName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:15}}>{t.displayName}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span>{t.region && <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.region==="br"?C.lGreen:"#EFF6FF",color:t.region==="br"?"#059669":"#2563EB"}}>{t.region==="br"?"BR":"LATAM"}</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
+                    })}
+                  </div>);}
+                  return (<div>{_qualGroups.map(function(qg){
+                    var qTpls=visTpls.filter(function(t){return _getQ(t.name)===qg.key;});
+                    if(qTpls.length===0)return null;
+                    return (<div key={qg.key} style={{marginBottom:14}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                        <div style={{width:3,height:16,borderRadius:2,background:qg.color}}/>
+                        <span style={{fontSize:12,fontWeight:700,color:qg.color,textTransform:"uppercase",letterSpacing:0.8}}>{qg.label}</span>
+                        <span style={{fontSize:11,color:C.muted}}>({qTpls.length})</span>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:qTpls.length===1?"1fr":"1fr 1fr",gap:12}}>
+                        {qTpls.map(function(t,i){var trn=parseFloat(t.rate);var tsc=trn>=20?C.green:trn>=12?C.yellow:C.red;
+                          var tplItem=d.tpl.find(function(x){return x.key===t.name;});var _tName=t.name;
+                          return (<Cd key={_tName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_tName,step:sk});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_tName||dragTpl.step!==sk)return;var fromIdx=visTpls.findIndex(function(x){return x.name===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<visTpls.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(visTpls[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={Object.assign({},{cursor:tplItem?"pointer":"grab"},dragTpl&&dragTpl.name===_tName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:15}}>{t.displayName}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span>{t.region && <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.region==="br"?C.lGreen:"#EFF6FF",color:t.region==="br"?"#059669":"#2563EB"}}>{t.region==="br"?"BR":"LATAM"}</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
+                        })}
+                      </div>
+                    </div>);
+                  })}</div>);
+                })()}
                 {hidTpls.length>0 && (<div style={{marginTop:10}}>
                   <button onClick={function(){setOpenArchivedStep(function(prev){return prev===sk?null:sk;});}} style={{background:"none",border:"1px solid "+C.border,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer",color:C.muted,fontFamily:font,display:"flex",alignItems:"center",gap:6}}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
@@ -1382,7 +1474,7 @@ export default function Dashboard(){
                     <span style={{fontSize:10,transition:"transform 0.2s",display:"inline-block",transform:openArchivedStep===sk?"rotate(180deg)":"rotate(0deg)"}}>{"\u25BC"}</span>
                   </button>
                   {openArchivedStep===sk && (<div style={{marginTop:8,display:"flex",flexDirection:"column",gap:6}}>
-                    {hidTpls.map(function(ht,hi){return (<div key={hi} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",background:"#F9FAFB",borderRadius:8,border:"1px solid "+C.border,opacity:0.7}}>
+                    {hidTpls.map(function(ht,hi){return (<div key={hi} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",background:C.rowBg,borderRadius:8,border:"1px solid "+C.border,opacity:0.7}}>
                       <span style={{fontSize:13,fontWeight:600,fontFamily:mono,color:C.sub}}>{ht.displayName||ht.name}</span>
                       <button onClick={function(){updateTemplateConfig(ht.name,"hidden",false);}} style={{background:C.lBlue,color:C.accent,border:"1px solid "+C.accent+"33",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Desarchivar</button>
                     </div>);})}
@@ -1390,15 +1482,14 @@ export default function Dashboard(){
                 </div>)}
               </div>);
             })}
+            {(function(){var unplacedAb=_allAbKeys.filter(function(gId){return !_renderedAb[gId];});if(unplacedAb.length===0)return null;return (<div style={{marginBottom:22}}><Sec>Tests A/B</Sec><div style={{display:"flex",flexDirection:"column",gap:16}}>{unplacedAb.map(function(gId){return _abCard(gId);})}</div></div>);})()}
           </>);
         })() : (<>
-          <Cd style={{marginBottom:18}}><Sec tipKey="cadencia">Cadencia</Sec>
-            <div style={{display:"flex",alignItems:"center",gap:0}}>{[{l:"MSG 1",s:"Yago SDR",d:"D+0",c:C.accent},0,{l:"MSG 2",s:"Sin WA / Caso \u00C9xito",d:"D+1",c:C.purple},0,{l:"MSG 3",s:"Value Nudge",d:"D+3",c:C.cyan},0,{l:"MSG 4",s:"Quick Audit",d:"D+5",c:C.orange}].map(function(s,i){if(!s)return <div key={i} style={{width:36,height:2,background:C.border,flexShrink:0}}/>;return(<div key={i} style={{flex:1,background:s.c+"08",border:"1px solid "+s.c+"22",borderRadius:12,padding:"12px 8px",textAlign:"center"}}><div style={{fontSize:11,color:C.muted}}>{s.d}</div><div style={{fontSize:17,fontWeight:800,color:s.c,marginTop:4}}>{s.l}</div><div style={{fontSize:12,color:C.muted}}>{s.s}</div></div>);})}</div>
-          </Cd>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+C.border+"66"}}><div style={{display:"flex",alignItems:"center",gap:0,fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700}}>Performance por Template<InfoTip data={TIPS.templatePerformance}/></div><button onClick={function(){setShowTplConfig(true);}} title="Configuraci\u00F3n de templates" style={{background:"none",border:"none",cursor:"pointer",color:C.muted,padding:4,borderRadius:6,display:"flex",alignItems:"center",transition:"color 0.15s"}} onMouseEnter={function(e){e.currentTarget.style.color=C.accent;}} onMouseLeave={function(e){e.currentTarget.style.color=C.muted;}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button></div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+C.border+"66"}}><div style={{display:"flex",alignItems:"center",gap:0,fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700}}>Performance por Template<InfoTip dark={_isDark} data={TIPS.templatePerformance}/></div><button onClick={function(){setShowTplConfig(true);}} title="Configuraci\u00F3n de templates" style={{background:"none",border:"none",cursor:"pointer",color:C.muted,padding:4,borderRadius:6,display:"flex",alignItems:"center",transition:"color 0.15s"}} onMouseEnter={function(e){e.currentTarget.style.color=C.accent;}} onMouseLeave={function(e){e.currentTarget.style.color=C.muted;}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button></div>
+          {_allAbKeys.length>0 && (<div style={{marginBottom:16}}><div style={{display:"flex",flexDirection:"column",gap:12}}>{_allAbKeys.map(function(gId){return _abCard(gId);})}</div></div>)}
           {(function(){var _flatVis=d.tpl.slice().filter(function(t){return !_isH(t.key||t.name);}).sort(function(a,b){var sa=_so(a.key||a.name);var sb=_so(b.key||b.name);if(sa!==sb)return sa-sb;return(a.name||"").localeCompare(b.name||"");});return (<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:22}}>
             {_flatVis.map(function(t,i){var rn=parseFloat(t.rate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;var _fName=t.key||t.name;
-              return (<Cd key={_fName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_fName,step:"_flat"});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_fName||dragTpl.step!=="_flat")return;var fromIdx=_flatVis.findIndex(function(x){return(x.key||x.name)===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<_flatVis.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(_flatVis[wi].key||_flatVis[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={function(){setSelTpl(t);}} style={Object.assign({cursor:"pointer"},dragTpl&&dragTpl.name===_fName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:16}}>{t.name}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.key||t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><span style={{fontSize:12,color:C.muted,background:"#F3F4F6",padding:"2px 8px",borderRadius:4}}>{t.day}</span></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:13,color:C.muted}}>{t.resp} de {t.sent}</div></div></div><div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div></Cd>);
+              return (<Cd key={_fName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_fName,step:"_flat"});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_fName||dragTpl.step!=="_flat")return;var fromIdx=_flatVis.findIndex(function(x){return(x.key||x.name)===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<_flatVis.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(_flatVis[wi].key||_flatVis[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={function(){setSelTpl(t);}} style={Object.assign({cursor:"pointer"},dragTpl&&dragTpl.name===_fName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:16}}>{t.name}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.key||t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><span style={{fontSize:12,color:C.muted,background:C.rowAlt,padding:"2px 8px",borderRadius:4}}>{t.day}</span></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:13,color:C.muted}}>{t.resp} de {t.sent}</div></div></div><div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div></Cd>);
             })}
           </div>);})()}
           {(function(){var _flatHid=d.tpl.slice().filter(function(t){return _isH(t.key||t.name);});if(_flatHid.length===0)return null;return (<div style={{marginTop:10,marginBottom:22}}>
@@ -1408,19 +1499,13 @@ export default function Dashboard(){
               <span style={{fontSize:10,transition:"transform 0.2s",display:"inline-block",transform:openArchivedStep==="_flat"?"rotate(180deg)":"rotate(0deg)"}}>{"\u25BC"}</span>
             </button>
             {openArchivedStep==="_flat" && (<div style={{marginTop:8,display:"flex",flexDirection:"column",gap:6}}>
-              {_flatHid.map(function(ht,hi){return (<div key={hi} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",background:"#F9FAFB",borderRadius:8,border:"1px solid "+C.border,opacity:0.7}}>
+              {_flatHid.map(function(ht,hi){return (<div key={hi} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",background:C.rowBg,borderRadius:8,border:"1px solid "+C.border,opacity:0.7}}>
                 <span style={{fontSize:13,fontWeight:600,fontFamily:mono,color:C.sub}}>{ht.name}</span>
                 <button onClick={function(){updateTemplateConfig(ht.key||ht.name,"hidden",false);}} style={{background:C.lBlue,color:C.accent,border:"1px solid "+C.accent+"33",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Desarchivar</button>
               </div>);})}
             </div>)}
           </div>);})()}
         </>)}
-        {_allAbKeys.length>0 && (<div style={{marginBottom:22}}>
-          <Sec>Tests A/B</Sec>
-          <div style={{display:"flex",flexDirection:"column",gap:16}}>
-            {_allAbKeys.map(function(gId){return _abCard(gId);})}
-          </div>
-        </div>)}
         {d.bcast&&d.bcast.length>0&&(<div style={{marginTop:10,marginBottom:22}}><div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",marginBottom:8,letterSpacing:1}}>Disparos Puntuais (fora do lifecycle)</div><div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>{d.bcast.map(function(t,i){var rn=parseFloat(t.rate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;return(<Cd key={i} onClick={function(){setSelTpl(t);}} style={{background:"#FEFCE8",border:"1px dashed "+C.yellow+"55",cursor:"pointer"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontWeight:800,fontSize:16}}>{t.name}</div><span style={{fontSize:12,color:C.muted,background:"#FEF9C3",padding:"2px 8px",borderRadius:4}}>Broadcast</span></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:13,color:C.muted}}>{t.resp+" de "+t.sent}</div></div></div><div style={{fontSize:11,color:C.yellow,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div></Cd>);})}</div></div>)}
         <Cd style={{marginBottom:18,background:C.lPurple,border:"1px solid "+C.purple+"20"}}>
           <Sec tipKey="meetByTemplate">{"\u{1F4C5} \u00BFEn qu\u00E9 template respondieron los que llegaron a reuni\u00F3n?"}</Sec>
@@ -1440,12 +1525,12 @@ export default function Dashboard(){
         <Cd style={{marginBottom:22}}>
           <Sec>Grupos WhatsApp — MeuGrupoVip</Sec>
           <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
-            <select value={gruposSelectedCampaign||""} onChange={function(e){var v=e.target.value;setGruposSelectedCampaign(v);loadGruposData(v,gruposDateFrom,gruposDateTo);}} style={{fontSize:13,fontWeight:600,padding:"8px 12px",borderRadius:10,border:"1px solid "+C.border,background:"#F9FAFB",color:C.text,fontFamily:font,cursor:"pointer",minWidth:200}}>
+            <select value={gruposSelectedCampaign||""} onChange={function(e){var v=e.target.value;setGruposSelectedCampaign(v);loadGruposData(v,gruposDateFrom,gruposDateTo);}} style={{fontSize:13,fontWeight:600,padding:"8px 12px",borderRadius:10,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer",minWidth:200}}>
               {gruposCampaigns.map(function(c){var cid=c.campaign_id||c.id;return <option key={cid} value={cid}>{c.name||c.title||("Campa\u00F1a "+cid)}</option>;})}
             </select>
-            <input type="date" value={gruposDateFrom} onChange={function(e){setGruposDateFrom(e.target.value);}} style={{fontSize:13,padding:"8px 10px",borderRadius:10,border:"1px solid "+C.border,background:"#F9FAFB",fontFamily:font}}/>
+            <input type="date" value={gruposDateFrom} onChange={function(e){setGruposDateFrom(e.target.value);}} style={{fontSize:13,padding:"8px 10px",borderRadius:10,border:"1px solid "+C.border,background:C.rowBg,fontFamily:font,color:C.text}}/>
             <span style={{color:C.muted,fontSize:13}}>a</span>
-            <input type="date" value={gruposDateTo} onChange={function(e){setGruposDateTo(e.target.value);}} style={{fontSize:13,padding:"8px 10px",borderRadius:10,border:"1px solid "+C.border,background:"#F9FAFB",fontFamily:font}}/>
+            <input type="date" value={gruposDateTo} onChange={function(e){setGruposDateTo(e.target.value);}} style={{fontSize:13,padding:"8px 10px",borderRadius:10,border:"1px solid "+C.border,background:C.rowBg,fontFamily:font,color:C.text}}/>
             <button onClick={function(){if(gruposSelectedCampaign)loadGruposData(gruposSelectedCampaign,gruposDateFrom,gruposDateTo);}} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Filtrar</button>
             <button onClick={function(){if(gruposSelectedCampaign)loadGruposCrossReference(gruposSelectedCampaign,gruposDateFrom,gruposDateTo);}} style={{background:C.purple,color:"#fff",border:"none",borderRadius:10,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Cruzar con Yago</button>
           </div>
@@ -1489,7 +1574,7 @@ export default function Dashboard(){
                     <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
                     <XAxis dataKey="d" tick={{fontSize:11,fill:C.muted}} tickFormatter={function(v){return v.slice(5);}}/>
                     <YAxis tick={{fontSize:11,fill:C.muted}}/>
-                    <Tooltip contentStyle={{borderRadius:10,border:"1px solid "+C.border,fontSize:13}}/>
+                    <Tooltip contentStyle={{borderRadius:10,border:"1px solid "+C.border,fontSize:13,background:C.card,color:C.text}}/>
                     <Area type="monotone" dataKey="entries" name="Entradas" stroke={C.green} fill={C.green+"33"} strokeWidth={2}/>
                     <Area type="monotone" dataKey="exits" name="Salidas" stroke={C.red} fill={C.red+"33"} strokeWidth={2}/>
                   </AreaChart>
@@ -1522,7 +1607,7 @@ export default function Dashboard(){
                       <div>Ocupaci&oacute;n: <strong style={{color:C.accent}}>{occRate}%</strong></div>
                     </div>
                     {/* Occupancy bar */}
-                    <div style={{background:"#F3F4F6",borderRadius:6,height:8,overflow:"hidden",marginBottom:8}}>
+                    <div style={{background:C.rowAlt,borderRadius:6,height:8,overflow:"hidden",marginBottom:8}}>
                       <div style={{background:occ>90?C.red:occ>70?C.yellow:C.green,height:"100%",width:Math.min(occ,100)+"%",borderRadius:6,transition:"width 0.3s"}}/>
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.muted}}>
@@ -1558,7 +1643,7 @@ export default function Dashboard(){
                 </Cd>
               </div>
               {/* Progress bar */}
-              <div style={{position:"relative",background:"#F3F4F6",borderRadius:10,height:24,overflow:"hidden"}}>
+              <div style={{position:"relative",background:C.rowAlt,borderRadius:10,height:24,overflow:"hidden"}}>
                 <div style={{background:"linear-gradient(90deg, "+C.accent+", "+C.purple+")",height:"100%",width:gruposCrossRef.rate+"%",borderRadius:10,transition:"width 0.5s ease"}}/>
                 <div style={{position:"absolute",top:0,left:0,right:0,bottom:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,color:Number(gruposCrossRef.rate)>50?"#fff":C.text}}>{gruposCrossRef.overlap} / {gruposCrossRef.grupoTotal} miembros tambi&eacute;n hablaron con Yago</div>
               </div>
@@ -1581,14 +1666,6 @@ export default function Dashboard(){
           }
         }
 
-        // Meeting stats
-        var meetOutcomes={};
-        for(var mi=0;mi<crmMeetings.length;mi++){
-          var mo=crmMeetings[mi].properties&&crmMeetings[mi].properties.hs_meeting_outcome||"UNKNOWN";
-          if(!meetOutcomes[mo])meetOutcomes[mo]=0;
-          meetOutcomes[mo]++;
-        }
-
         // Deal pipeline stats
         var dealsByStage={};var totalPipelineValue=0;
         for(var di=0;di<crmDeals.length;di++){
@@ -1601,81 +1678,173 @@ export default function Dashboard(){
         }
         var pipelineData=Object.keys(dealsByStage).map(function(k){return{stage:dealsByStage[k].label,count:dealsByStage[k].count,value:dealsByStage[k].value};});
 
-        // Recent meetings sorted by date
-        var sortedMeetings=crmMeetings.slice().sort(function(a,b){
-          var da=a.properties&&a.properties.hs_meeting_start_time||"";
-          var db=b.properties&&b.properties.hs_meeting_start_time||"";
-          return da>db?-1:da<db?1:0;
-        }).slice(0,20);
-
         var outcomeColor={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:C.yellow,RESCHEDULED:C.orange,UNKNOWN:C.muted};
+
+        // Build phone → meetings reverse lookup
+        var phoneMeetings={};
+        var contactPhoneMap={};
+        for(var ci=0;ci<crmContacts.length;ci++){
+          var cc=crmContacts[ci];
+          var cph=cc.properties&&cc.properties.phone;
+          if(cph){var cclean=cph.replace(/\D/g,"");if(cclean)contactPhoneMap[cc.id]=cclean;}
+        }
+        for(var mj=0;mj<crmMeetings.length;mj++){
+          var mm=crmMeetings[mj];
+          var assoc=mm.associations&&mm.associations.contacts&&mm.associations.contacts.results;
+          if(!assoc)continue;
+          for(var ak=0;ak<assoc.length;ak++){
+            var aphone=contactPhoneMap[assoc[ak].id];
+            if(aphone){
+              if(!phoneMeetings[aphone])phoneMeetings[aphone]=[];
+              phoneMeetings[aphone].push(mm);
+            }
+          }
+        }
+
+        // Cross outbound leads with HS meetings
+        var ofertaLeads=meetings.filter(function(l){return l.ml;});
+        var matchedLeads=[];
+        var unmatchedLeads=[];
+        for(var oi=0;oi<ofertaLeads.length;oi++){
+          var oPhone=(ofertaLeads[oi].p||"").replace(/\D/g,"");
+          var hsMeets=phoneMeetings[oPhone];
+          if(hsMeets&&hsMeets.length>0){
+            matchedLeads.push({lead:ofertaLeads[oi],meetings:hsMeets});
+          }else{
+            unmatchedLeads.push(ofertaLeads[oi]);
+          }
+        }
+        var ofertaCount=ofertaLeads.length;
+        var matchedCount=matchedLeads.length;
+        var convRate=ofertaCount>0?(matchedCount/ofertaCount*100).toFixed(1):"0";
+        var respCount=d.resp||0;
+        var ofertaPctResp=respCount>0?(ofertaCount/respCount*100).toFixed(1):"0";
+
+        // Meeting outcome stats — total HS
+        var totalMeetOutcomes={};
+        for(var tmi=0;tmi<crmMeetings.length;tmi++){
+          var tmo=crmMeetings[tmi].properties&&crmMeetings[tmi].properties.hs_meeting_outcome||"UNKNOWN";
+          if(!totalMeetOutcomes[tmo])totalMeetOutcomes[tmo]=0;
+          totalMeetOutcomes[tmo]++;
+        }
+
+        // Outbound-only meeting outcomes
+        var outboundOutcomes={};
+        for(var mi2=0;mi2<matchedLeads.length;mi2++){
+          for(var mj2=0;mj2<matchedLeads[mi2].meetings.length;mj2++){
+            var om=matchedLeads[mi2].meetings[mj2].properties&&matchedLeads[mi2].meetings[mj2].properties.hs_meeting_outcome||"UNKNOWN";
+            if(!outboundOutcomes[om])outboundOutcomes[om]=0;
+            outboundOutcomes[om]++;
+          }
+        }
 
         return (<>
           {crmLoading && <div style={{textAlign:"center",padding:40,color:C.muted,fontSize:15}}><div style={{width:30,height:30,border:"3px solid "+C.border,borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto 12px"}}/>Cargando datos de HubSpot...</div>}
-          {crmError && <div style={{color:C.red,fontSize:13,fontWeight:600,marginBottom:16,background:"#FEF2F2",padding:"12px 18px",borderRadius:10,border:"1px solid #FECACA"}}>Error: {crmError} <button onClick={function(){setCrmError(null);setCrmInited(false);}} style={{marginLeft:12,background:C.accent,color:"#fff",border:"none",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Reintentar</button></div>}
+          {crmError && <div style={{color:C.red,fontSize:13,fontWeight:600,marginBottom:16,background:C.lRed,padding:"12px 18px",borderRadius:10,border:"1px solid "+C.redBorder}}>Error: {crmError} <button onClick={function(){setCrmError(null);setCrmInited(false);}} style={{marginLeft:12,background:C.accent,color:"#fff",border:"none",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Reintentar</button></div>}
 
           {!crmLoading && crmInited && (<>
-            {/* KPI Cards */}
+            {/* Section 1: KPI Cards — Funnel de Reuniones */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:22}}>
-              <Cd>
-                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Contactos HubSpot</div>
-                <div style={{fontSize:28,fontWeight:900,color:C.accent,fontFamily:mono,marginTop:6}}>{crmContacts.length.toLocaleString()}</div>
-                <div style={{fontSize:12,color:C.muted,marginTop:2}}>total en CRM</div>
+              <Cd style={{border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, #FFF 0%, #FFF5F7 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Oferta de Reuni{"\u00F3"}n</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.pink,fontFamily:mono,marginTop:6}}>{ofertaCount}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{ofertaPctResp}% de los que respondieron</div>
               </Cd>
-              <Cd>
-                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Reuniones</div>
-                <div style={{fontSize:28,fontWeight:900,color:C.green,fontFamily:mono,marginTop:6}}>{crmMeetings.length.toLocaleString()}</div>
-                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{meetOutcomes.COMPLETED||0} completadas {"\u00B7"} {meetOutcomes.SCHEDULED||0} agendadas</div>
+              <Cd style={{border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, #FFF 0%, #ECFDF5 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Reuni{"\u00F3"}n Confirmada</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.green,fontFamily:mono,marginTop:6}}>{matchedCount}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{convRate}% de conversi{"\u00F3"}n (oferta {"\u2192"} confirmada)</div>
               </Cd>
-              <Cd>
-                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Deals</div>
-                <div style={{fontSize:28,fontWeight:900,color:C.purple,fontFamily:mono,marginTop:6}}>{crmDeals.length.toLocaleString()}</div>
-                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{pipelineData.length} stages activos</div>
+              <Cd style={{border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, #FFF 0%, #EFF6FF 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Tasa de Conversi{"\u00F3"}n</div>
+                <div style={{fontSize:36,fontWeight:900,color:C.accent,fontFamily:mono,marginTop:6}}>{convRate}%</div>
+                <div style={{position:"relative",background:"#E5E7EB",borderRadius:10,height:10,overflow:"hidden",marginTop:8}}>
+                  <div style={{background:"linear-gradient(90deg, "+C.accent+", "+C.green+")",height:"100%",width:Math.min(parseFloat(convRate),100)+"%",borderRadius:10,transition:"width 0.5s ease"}}/>
+                </div>
               </Cd>
-              <Cd>
-                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Valor Pipeline</div>
-                <div style={{fontSize:28,fontWeight:900,color:C.green,fontFamily:mono,marginTop:6}}>${totalPipelineValue.toLocaleString()}</div>
-                <div style={{fontSize:12,color:C.muted,marginTop:2}}>valor total de deals</div>
+              <Cd style={{border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, #FFF 0%, #F5F3FF 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Reuniones Totales HS</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.purple,fontFamily:mono,marginTop:6}}>{crmMeetings.length}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{totalMeetOutcomes.COMPLETED||0} completadas {"\u00B7"} {totalMeetOutcomes.SCHEDULED||0} agendadas {"\u00B7"} {totalMeetOutcomes.NO_SHOW||0} no show</div>
               </Cd>
             </div>
 
-            {/* Reuniones Recientes */}
-            {sortedMeetings.length>0 && (
-              <Cd style={{marginBottom:22}}>
-                <Sec>Reuniones Recientes</Sec>
+            {/* Section 2: Tabla de Cruzamiento Lead-a-Lead */}
+            <Cd style={{marginBottom:22}}>
+              <Sec>Cruce Outbound {"\u2194"} Reuniones HubSpot</Sec>
+              <div style={{fontSize:13,color:C.muted,marginBottom:14}}>Leads que recibieron link <strong>meetings.hubspot.com</strong> y si agendaron reuni{"\u00F3"}n real en HubSpot</div>
+              {ofertaLeads.length===0 ? (
+                <div style={{textAlign:"center",padding:30,color:C.muted,fontSize:14}}>No hay leads con oferta de reuni{"\u00F3"}n en los datos cargados</div>
+              ) : (
                 <div style={{overflowX:"auto"}}>
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
                     <thead>
                       <tr style={{borderBottom:"2px solid "+C.border}}>
-                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>T&iacute;tulo</th>
-                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Fecha</th>
-                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Resultado</th>
-                        <th style={{textAlign:"right",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Duraci&oacute;n</th>
+                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Tel{"\u00E9"}fono</th>
+                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Pa{"\u00ED"}s</th>
+                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Engagement</th>
+                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Templates</th>
+                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Status Reuni{"\u00F3"}n (HS)</th>
+                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Detalle HS</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedMeetings.map(function(m,idx){
-                        var props=m.properties||{};
-                        var title=props.hs_meeting_title||"Sin t\u00EDtulo";
-                        var start=props.hs_meeting_start_time?new Date(props.hs_meeting_start_time):null;
-                        var end=props.hs_meeting_end_time?new Date(props.hs_meeting_end_time):null;
-                        var outcome=props.hs_meeting_outcome||"UNKNOWN";
-                        var dur=start&&end?Math.round((end-start)/60000):null;
-                        var oc=outcomeColor[outcome]||C.muted;
-                        return (<tr key={m.id||idx} style={{borderBottom:"1px solid "+C.border+"66"}}>
-                          <td style={{padding:"10px 12px",fontWeight:600}}>{title}</td>
-                          <td style={{padding:"10px 12px",color:C.sub,fontFamily:mono,fontSize:12}}>{start?start.toLocaleDateString("es",{day:"2-digit",month:"short",year:"numeric"})+" "+start.toLocaleTimeString("es",{hour:"2-digit",minute:"2-digit"}):"—"}</td>
-                          <td style={{padding:"10px 12px"}}><Bd color={oc}>{outcome}</Bd></td>
-                          <td style={{padding:"10px 12px",textAlign:"right",fontFamily:mono,fontSize:12}}>{dur!==null?dur+" min":"—"}</td>
+                      {matchedLeads.map(function(item,idx){
+                        var l=item.lead;
+                        var hsM=item.meetings[0];
+                        var hsProps=hsM.properties||{};
+                        var hsOutcome=hsProps.hs_meeting_outcome||"UNKNOWN";
+                        var hsTitle=hsProps.hs_meeting_title||"Sin t\u00EDtulo";
+                        var hsStart=hsProps.hs_meeting_start_time?new Date(hsProps.hs_meeting_start_time):null;
+                        var eC2={alto:C.green,medio:C.accent,bajo:C.yellow,minimo:C.red,profunda:C.green,media:C.accent,corta:C.yellow,rebote:C.red};
+                        return (<tr key={"m"+idx} style={{borderBottom:"1px solid "+C.border+"66",background:C.lGreen+"66"}}>
+                          <td style={{padding:"10px 12px",fontFamily:mono,fontWeight:700}}>{l.p}</td>
+                          <td style={{padding:"10px 12px",fontSize:18}}>{l.co}</td>
+                          <td style={{padding:"10px 12px"}}><Bd color={eC2[l.e]||C.muted}>{l.e}</Bd></td>
+                          <td style={{padding:"10px 12px",fontSize:12,color:C.sub}}>{l.tr&&l.tr.length>0?l.tr.join(", "):"—"}</td>
+                          <td style={{padding:"10px 12px"}}><span style={{display:"inline-flex",alignItems:"center",gap:6,background:(outcomeColor[hsOutcome]||C.green)+"12",border:"1px solid "+(outcomeColor[hsOutcome]||C.green)+"30",borderRadius:8,padding:"4px 10px"}}><span style={{width:8,height:8,borderRadius:"50%",background:outcomeColor[hsOutcome]||C.green,flexShrink:0}}/><span style={{fontSize:12,fontWeight:700,color:outcomeColor[hsOutcome]||C.green}}>{hsOutcome}</span></span></td>
+                          <td style={{padding:"10px 12px",fontSize:12,color:C.sub}}>{hsTitle}{hsStart?" \u00B7 "+hsStart.toLocaleDateString("es",{day:"2-digit",month:"short"}):""}</td>
+                        </tr>);
+                      })}
+                      {unmatchedLeads.map(function(l,idx){
+                        var eC2={alto:C.green,medio:C.accent,bajo:C.yellow,minimo:C.red,profunda:C.green,media:C.accent,corta:C.yellow,rebote:C.red};
+                        return (<tr key={"u"+idx} style={{borderBottom:"1px solid "+C.border+"66"}}>
+                          <td style={{padding:"10px 12px",fontFamily:mono,fontWeight:700}}>{l.p}</td>
+                          <td style={{padding:"10px 12px",fontSize:18}}>{l.co}</td>
+                          <td style={{padding:"10px 12px"}}><Bd color={eC2[l.e]||C.muted}>{l.e}</Bd></td>
+                          <td style={{padding:"10px 12px",fontSize:12,color:C.sub}}>{l.tr&&l.tr.length>0?l.tr.join(", "):"—"}</td>
+                          <td style={{padding:"10px 12px"}}><Bd color={C.red}>SIN REUNI{"\u00D3"}N</Bd></td>
+                          <td style={{padding:"10px 12px",fontSize:12,color:C.muted}}>{"\u2014"}</td>
                         </tr>);
                       })}
                     </tbody>
                   </table>
                 </div>
+              )}
+            </Cd>
+
+            {/* Section 3: Breakdown por Outcome (only outbound meetings) */}
+            {Object.keys(outboundOutcomes).length>0 && (
+              <Cd style={{marginBottom:22}}>
+                <Sec>Outcome de Reuniones Outbound</Sec>
+                <div style={{fontSize:13,color:C.muted,marginBottom:12}}>Solo reuniones generadas por leads del Yago</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:12}}>
+                  {Object.keys(outboundOutcomes).map(function(o){
+                    var cnt=outboundOutcomes[o];
+                    var totalOut=matchedLeads.length;
+                    var pct=totalOut>0?(cnt/totalOut*100).toFixed(1):"0";
+                    var oc=outcomeColor[o]||C.muted;
+                    return (<div key={o} style={{background:oc+"08",borderRadius:10,padding:"14px 16px",border:"1px solid "+oc+"20",textAlign:"center"}}>
+                      <div style={{fontSize:11,fontWeight:700,color:oc,textTransform:"uppercase",letterSpacing:0.5}}>{o}</div>
+                      <div style={{fontSize:26,fontWeight:900,fontFamily:mono,color:oc,marginTop:4}}>{cnt}</div>
+                      <div style={{fontSize:12,color:C.muted,marginTop:2}}>{pct}%</div>
+                    </div>);
+                  })}
+                </div>
               </Cd>
             )}
 
-            {/* Pipeline de Deals */}
+            {/* Section 4: Pipeline de Deals (kept) */}
             {pipelineData.length>0 && (
               <Cd style={{marginBottom:22}}>
                 <Sec>Pipeline de Deals</Sec>
@@ -1685,7 +1854,7 @@ export default function Dashboard(){
                       <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
                       <XAxis type="number" tick={{fontSize:11,fill:C.muted}}/>
                       <YAxis type="category" dataKey="stage" tick={{fontSize:11,fill:C.sub}} width={120}/>
-                      <Tooltip contentStyle={{borderRadius:10,border:"1px solid "+C.border,fontSize:13}} formatter={function(v,name){return name==="value"?"$"+v.toLocaleString():v;}}/>
+                      <Tooltip contentStyle={{borderRadius:10,border:"1px solid "+C.border,fontSize:13,background:C.card,color:C.text}} formatter={function(v,name){return name==="value"?"$"+v.toLocaleString():v;}}/>
                       <Bar dataKey="count" name="Deals" fill={C.purple} radius={[0,6,6,0]}/>
                     </BarChart>
                   </ResponsiveContainer>
@@ -1704,26 +1873,7 @@ export default function Dashboard(){
               </Cd>
             )}
 
-            {/* Outcome de Reuniones */}
-            {Object.keys(meetOutcomes).length>0 && (
-              <Cd style={{marginBottom:22}}>
-                <Sec>Outcome de Reuniones</Sec>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:12}}>
-                  {Object.keys(meetOutcomes).map(function(o){
-                    var cnt=meetOutcomes[o];
-                    var pct=crmMeetings.length>0?(cnt/crmMeetings.length*100).toFixed(1):"0";
-                    var oc=outcomeColor[o]||C.muted;
-                    return (<div key={o} style={{background:oc+"08",borderRadius:10,padding:"14px 16px",border:"1px solid "+oc+"20",textAlign:"center"}}>
-                      <div style={{fontSize:11,fontWeight:700,color:oc,textTransform:"uppercase",letterSpacing:0.5}}>{o}</div>
-                      <div style={{fontSize:26,fontWeight:900,fontFamily:mono,color:oc,marginTop:4}}>{cnt}</div>
-                      <div style={{fontSize:12,color:C.muted,marginTop:2}}>{pct}%</div>
-                    </div>);
-                  })}
-                </div>
-              </Cd>
-            )}
-
-            {/* Cruce 3 Canales */}
+            {/* Section 5: Cruce 3 Canales (kept) */}
             <Cd style={{marginBottom:22}}>
               <Sec>Cruce 3 Canales</Sec>
               {!crmCrossRef && (
@@ -1743,22 +1893,22 @@ export default function Dashboard(){
                     <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Hablaron con Yago</div>
                     <div style={{fontSize:28,fontWeight:900,fontFamily:mono,color:C.purple,marginTop:4}}>{crmCrossRef.yagoTotal.toLocaleString()}</div>
                   </div>
-                  <div style={{background:"#FFF7ED",borderRadius:12,padding:"16px 20px",textAlign:"center"}}>
+                  <div style={{background:C.lOrange,borderRadius:12,padding:"16px 20px",textAlign:"center"}}>
                     <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>En HubSpot</div>
                     <div style={{fontSize:28,fontWeight:900,fontFamily:mono,color:C.orange,marginTop:4}}>{crmCrossRef.hsTotal.toLocaleString()}</div>
                   </div>
                 </div>
                 {/* Pairwise row */}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14,marginBottom:16}}>
-                  <div style={{background:"#F9FAFB",borderRadius:12,padding:"14px 16px",textAlign:"center",border:"1px solid "+C.border}}>
+                  <div style={{background:C.rowBg,borderRadius:12,padding:"14px 16px",textAlign:"center",border:"1px solid "+C.border}}>
                     <div style={{fontSize:11,color:C.muted,fontWeight:700}}>Grupos + Yago</div>
                     <div style={{fontSize:24,fontWeight:900,fontFamily:mono,color:C.cyan,marginTop:4}}>{crmCrossRef.gruposYago}</div>
                   </div>
-                  <div style={{background:"#F9FAFB",borderRadius:12,padding:"14px 16px",textAlign:"center",border:"1px solid "+C.border}}>
+                  <div style={{background:C.rowBg,borderRadius:12,padding:"14px 16px",textAlign:"center",border:"1px solid "+C.border}}>
                     <div style={{fontSize:11,color:C.muted,fontWeight:700}}>Grupos + HubSpot</div>
                     <div style={{fontSize:24,fontWeight:900,fontFamily:mono,color:C.cyan,marginTop:4}}>{crmCrossRef.gruposHS}</div>
                   </div>
-                  <div style={{background:"#F9FAFB",borderRadius:12,padding:"14px 16px",textAlign:"center",border:"1px solid "+C.border}}>
+                  <div style={{background:C.rowBg,borderRadius:12,padding:"14px 16px",textAlign:"center",border:"1px solid "+C.border}}>
                     <div style={{fontSize:11,color:C.muted,fontWeight:700}}>Yago + HubSpot</div>
                     <div style={{fontSize:24,fontWeight:900,fontFamily:mono,color:C.cyan,marginTop:4}}>{crmCrossRef.yagoHS}</div>
                   </div>
@@ -1770,7 +1920,7 @@ export default function Dashboard(){
                   <div style={{fontSize:13,color:C.muted,marginTop:6}}>presentes en Grupos + Yago + HubSpot</div>
                 </div>
                 <div style={{marginTop:12,textAlign:"center"}}>
-                  <button onClick={function(){setCrmCrossRef(null);}} style={{background:"#F3F4F6",color:C.muted,border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Recalcular</button>
+                  <button onClick={function(){setCrmCrossRef(null);}} style={{background:C.rowAlt,color:C.muted,border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Recalcular</button>
                 </div>
               </>)}
             </Cd>
@@ -1782,7 +1932,7 @@ export default function Dashboard(){
         <Cd style={{marginBottom:22}}>
           <Sec>Buscar Conversaci&oacute;n</Sec>
           <form onSubmit={function(e){e.preventDefault();handleSearch(searchQuery);}} style={{display:"flex",gap:10}}>
-            <input value={searchQuery} onChange={function(e){setSearchQuery(e.target.value);}} placeholder="Tel\u00E9fono o Thread ID..." style={{flex:1,padding:"12px 16px",border:"1px solid "+C.border,borderRadius:10,fontSize:15,fontFamily:mono,outline:"none",background:"#F9FAFB"}}/>
+            <input value={searchQuery} onChange={function(e){setSearchQuery(e.target.value);}} placeholder="Tel\u00E9fono o Thread ID..." style={{flex:1,padding:"12px 16px",border:"1px solid "+C.border,borderRadius:10,fontSize:15,fontFamily:mono,outline:"none",background:C.rowBg,color:C.text}}/>
             <button type="submit" disabled={searchLoading} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"12px 24px",fontSize:14,fontWeight:700,cursor:searchLoading?"wait":"pointer",fontFamily:font,opacity:searchLoading?0.6:1}}>{searchLoading?"Buscando...":"Buscar"}</button>
           </form>
           <div style={{fontSize:12,color:C.muted,marginTop:8}}>Busca por n&uacute;mero de tel&eacute;fono (parcial). Busca en los datos cargados.</div>
@@ -1807,7 +1957,7 @@ export default function Dashboard(){
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
               {searchResults.map(function(r,i){
                 var l=r.lead;var eC={alto:C.green,medio:C.accent,bajo:C.yellow,minimo:C.red};var ql=qualLabel(l.q);
-                return (<div key={i} onClick={function(){selectSearchResult(i);}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:"#F9FAFB",borderRadius:12,cursor:"pointer",border:"2px solid transparent"}}>
+                return (<div key={i} onClick={function(){selectSearchResult(i);}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:C.rowBg,borderRadius:12,cursor:"pointer",border:"2px solid transparent"}}>
                   <span style={{fontSize:20}}>{l.co}</span>
                   <div style={{flex:1}}>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -1876,7 +2026,7 @@ export default function Dashboard(){
           return {sent:0,resp:0,rate:"0.0%"};
         }
         return (<div onClick={function(e){if(e.target===e.currentTarget){setShowTplConfig(false);setAbSelectMode(false);setAbSelected([]);}}} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.4)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",animation:"fadeInModal 0.2s ease"}}>
-          <div style={{background:C.card,borderRadius:16,padding:28,width:"90%",maxWidth:900,maxHeight:"85vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.15)",animation:"scaleInModal 0.2s ease"}}>
+          <div style={{background:C.card,borderRadius:16,padding:28,width:"94%",maxWidth:1060,maxHeight:"85vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.15)",animation:"scaleInModal 0.2s ease"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
               <div style={{fontSize:18,fontWeight:800,color:C.text}}>Configuraci&oacute;n de Templates</div>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -1884,7 +2034,7 @@ export default function Dashboard(){
                   abSelectMode
                     ? <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <span style={{fontSize:13,color:C.accent,fontWeight:600}}>Selecciona 2 templates para comparar</span>
-                        <button onClick={function(){setAbSelectMode(false);setAbSelected([]);}} style={{background:"#F3F4F6",border:"1px solid "+C.border,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",color:C.muted,fontFamily:font}}>Cancelar</button>
+                        <button onClick={function(){setAbSelectMode(false);setAbSelected([]);}} style={{background:C.rowAlt,border:"1px solid "+C.border,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",color:C.muted,fontFamily:font}}>Cancelar</button>
                       </div>
                     : <button onClick={function(){setAbSelectMode(true);setAbSelected([]);}} style={{background:C.lPurple,color:C.purple,border:"1px solid "+C.purple+"33",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap"}}>+ Crear Test A/B</button>
                 )}
@@ -1899,12 +2049,13 @@ export default function Dashboard(){
                   var currentEntry=templateConfig[tplName]||{};
                   var currentCat=typeof currentEntry==="string"?currentEntry:(currentEntry.category||"sin_categoria");
                   var currentRegion=typeof currentEntry==="string"?"":(currentEntry.region||"");
+                  var currentQual=currentEntry.qualification||_deduceQual(tplName);
                   var hasAbGroup=currentEntry.ab_group;
                   var isAbSel=abSelected.indexOf(tplName)>=0;
                   var isHidden=currentEntry.hidden||false;
-                  return (<div key={tplName} onClick={abSelectMode?function(){handleAbToggle(tplName);}:undefined} style={{display:"flex",alignItems:"center",gap:14,padding:"12px 16px",background:isAbSel?"#EDE9FE":hasAbGroup?"#FAFAFE":"#F9FAFB",borderRadius:10,border:"1px solid "+(isAbSel?C.purple+"66":hasAbGroup?C.purple+"33":C.border),cursor:abSelectMode?"pointer":"default",transition:"all 0.15s ease",opacity:isHidden?0.5:1}}>
+                  return (<div key={tplName} onClick={abSelectMode?function(){handleAbToggle(tplName);}:undefined} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:isAbSel?C.abSelBg:hasAbGroup?C.abRowBg:C.rowBg,borderRadius:10,border:"1px solid "+(isAbSel?C.purple+"66":hasAbGroup?C.purple+"33":C.border),cursor:abSelectMode?"pointer":"default",transition:"all 0.15s ease",opacity:isHidden?0.5:1}}>
                     {abSelectMode && (
-                      <div style={{width:20,height:20,borderRadius:6,border:"2px solid "+(isAbSel?C.purple:C.border),background:isAbSel?C.purple:"#FFF",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s ease"}}>
+                      <div style={{width:20,height:20,borderRadius:6,border:"2px solid "+(isAbSel?C.purple:C.border),background:isAbSel?C.purple:C.inputBg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s ease"}}>
                         {isAbSel && <span style={{color:"#FFF",fontSize:12,fontWeight:800}}>{"\u2713"}</span>}
                       </div>
                     )}
@@ -1913,24 +2064,29 @@ export default function Dashboard(){
                       <button onClick={function(e){e.stopPropagation();updateTemplateConfig(tplName,"sort_order",(currentEntry.sort_order||0)+1);}} style={{background:"none",border:"1px solid "+C.border,borderRadius:4,width:22,height:18,fontSize:10,cursor:"pointer",color:C.muted,display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>{"\u25BC"}</button>
                     </div>
                     <button onClick={function(e){e.stopPropagation();updateTemplateConfig(tplName,"hidden",!isHidden);}} title={isHidden?"Mostrar template":"Ocultar template"} style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:isHidden?C.muted:C.accent,flexShrink:0,opacity:isHidden?0.5:0.8,display:"flex",alignItems:"center"}}>{isHidden?<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button>
-                    <div style={{flex:1,fontWeight:700,fontSize:14,fontFamily:mono,display:"flex",alignItems:"center",gap:8}}>
-                      {tplName}
-                      {hasAbGroup && <span style={{background:C.purple+"18",color:C.purple,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,letterSpacing:0.5}}>A/B</span>}
-                      {isHidden && <span style={{background:C.red+"15",color:C.red,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,letterSpacing:0.5}}>Oculto</span>}
+                    <div style={{flex:1,minWidth:0,fontWeight:700,fontSize:14,fontFamily:mono,display:"flex",alignItems:"center",gap:8,overflow:"hidden"}}>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={tplName}>{tplName}</span>
+                      {hasAbGroup && <span style={{background:C.purple+"18",color:C.purple,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,letterSpacing:0.5,flexShrink:0}}>A/B</span>}
+                      {isHidden && <span style={{background:C.red+"15",color:C.red,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,letterSpacing:0.5,flexShrink:0}}>Oculto</span>}
                     </div>
-                    <select value={currentCat} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"category",e.target.value);}} style={{padding:"6px 12px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:font,background:"#FFF",color:C.text,cursor:"pointer",minWidth:200}}>
+                    <select value={currentCat} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"category",e.target.value);}} style={{padding:"6px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:12,fontFamily:font,background:C.inputBg,color:C.text,cursor:"pointer",flexShrink:0}}>
                       <option value="sin_categoria">Sin categor&iacute;a</option>
-                      <option value="d0">D+0 — Contacto Inicial</option>
-                      <option value="d1">D+1 — Seguimiento</option>
-                      <option value="d3">D+3 — Value Nudge</option>
-                      <option value="d5">D+5 — Quick Audit</option>
-                      <option value="automatico">Autom&aacute;tico</option>
+                      <option value="d0">D+0</option>
+                      <option value="d1">D+1</option>
+                      <option value="d3">D+3</option>
+                      <option value="d5">D+5</option>
+                      <option value="automatico">Auto</option>
                       <option value="campanha">Campa&ntilde;a</option>
                     </select>
-                    <select value={currentRegion} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"region",e.target.value);}} style={{padding:"6px 12px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:font,background:"#FFF",color:C.text,cursor:"pointer",minWidth:130}}>
+                    <select value={currentRegion} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"region",e.target.value);}} style={{padding:"6px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:12,fontFamily:font,background:C.inputBg,color:C.text,cursor:"pointer",flexShrink:0}}>
                       <option value="">Sin regi&oacute;n</option>
                       <option value="br">BR</option>
                       <option value="latam">LATAM</option>
+                    </select>
+                    <select value={currentQual} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"qualification",e.target.value);}} style={{padding:"6px 10px",border:"1px solid "+(currentQual==="calificado"?C.green+"66":currentQual==="no_calificado"?C.orange+"66":C.border),borderRadius:8,fontSize:12,fontFamily:font,background:currentQual==="calificado"?C.lGreen:currentQual==="no_calificado"?C.lOrange:"#FFF",color:C.text,cursor:"pointer",flexShrink:0}}>
+                      <option value="general">General</option>
+                      <option value="calificado">Calificado</option>
+                      <option value="no_calificado">No Calificado</option>
                     </select>
                   </div>);
                 })}
@@ -1950,7 +2106,7 @@ export default function Dashboard(){
                       var diff=Math.abs(rateA-rateB).toFixed(1);
                       var winner=rateA>rateB?0:(rateB>rateA?1:-1);
                       var maxRate=Math.max(rateA,rateB,1);
-                      return (<div key={gId} style={{background:"#FFF",border:"1px solid "+C.purple+"33",borderRadius:14,padding:0,overflow:"hidden"}}>
+                      return (<div key={gId} style={{background:C.inputBg,border:"1px solid "+C.purple+"33",borderRadius:14,padding:0,overflow:"hidden"}}>
                         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 20px",background:C.lPurple,borderBottom:"1px solid "+C.purple+"22"}}>
                           <div style={{display:"flex",alignItems:"center",gap:8}}>
                             <span style={{fontSize:15,fontWeight:800,color:C.purple}}>Test A/B</span>
@@ -1973,7 +2129,7 @@ export default function Dashboard(){
                                 <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Respuestas</div><div style={{fontSize:18,fontWeight:800,color:C.text,fontFamily:mono}}>{st.resp||0}</div></div>
                                 <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Tasa</div><div style={{fontSize:18,fontWeight:800,color:isWinner?C.green:C.text,fontFamily:mono}}>{st.rate||"0.0%"}</div></div>
                               </div>
-                              <div style={{background:"#F3F4F6",borderRadius:6,height:8,overflow:"hidden"}}>
+                              <div style={{background:C.rowAlt,borderRadius:6,height:8,overflow:"hidden"}}>
                                 <div style={{height:"100%",borderRadius:6,background:isWinner?C.green:C.accent,width:(maxRate>0?(rate/maxRate*100):0)+"%",transition:"width 0.3s ease"}}></div>
                               </div>
                             </div>);
@@ -1986,7 +2142,7 @@ export default function Dashboard(){
               )}
 
               <div style={{marginTop:18,display:"flex",gap:12}}>
-                <button onClick={resetConfig} style={{background:"#FEF2F2",color:C.red,border:"1px solid #FECACA",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Resetear config</button>
+                <button onClick={resetConfig} style={{background:C.lRed,color:C.red,border:"1px solid "+C.redBorder,borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Resetear config</button>
                 <span style={{fontSize:12,color:C.muted,alignSelf:"center"}}>Resetear volver&aacute; al auto-detect por step_order en la pr&oacute;xima carga.</span>
               </div>
             </>)}

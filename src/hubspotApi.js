@@ -1,21 +1,22 @@
-export async function callHubSpot(endpoint, params) {
+export async function callHubSpot(endpoint, params, body) {
   var password = sessionStorage.getItem("dashboard_password") || "";
+  var payload = { endpoint: endpoint };
+  if (body) payload.body = body;
+  else if (params) payload.params = params;
   var resp = await fetch("/api/hubspot", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-dashboard-password": password,
     },
-    body: JSON.stringify({ endpoint: endpoint, params: params || {} }),
+    body: JSON.stringify(payload),
   });
   if (resp.status === 401) {
-    // 401 = dashboard password wrong (not HubSpot auth — that comes as 502)
     window.dispatchEvent(new Event("auth-required"));
     throw new Error("Unauthorized");
   }
   if (!resp.ok) {
     var errText = await resp.text();
-    // Parse error body for a better message
     try { var errJson = JSON.parse(errText); errText = errJson.error || errText; } catch(e) {}
     throw new Error("HubSpot API error: " + errText);
   }
@@ -32,6 +33,111 @@ export async function fetchAllContacts() {
     };
     if (after) params.after = after;
     var data = await callHubSpot("/crm/v3/objects/contacts", params);
+    if (data.results) all = all.concat(data.results);
+    if (!data.paging || !data.paging.next || !data.paging.next.after) break;
+    after = data.paging.next.after;
+  }
+  return all;
+}
+
+// Search meetings from a date onwards using Search API + parallel association fetch
+export async function fetchMeetingsSince(sinceIso) {
+  var sinceMs = new Date(sinceIso).getTime();
+  console.log("[HS] Searching meetings since", sinceIso);
+
+  // Step 1: Search meetings by date
+  var all = [];
+  var after = undefined;
+  while (true) {
+    var searchBody = {
+      filterGroups: [{
+        filters: [{
+          propertyName: "hs_meeting_start_time",
+          operator: "GTE",
+          value: String(sinceMs)
+        }]
+      }],
+      properties: ["hs_meeting_title", "hs_meeting_start_time", "hs_meeting_end_time", "hs_meeting_outcome"],
+      limit: 100,
+    };
+    if (after) searchBody.after = after;
+    var data = await callHubSpot("/crm/v3/objects/meetings/search", null, searchBody);
+    if (data.results) all = all.concat(data.results);
+    if (!data.paging || !data.paging.next || !data.paging.next.after) break;
+    after = data.paging.next.after;
+  }
+  console.log("[HS] Found", all.length, "meetings");
+
+  if (all.length === 0) return all;
+
+  // Step 2: Fetch contact associations using v4 batch API (100 per request)
+  console.log("[HS] Fetching associations for", all.length, "meetings via batch API...");
+  var assocMap = {};
+  var BATCH = 100;
+  for (var i = 0; i < all.length; i += BATCH) {
+    var chunk = all.slice(i, i + BATCH);
+    var inputs = chunk.map(function(meeting) { return { id: meeting.id }; });
+    try {
+      var batchData = await callHubSpot("/crm/v4/associations/meetings/contacts/batch/read", null, { inputs: inputs });
+      if (batchData.results) {
+        for (var r = 0; r < batchData.results.length; r++) {
+          var item = batchData.results[r];
+          var fromId = item.from && item.from.id;
+          if (fromId && item.to && item.to.length > 0) {
+            assocMap[fromId] = item.to.map(function(t) { return { id: String(t.toObjectId) }; });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[HS] Batch association error for chunk", i, e.message);
+    }
+  }
+  console.log("[HS] Associations done, mapped", Object.keys(assocMap).length, "meetings");
+
+  // Stitch associations onto meetings
+  for (var k = 0; k < all.length; k++) {
+    if (assocMap[all[k].id]) {
+      all[k].associations = { contacts: { results: assocMap[all[k].id] } };
+    }
+  }
+
+  return all;
+}
+
+// Batch-read contacts by IDs
+export async function fetchContactsByIds(contactIds) {
+  var all = [];
+  for (var i = 0; i < contactIds.length; i += 100) {
+    var batch = contactIds.slice(i, i + 100);
+    var inputs = batch.map(function(id) { return { id: id }; });
+    var data = await callHubSpot("/crm/v3/objects/contacts/batch/read", null, {
+      inputs: inputs,
+      properties: ["firstname", "lastname", "phone", "email", "createdate", "hs_lead_status", "lifecyclestage"]
+    });
+    if (data.results) all = all.concat(data.results);
+  }
+  return all;
+}
+
+// Search deals from a date onwards
+export async function fetchDealsSince(sinceIso) {
+  var sinceMs = new Date(sinceIso).getTime();
+  var all = [];
+  var after = undefined;
+  while (true) {
+    var searchBody = {
+      filterGroups: [{
+        filters: [{
+          propertyName: "createdate",
+          operator: "GTE",
+          value: String(sinceMs)
+        }]
+      }],
+      properties: ["dealname", "dealstage", "amount", "pipeline", "createdate", "closedate"],
+      limit: 100,
+    };
+    if (after) searchBody.after = after;
+    var data = await callHubSpot("/crm/v3/objects/deals/search", null, searchBody);
     if (data.results) all = all.concat(data.results);
     if (!data.paging || !data.paging.next || !data.paging.next.after) break;
     after = data.paging.next.after;
@@ -58,7 +164,6 @@ export async function fetchAllMeetings() {
 }
 
 export function getMeetingContactPhones(meetings, contacts) {
-  // Build contact ID -> phone map
   var contactPhoneMap = {};
   for (var i = 0; i < contacts.length; i++) {
     var c = contacts[i];
@@ -68,7 +173,6 @@ export function getMeetingContactPhones(meetings, contacts) {
       if (clean) contactPhoneMap[c.id] = clean;
     }
   }
-  // For each meeting, collect associated contact phones
   var meetingPhones = {};
   for (var j = 0; j < meetings.length; j++) {
     var m = meetings[j];

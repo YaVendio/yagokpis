@@ -47,6 +47,14 @@ body {
   background: #9CA3AF;
 }
 
+.dark-mode ::-webkit-scrollbar-thumb {
+  background: #3D4150;
+}
+
+.dark-mode ::-webkit-scrollbar-thumb:hover {
+  background: #555B6E;
+}
+
 button {
   transition: all 0.15s ease;
 }

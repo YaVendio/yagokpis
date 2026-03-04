@@ -1187,15 +1187,11 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
   var funnelAll = [
     { n: "Contactados", v: totalContactados, c: C.accent },
     { n: "Respondieron", v: respondieron, c: C.purple },
-    { n: "Config. Plataf.", v: toolCount, c: C.green },
-    { n: "Enviaron IG", v: igCount, c: C.orange },
     { n: "Oferta Reuni\u00F3n", v: mcCount, c: C.pink },
   ];
   var funnelReal = [
     { n: "Contactados", v: totalContactados, c: C.accent },
     { n: "Resp. Reales", v: realesCount, c: C.cyan },
-    { n: "Config. Plataf.", v: toolCountReal, c: C.green },
-    { n: "Enviaron IG", v: igCountReal, c: C.orange },
     { n: "Oferta Reuni\u00F3n", v: mcCountReal, c: C.pink },
   ];
 

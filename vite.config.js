@@ -158,20 +158,26 @@ export default defineConfig(({ mode }) => {
                 }
 
                 var url = 'https://api.hubapi.com' + parsed.endpoint
-                if (parsed.params && Object.keys(parsed.params).length > 0) {
+                var fetchOpts = {
+                  method: 'GET',
+                  headers: {
+                    'Authorization': 'Bearer ' + token,
+                    'Accept': 'application/json',
+                  },
+                }
+
+                if (parsed.body) {
+                  fetchOpts.method = 'POST'
+                  fetchOpts.headers['Content-Type'] = 'application/json'
+                  fetchOpts.body = JSON.stringify(parsed.body)
+                } else if (parsed.params && Object.keys(parsed.params).length > 0) {
                   var qs = Object.entries(parsed.params)
                     .map(pair => encodeURIComponent(pair[0]) + '=' + encodeURIComponent(pair[1]))
                     .join('&')
                   url += '?' + qs
                 }
 
-                var resp = await fetch(url, {
-                  method: 'GET',
-                  headers: {
-                    'Authorization': 'Bearer ' + token,
-                    'Accept': 'application/json',
-                  },
-                })
+                var resp = await fetch(url, fetchOpts)
 
                 if (!resp.ok) {
                   var errText = await resp.text()
