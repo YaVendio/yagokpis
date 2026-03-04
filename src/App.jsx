@@ -342,10 +342,10 @@ export default function Dashboard(){
     if(tab==="grupos"&&gruposCampaigns.length===0&&!gruposLoading&&!gruposError){initGrupos();}
   },[tab]);
 
-  // Auto-load CRM data once on mount (used by both overview and CRM tab)
+  // Auto-load CRM data once authenticated (used by both overview and CRM tab)
   useEffect(function(){
-    if(!crmInited&&!crmLoading&&!crmError){initCrm();}
-  },[]);
+    if(isAuthenticated&&!crmInited&&!crmLoading&&!crmError){initCrm();}
+  },[isAuthenticated]);
 
   // Compute meeting phones when CRM data is loaded
   useEffect(function(){
@@ -454,7 +454,7 @@ export default function Dashboard(){
         <div style={{fontSize:13,color:C.muted,marginBottom:24}}>Ingrese la contraseña para acceder</div>
         <input type="password" value={loginPassword} onChange={function(ev){setLoginPassword(ev.target.value);}} placeholder="Contraseña" style={{width:"100%",padding:"12px 14px",fontSize:15,border:"1px solid "+C.border,borderRadius:8,fontFamily:font,marginBottom:12,boxSizing:"border-box",outline:"none",background:C.inputBg,color:C.text}}/>
         {loginError && <div style={{color:C.red,fontSize:13,fontWeight:600,marginBottom:12}}>{loginError}</div>}
-        <button type="submit" disabled={loginLoading||!loginPassword} style={{width:"100%",padding:"12px 0",fontSize:15,fontWeight:700,color:"#fff",background:loginLoading?"#93C5FD":C.accent,border:"none",borderRadius:8,cursor:loginLoading?"wait":"pointer",fontFamily:font}}>{loginLoading?"Verificando...":"Entrar"}</button>
+        <button type="submit" disabled={loginLoading||!loginPassword} style={{width:"100%",padding:"12px 0",fontSize:15,fontWeight:700,color:"#fff",background:loginLoading?C.accent+"88":C.accent,border:"none",borderRadius:8,cursor:loginLoading?"wait":"pointer",fontFamily:font}}>{loginLoading?"Verificando...":"Entrar"}</button>
       </form>
     </div>
   );
@@ -882,7 +882,7 @@ export default function Dashboard(){
 
     <div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
       <div style={{display:"flex",background:C.rowAlt,borderRadius:10,padding:3,gap:2,boxShadow:"inset 0 1px 2px #00000008"}}>
-        {[{id:"outbound",l:"Outbound",c:C.accent},{id:"inbound",l:"Inbound",c:"#7C3AED"}].map(function(p){var a=panel===p.id;return <button key={p.id} onClick={function(){switchPanel(p.id);}} style={{background:a?p.c:"transparent",color:a?"#fff":C.muted,border:"none",borderRadius:8,padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>{p.l}</button>;})}
+        {[{id:"outbound",l:"Outbound",c:C.accent},{id:"inbound",l:"Inbound",c:C.purple}].map(function(p){var a=panel===p.id;return <button key={p.id} onClick={function(){switchPanel(p.id);}} style={{background:a?p.c:"transparent",color:a?"#fff":C.muted,border:"none",borderRadius:8,padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>{p.l}</button>;})}
       </div>
       {panel==="outbound" && <div style={{display:"flex",background:C.rowAlt,borderRadius:10,padding:3,gap:2,boxShadow:"inset 0 1px 2px #00000008"}}>
         {[{l:"Todas",c:C.accent},{l:"Reales",c:C.green}].map(function(o,i){var a=mode===i;return <button key={i} onClick={function(){setMode(i);}} style={{background:a?o.c:"transparent",color:a?"#fff":C.muted,border:"none",borderRadius:8,padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>{o.l}</button>;})}
@@ -952,7 +952,7 @@ export default function Dashboard(){
             {/* Topics ranking */}
             <Cd><Sec tipKey="temasAbordados">{"\u00BF"}Qu{"\u00E9"} buscan?</Sec>
               {d.topics.map(function(tp,i){
-                var topicColors=["#3B82F6","#8B5CF6","#06B6D4","#F59E0B","#10B981","#EF4444"];
+                var topicColors=[C.accent,C.purple,C.cyan,C.yellow,C.green,C.red];
                 var bC=topicColors[i%topicColors.length];
                 return (
                   <div key={i} onClick={function(){setTopicModal(tp.t);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:i<d.topics.length-1?"1px solid "+C.border+"44":"none",cursor:"pointer"}}>
@@ -1012,7 +1012,7 @@ export default function Dashboard(){
             return (
           <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:12,marginBottom:22}}>
             {/* Card 1: Contactados */}
-            <Cd onClick={function(){setShowA(true);}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, #FFF 0%, #EFF6FF 100%)"}}>
+            <Cd onClick={function(){setShowA(true);}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4E9}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4E9}"}</div>
@@ -1024,7 +1024,7 @@ export default function Dashboard(){
               <div style={{fontSize:11,color:C.accent,fontWeight:700,marginTop:6}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
             </Cd>
             {/* Card 2: Respuestas */}
-            <Cd onClick={function(){setShowA(true);}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, #FFF 0%, #F5F3FF 100%)"}}>
+            <Cd onClick={function(){setShowA(true);}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4CA}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4CA}"}</div>
@@ -1037,7 +1037,7 @@ export default function Dashboard(){
               <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:4}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
             </Cd>
             {/* Card 3: Oferta de Reunión */}
-            <Cd onClick={function(){setShowM(true);}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, #FFF 0%, #FFF5F7 100%)"}}>
+            <Cd onClick={function(){setShowM(true);}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4C5}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.pink+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4C5}"}</div>
@@ -1049,7 +1049,7 @@ export default function Dashboard(){
               <div style={{fontSize:11,color:C.pink,fontWeight:700,marginTop:6}}>{"\u{1F4C5} Ver contactos \u2192"}</div>
             </Cd>
             {/* Card 4: Reunión Confirmada (HubSpot cross-reference) */}
-            <Cd style={{position:"relative",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, #FFF 0%, #ECFDF5 100%)"}}>
+            <Cd style={{position:"relative",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u2705"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div>
@@ -1112,13 +1112,13 @@ export default function Dashboard(){
         var autoP=totalResp>0?((headerInfo.autoReplyCount/totalResp)*100).toFixed(1):"0";
         var realP=totalResp>0?((headerInfo.realesCount/totalResp)*100).toFixed(1):"0";
         var peakH=0;var peakV=0;for(var hi=0;hi<d.hours.length;hi++){if(d.hours[hi]>peakV){peakV=d.hours[hi];peakH=hi;}}
-        var topicColors=["#3B82F6","#8B5CF6","#06B6D4","#F59E0B","#10B981","#EF4444"];
+        var topicColors=[C.accent,C.purple,C.cyan,C.yellow,C.green,C.red];
 
         if(isInb&&ix){
           var depthItems=[
-            {k:"rebote",n:"Rebote: 1 msg",c:C.red,bg:"#FEF2F2",ic:"\u{1F4A4}"},
+            {k:"rebote",n:"Rebote: 1 msg",c:C.red,bg:C.lRed,ic:"\u{1F4A4}"},
             {k:"corta",n:"Corta: 2-4 msgs",c:C.yellow,bg:C.lYellow,ic:"\u{1F610}"},
-            {k:"media",n:"Media: 5-9 msgs",c:C.accent,bg:"#EFF6FF",ic:"\u{1F44D}"},
+            {k:"media",n:"Media: 5-9 msgs",c:C.accent,bg:C.lBlue,ic:"\u{1F44D}"},
             {k:"profunda",n:"Profunda: 10+ msgs",c:C.green,bg:C.lGreen,ic:"\u{1F525}"}
           ];
           var depthLabels={profunda:"Profunda (10+)",media:"Media (5-9)",corta:"Corta (2-4)",rebote:"Rebote (1 msg)"};
@@ -1149,7 +1149,7 @@ export default function Dashboard(){
                     <div style={{display:"flex",alignItems:"baseline",gap:8}}>
                       <span style={{fontSize:20,fontWeight:900,fontFamily:mono,color:st.c}}>{st.v}</span>
                       <span style={{fontSize:12,color:C.muted}}>({absRate}%)</span>
-                      {stepRate && <span style={{fontSize:12,fontWeight:700,color:parseFloat(stepRate)>=50?C.green:parseFloat(stepRate)>=20?C.yellow:C.red,background:parseFloat(stepRate)>=50?C.lGreen:parseFloat(stepRate)>=20?C.lYellow:"#FEF2F2",padding:"2px 8px",borderRadius:4}}>{stepRate}% del paso anterior</span>}
+                      {stepRate && <span style={{fontSize:12,fontWeight:700,color:parseFloat(stepRate)>=50?C.green:parseFloat(stepRate)>=20?C.yellow:C.red,background:parseFloat(stepRate)>=50?C.lGreen:parseFloat(stepRate)>=20?C.lYellow:C.lRed,padding:"2px 8px",borderRadius:4}}>{stepRate}% del paso anterior</span>}
                     </div>
                   </div>
                   <div style={{height:18,background:C.rowAlt,borderRadius:6,overflow:"hidden"}}>
@@ -1253,7 +1253,7 @@ export default function Dashboard(){
                   <YAxis tick={{fontSize:11,fill:C.muted}}/>
                   <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13}} formatter={function(v){return[v,"Mensajes"];}}/>
                   <Bar dataKey="v" radius={[4,4,0,0]} barSize={22}>
-                    {d.hours.map(function(v,i){return <Cell key={i} fill={i===peakH?"#1D4ED8":v>=10?"url(#barGrad)":v>=5?C.accent+"77":C.accent+"33"}/>;})
+                    {d.hours.map(function(v,i){return <Cell key={i} fill={i===peakH?C.accent:v>=10?"url(#barGrad)":v>=5?C.accent+"77":C.accent+"33"}/>;})
                     }
                   </Bar>
                 </BarChart>
@@ -1295,9 +1295,9 @@ export default function Dashboard(){
           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:18}}>
             {[
               {k:"alto",n:"Alto",c:C.green,bg:C.lGreen},
-              {k:"medio",n:"Medio",c:C.accent,bg:"#EFF6FF"},
+              {k:"medio",n:"Medio",c:C.accent,bg:C.lBlue},
               {k:"bajo",n:"Bajo",c:C.yellow,bg:C.lYellow},
-              {k:"minimo",n:"M\u00EDnimo",c:C.red,bg:"#FEF2F2"}
+              {k:"minimo",n:"M\u00EDnimo",c:C.red,bg:C.lRed}
             ].map(function(e,i){var eng=d.eng[e.k];return (
               <div key={i} style={{background:e.bg,borderRadius:12,padding:"16px 14px",textAlign:"center",border:"1px solid "+e.c+"20"}}>
                 <div style={{fontSize:28,marginBottom:4}}>{engIcons[e.k]}</div>
@@ -1360,7 +1360,7 @@ export default function Dashboard(){
               <YAxis tick={{fontSize:11,fill:C.muted}}/>
               <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13}} formatter={function(v){return[v,"Respuestas"];}}/>
               <Bar dataKey="v" radius={[4,4,0,0]} barSize={22}>
-                {d.hours.map(function(v,i){return <Cell key={i} fill={i===peakH?"#1D4ED8":v>=10?"url(#barGrad)":v>=5?C.accent+"77":C.accent+"33"}/>;})
+                {d.hours.map(function(v,i){return <Cell key={i} fill={i===peakH?C.accent:v>=10?"url(#barGrad)":v>=5?C.accent+"77":C.accent+"33"}/>;})
                 }
               </Bar>
             </BarChart>
@@ -1446,7 +1446,7 @@ export default function Dashboard(){
                   if(!hasMultipleQuals){return (<div style={{display:"grid",gridTemplateColumns:visTpls.length===1?"1fr":"1fr 1fr",gap:12}}>
                     {visTpls.map(function(t,i){var trn=parseFloat(t.rate);var tsc=trn>=20?C.green:trn>=12?C.yellow:C.red;
                       var tplItem=d.tpl.find(function(x){return x.key===t.name;});var _tName=t.name;
-                      return (<Cd key={_tName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_tName,step:sk});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_tName||dragTpl.step!==sk)return;var fromIdx=visTpls.findIndex(function(x){return x.name===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<visTpls.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(visTpls[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={Object.assign({},{cursor:tplItem?"pointer":"grab"},dragTpl&&dragTpl.name===_tName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:15}}>{t.displayName}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span>{t.region && <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.region==="br"?C.lGreen:"#EFF6FF",color:t.region==="br"?"#059669":"#2563EB"}}>{t.region==="br"?"BR":"LATAM"}</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
+                      return (<Cd key={_tName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_tName,step:sk});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_tName||dragTpl.step!==sk)return;var fromIdx=visTpls.findIndex(function(x){return x.name===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<visTpls.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(visTpls[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={Object.assign({},{cursor:tplItem?"pointer":"grab"},dragTpl&&dragTpl.name===_tName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:15}}>{t.displayName}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span>{t.region && <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.region==="br"?C.lGreen:C.lBlue,color:t.region==="br"?C.green:C.accent}}>{t.region==="br"?"BR":"LATAM"}</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
                     })}
                   </div>);}
                   return (<div>{_qualGroups.map(function(qg){
@@ -1461,7 +1461,7 @@ export default function Dashboard(){
                       <div style={{display:"grid",gridTemplateColumns:qTpls.length===1?"1fr":"1fr 1fr",gap:12}}>
                         {qTpls.map(function(t,i){var trn=parseFloat(t.rate);var tsc=trn>=20?C.green:trn>=12?C.yellow:C.red;
                           var tplItem=d.tpl.find(function(x){return x.key===t.name;});var _tName=t.name;
-                          return (<Cd key={_tName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_tName,step:sk});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_tName||dragTpl.step!==sk)return;var fromIdx=visTpls.findIndex(function(x){return x.name===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<visTpls.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(visTpls[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={Object.assign({},{cursor:tplItem?"pointer":"grab"},dragTpl&&dragTpl.name===_tName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:15}}>{t.displayName}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span>{t.region && <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.region==="br"?C.lGreen:"#EFF6FF",color:t.region==="br"?"#059669":"#2563EB"}}>{t.region==="br"?"BR":"LATAM"}</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
+                          return (<Cd key={_tName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_tName,step:sk});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_tName||dragTpl.step!==sk)return;var fromIdx=visTpls.findIndex(function(x){return x.name===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<visTpls.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(visTpls[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={Object.assign({},{cursor:tplItem?"pointer":"grab"},dragTpl&&dragTpl.name===_tName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:15}}>{t.displayName}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span>{t.region && <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.region==="br"?C.lGreen:C.lBlue,color:t.region==="br"?C.green:C.accent}}>{t.region==="br"?"BR":"LATAM"}</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
                         })}
                       </div>
                     </div>);
@@ -1506,7 +1506,7 @@ export default function Dashboard(){
             </div>)}
           </div>);})()}
         </>)}
-        {d.bcast&&d.bcast.length>0&&(<div style={{marginTop:10,marginBottom:22}}><div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",marginBottom:8,letterSpacing:1}}>Disparos Puntuais (fora do lifecycle)</div><div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>{d.bcast.map(function(t,i){var rn=parseFloat(t.rate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;return(<Cd key={i} onClick={function(){setSelTpl(t);}} style={{background:"#FEFCE8",border:"1px dashed "+C.yellow+"55",cursor:"pointer"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontWeight:800,fontSize:16}}>{t.name}</div><span style={{fontSize:12,color:C.muted,background:"#FEF9C3",padding:"2px 8px",borderRadius:4}}>Broadcast</span></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:13,color:C.muted}}>{t.resp+" de "+t.sent}</div></div></div><div style={{fontSize:11,color:C.yellow,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div></Cd>);})}</div></div>)}
+        {d.bcast&&d.bcast.length>0&&(<div style={{marginTop:10,marginBottom:22}}><div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",marginBottom:8,letterSpacing:1}}>Disparos Puntuais (fora do lifecycle)</div><div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>{d.bcast.map(function(t,i){var rn=parseFloat(t.rate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;return(<Cd key={i} onClick={function(){setSelTpl(t);}} style={{background:C.lYellow,border:"1px dashed "+C.yellow+"55",cursor:"pointer"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontWeight:800,fontSize:16}}>{t.name}</div><span style={{fontSize:12,color:C.muted,background:C.lYellow,padding:"2px 8px",borderRadius:4}}>Broadcast</span></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:13,color:C.muted}}>{t.resp+" de "+t.sent}</div></div></div><div style={{fontSize:11,color:C.yellow,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div></Cd>);})}</div></div>)}
         <Cd style={{marginBottom:18,background:C.lPurple,border:"1px solid "+C.purple+"20"}}>
           <Sec tipKey="meetByTemplate">{"\u{1F4C5} \u00BFEn qu\u00E9 template respondieron los que llegaron a reuni\u00F3n?"}</Sec>
           <div style={{fontSize:14,color:C.sub,marginBottom:14}}>De {d.mc} leads, este fue el <strong>template donde respondieron por primera vez</strong>:</div>
@@ -1745,24 +1745,24 @@ export default function Dashboard(){
           {!crmLoading && crmInited && (<>
             {/* Section 1: KPI Cards — Funnel de Reuniones */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:22}}>
-              <Cd style={{border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, #FFF 0%, #FFF5F7 100%)"}}>
+              <Cd style={{border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
                 <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Oferta de Reuni{"\u00F3"}n</div>
                 <div style={{fontSize:32,fontWeight:900,color:C.pink,fontFamily:mono,marginTop:6}}>{ofertaCount}</div>
                 <div style={{fontSize:12,color:C.muted,marginTop:2}}>{ofertaPctResp}% de los que respondieron</div>
               </Cd>
-              <Cd style={{border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, #FFF 0%, #ECFDF5 100%)"}}>
+              <Cd style={{border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
                 <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Reuni{"\u00F3"}n Confirmada</div>
                 <div style={{fontSize:32,fontWeight:900,color:C.green,fontFamily:mono,marginTop:6}}>{matchedCount}</div>
                 <div style={{fontSize:12,color:C.muted,marginTop:2}}>{convRate}% de conversi{"\u00F3"}n (oferta {"\u2192"} confirmada)</div>
               </Cd>
-              <Cd style={{border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, #FFF 0%, #EFF6FF 100%)"}}>
+              <Cd style={{border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
                 <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Tasa de Conversi{"\u00F3"}n</div>
                 <div style={{fontSize:36,fontWeight:900,color:C.accent,fontFamily:mono,marginTop:6}}>{convRate}%</div>
-                <div style={{position:"relative",background:"#E5E7EB",borderRadius:10,height:10,overflow:"hidden",marginTop:8}}>
+                <div style={{position:"relative",background:C.rowAlt,borderRadius:10,height:10,overflow:"hidden",marginTop:8}}>
                   <div style={{background:"linear-gradient(90deg, "+C.accent+", "+C.green+")",height:"100%",width:Math.min(parseFloat(convRate),100)+"%",borderRadius:10,transition:"width 0.5s ease"}}/>
                 </div>
               </Cd>
-              <Cd style={{border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, #FFF 0%, #F5F3FF 100%)"}}>
+              <Cd style={{border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)"}}>
                 <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Reuniones Totales HS</div>
                 <div style={{fontSize:32,fontWeight:900,color:C.purple,fontFamily:mono,marginTop:6}}>{crmMeetings.length}</div>
                 <div style={{fontSize:12,color:C.muted,marginTop:2}}>{totalMeetOutcomes.COMPLETED||0} completadas {"\u00B7"} {totalMeetOutcomes.SCHEDULED||0} agendadas {"\u00B7"} {totalMeetOutcomes.NO_SHOW||0} no show</div>
@@ -2083,7 +2083,7 @@ export default function Dashboard(){
                       <option value="br">BR</option>
                       <option value="latam">LATAM</option>
                     </select>
-                    <select value={currentQual} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"qualification",e.target.value);}} style={{padding:"6px 10px",border:"1px solid "+(currentQual==="calificado"?C.green+"66":currentQual==="no_calificado"?C.orange+"66":C.border),borderRadius:8,fontSize:12,fontFamily:font,background:currentQual==="calificado"?C.lGreen:currentQual==="no_calificado"?C.lOrange:"#FFF",color:C.text,cursor:"pointer",flexShrink:0}}>
+                    <select value={currentQual} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"qualification",e.target.value);}} style={{padding:"6px 10px",border:"1px solid "+(currentQual==="calificado"?C.green+"66":currentQual==="no_calificado"?C.orange+"66":C.border),borderRadius:8,fontSize:12,fontFamily:font,background:currentQual==="calificado"?C.lGreen:currentQual==="no_calificado"?C.lOrange:C.inputBg,color:C.text,cursor:"pointer",flexShrink:0}}>
                       <option value="general">General</option>
                       <option value="calificado">Calificado</option>
                       <option value="no_calificado">No Calificado</option>
