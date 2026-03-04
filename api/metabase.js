@@ -28,6 +28,7 @@ export default async function handler(req, res) {
         database: dbId,
         type: "native",
         native: { query: sql },
+        constraints: { "max-results": 100000, "max-results-bare-rows": 100000 },
       }),
     });
 
