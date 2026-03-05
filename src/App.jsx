@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Legend } from "recharts";
 import { processCSVRows, processInboundRows, parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
-import { fetchThreadsFromPostHog, expandThreadMessages, fetchInboundThreadsFromPostHog, expandInboundThreadMessages, fetchLifecyclePhones, queryMetabase } from "./posthogApi";
+import { fetchThreadsFromPostHog, expandThreadMessages, fetchInboundThreadsFromPostHog, expandInboundThreadMessages, fetchLifecyclePhones, queryMetabase, fetchResponseStats } from "./posthogApi";
 import { DEFAULT_MEETINGS as _RAW_MEETINGS } from "./defaultData";
 import { supabase } from "./supabase";
 import InfoTip from "./components/InfoTip";
 import TIPS from "./tooltips";
 import { fetchCampaigns, fetchCampaignGroups, fetchCampaignLeads, formatDateForApi } from "./gruposApi";
-import { fetchAllContacts, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones, fetchMeetingsSince, fetchContactsByIds, fetchDealsSince } from "./hubspotApi";
+import { fetchAllContacts, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones, fetchMeetingsSince, fetchContactsByIds, fetchDealsSince, fetchLeadsSince, debugLeadProperties } from "./hubspotApi";
 
 var font="'Source Sans 3', sans-serif";
 var mono="'JetBrains Mono', monospace";
@@ -285,6 +285,7 @@ export default function Dashboard(){
   const [meetByTplReal,setMeetByTplReal]=useState([]);
   const [headerInfo,setHeaderInfo]=useState(EMPTY_HEADER);
   const [allContactedPhones,setAllContactedPhones]=useState({});
+  const [responseStats,setResponseStats]=useState(null);
   const [selTpl,setSelTpl]=useState(null);
   const [searchQuery,setSearchQuery]=useState("");
   const [searchResults,setSearchResults]=useState(null);
@@ -330,6 +331,7 @@ export default function Dashboard(){
   const [crmCrossLoading,setCrmCrossLoading]=useState(false);
   const [crmInited,setCrmInited]=useState(false);
   const [crmMeetingPhones,setCrmMeetingPhones]=useState(null);
+  const [crmLeads,setCrmLeads]=useState([]);
 
   useEffect(function(){
     function onAuthRequired(){sessionStorage.removeItem("dashboard_password");setIsAuthenticated(false);setLoginError("Sesión expirada. Ingrese de nuevo.");}
@@ -354,6 +356,36 @@ export default function Dashboard(){
       setCrmMeetingPhones(phones);
     }
   },[crmMeetings,crmContacts]);
+
+  // Merge HubSpot lead-pipeline deals per day into daily chart data
+  const [dailyWithHs,setDailyWithHs]=useState([]);
+  useEffect(function(){
+    if(daily.length===0){setDailyWithHs([]);return;}
+    // Build HubSpot daily map from leads in pipeline 808581652
+    var hsMap={};
+    for(var i=0;i<crmLeads.length;i++){
+      var lead=crmLeads[i];
+      var cd=(lead.properties||{}).createdate;
+      if(!cd)continue;
+      var dt=new Date(cd);
+      if(isNaN(dt.getTime()))continue;
+      var key=String(dt.getDate()).padStart(2,"0")+"/"+String(dt.getMonth()+1).padStart(2,"0");
+      if(!hsMap[key])hsMap[key]=0;
+      hsMap[key]++;
+    }
+    // Merge into daily array
+    var merged=daily.map(function(item){return{d:item.d,l:item.l,hs:hsMap[item.d]||0};});
+    // Add any HubSpot days not present in daily
+    var dailyKeys={};
+    for(var j=0;j<daily.length;j++)dailyKeys[daily[j].d]=true;
+    var extraKeys=Object.keys(hsMap).filter(function(k){return!dailyKeys[k];});
+    if(extraKeys.length>0){
+      extraKeys.sort(function(a,b){var pa=a.split("/"),pb=b.split("/");return(parseInt(pa[1])*100+parseInt(pa[0]))-(parseInt(pb[1])*100+parseInt(pb[0]));});
+      for(var k=0;k<extraKeys.length;k++){merged.push({d:extraKeys[k],l:0,hs:hsMap[extraKeys[k]]});}
+      merged.sort(function(a,b){var pa=a.d.split("/"),pb=b.d.split("/");return(parseInt(pa[1])*100+parseInt(pa[0]))-(parseInt(pb[1])*100+parseInt(pb[0]));});
+    }
+    setDailyWithHs(merged);
+  },[daily,crmLeads]);
 
   function applyResult(result){
     var hi={totalContactados:result.totalContactados,leadsPerDay:result.leadsPerDay,dateRange:result.dateRange,autoReplyCount:result.autoReplyCount,realesCount:result.realesCount,esRate:result.esRate,esResp:result.esResp,esTotal:result.esTotal,ptRate:result.ptRate,ptResp:result.ptResp,ptTotal:result.ptTotal};
@@ -389,7 +421,8 @@ export default function Dashboard(){
       setDbLoading(true);
       setLoadError(null);
       try{
-        var threads=await fetchThreadsFromPostHog(stepFilter);
+        var [threads,stats]=await Promise.all([fetchThreadsFromPostHog(stepFilter),fetchResponseStats('2026-02-02')]);
+        setResponseStats(stats);
         var csvRows=expandThreadMessages(threads);
         setRawRows(csvRows);
         var result=processCSVRows(csvRows,templateConfig,regionFilter);
@@ -666,6 +699,13 @@ export default function Dashboard(){
       console.log("[CRM] Meetings:",meetingsRes.length);
       var dealsRes=await fetchDealsSince(CRM_SINCE);
       console.log("[CRM] Deals:",dealsRes.length);
+      var leadProps=await debugLeadProperties();
+      console.log("[CRM] Lead properties:",leadProps);
+      var leadsRes=[];
+      try{
+        leadsRes=await fetchLeadsSince(CRM_SINCE,"808581652");
+        console.log("[CRM] Leads (pipeline 808581652):",leadsRes.length);
+      }catch(e){console.warn("[CRM] Leads fetch failed:",e.message);}
       var pipelines=await fetchDealPipelines();
       console.log("[CRM] Pipelines loaded");
       // Collect unique contact IDs from meeting associations and batch-fetch only those
@@ -680,8 +720,8 @@ export default function Dashboard(){
         contactsRes=await fetchContactsByIds(contactIds);
         console.log("[CRM] Contacts (from meetings):",contactsRes.length);
       }
-      setCrmContacts(contactsRes);setCrmMeetings(meetingsRes);setCrmDeals(dealsRes);setCrmPipelines(pipelines);setCrmInited(true);
-      console.log("[CRM] Done. Meetings:",meetingsRes.length,"Contacts:",contactsRes.length,"Deals:",dealsRes.length);
+      setCrmContacts(contactsRes);setCrmMeetings(meetingsRes);setCrmDeals(dealsRes);setCrmLeads(leadsRes);setCrmPipelines(pipelines);setCrmInited(true);
+      console.log("[CRM] Done. Meetings:",meetingsRes.length,"Contacts:",contactsRes.length,"Deals:",dealsRes.length,"Leads:",leadsRes.length);
     }catch(e){console.error("[CRM] Error:",e);setCrmError(e.message);}
     finally{setCrmLoading(false);}
   }
@@ -923,7 +963,7 @@ export default function Dashboard(){
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4AC}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4AC}"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Leads Inbound</span><InfoTip dark={_isDark} data={TIPS.contactados}/></div>
               <div style={{fontSize:36,fontWeight:900,fontFamily:mono,marginTop:6,lineHeight:1}}>{ix.uniqueLeadCount}</div>
-              <div style={{fontSize:13,color:C.muted,marginTop:4}}>{lpd}/d{"\u00ED"}a {"\u00B7"} {tc} conversaciones</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:4}}>{lpd}/d{"\u00ED"}a {"\u00B7"} {responseStats?responseStats.inbound:tc} conversaciones</div>
               <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:6}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
             </Cd>
             <Cd style={{position:"relative",overflow:"hidden"}}>
@@ -974,13 +1014,16 @@ export default function Dashboard(){
         </>) : (<>
           {/* Outbound: 4 KPI funnel cards */}
           {(function(){
-            var respCount=d.resp;
-            var respRate=tc>0?((respCount/tc)*100).toFixed(1):"0";
+            var sqlTotal=responseStats?responseStats.outboundTotal:null;
+            var sqlResp=responseStats?responseStats.outboundResponded:null;
+            var contactados=sqlTotal||tc;
+            var respCount=sqlResp!=null?sqlResp:d.resp;
+            var respRate=contactados>0?((respCount/contactados)*100).toFixed(1):"0";
             var twoMsgCount=meetings.filter(function(m){return m.ms>=2;}).length;
             var twoMsgPct=respCount>0?((twoMsgCount/respCount)*100).toFixed(1):"0";
             var ofertaCount=d.mc;
             var ofertaVsResp=respCount>0?((ofertaCount/respCount)*100).toFixed(1):"0";
-            var ofertaVsTotal=tc>0?((ofertaCount/tc)*100).toFixed(1):"0";
+            var ofertaVsTotal=contactados>0?((ofertaCount/contactados)*100).toFixed(1):"0";
             // Filter HS meetings by active date period
             var periodMeetPhones=null;
             if(crmMeetings.length>0&&crmContacts.length>0){
@@ -1008,7 +1051,7 @@ export default function Dashboard(){
               }
             }
             var actualVsOferta=ofertaCount>0?((actualMeetCount/ofertaCount)*100).toFixed(1):"0";
-            var actualVsTotal=tc>0?((actualMeetCount/tc)*100).toFixed(1):"0";
+            var actualVsTotal=contactados>0?((actualMeetCount/contactados)*100).toFixed(1):"0";
             return (
           <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:12,marginBottom:22}}>
             {/* Card 1: Contactados */}
@@ -1019,7 +1062,7 @@ export default function Dashboard(){
                 <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Contactados</span>
                 <InfoTip dark={_isDark} data={TIPS.contactados}/>
               </div>
-              <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1}}>{tc}</div>
+              <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1}}>{contactados}</div>
               <div style={{fontSize:13,color:C.muted,marginTop:4}}>{lpd}/d{"\u00ED"}a</div>
               <div style={{fontSize:11,color:C.accent,fontWeight:700,marginTop:6}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
             </Cd>
@@ -1093,7 +1136,7 @@ export default function Dashboard(){
         </>)}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
           <Cd><Sec tipKey="esVsPt">{"\u{1F1EA}\u{1F1F8} vs \u{1F1E7}\u{1F1F7}"}</Sec><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><div style={{background:C.lBlue,borderRadius:12,padding:16,textAlign:"center"}}><div style={{fontSize:12,color:C.accent,fontWeight:700}}>{"\u{1F1EA}\u{1F1F8} ESPA\u00D1OL"}</div><div style={{fontSize:34,fontWeight:900,color:C.accent,fontFamily:mono}}>{headerInfo.esRate}%</div><div style={{fontSize:13,color:C.muted}}>{headerInfo.esResp} de {headerInfo.esTotal}</div></div><div style={{background:C.lGreen,borderRadius:12,padding:16,textAlign:"center"}}><div style={{fontSize:12,color:C.green,fontWeight:700}}>{"\u{1F1E7}\u{1F1F7} PORTUGU\u00C9S"}</div><div style={{fontSize:34,fontWeight:900,color:C.green,fontFamily:mono}}>{headerInfo.ptRate}%</div><div style={{fontSize:13,color:C.muted}}>{headerInfo.ptResp} de {headerInfo.ptTotal}</div></div></div></Cd>
-          <Cd><Sec tipKey="leadsPorDia">Leads por D{"\u00ED"}a</Sec><ResponsiveContainer width="100%" height={160}><AreaChart data={daily} margin={{left:-15,right:5,top:5,bottom:0}}><defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.accent} stopOpacity={0.2}/><stop offset="100%" stopColor={C.accent} stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border}/><XAxis dataKey="d" tick={{fontSize:12,fill:C.muted}}/><YAxis tick={{fontSize:12,fill:C.muted}}/><Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13}}/><Area type="monotone" dataKey="l" stroke={C.accent} fill="url(#ag)" strokeWidth={2}/></AreaChart></ResponsiveContainer></Cd>
+          <Cd><Sec tipKey="leadsPorDia">Leads por D{"\u00ED"}a</Sec><ResponsiveContainer width="100%" height={180}><AreaChart data={dailyWithHs.length>0?dailyWithHs:daily} margin={{left:-15,right:5,top:5,bottom:0}}><defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.accent} stopOpacity={0.2}/><stop offset="100%" stopColor={C.accent} stopOpacity={0}/></linearGradient><linearGradient id="agHs" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.orange} stopOpacity={0.2}/><stop offset="100%" stopColor={C.orange} stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border}/><XAxis dataKey="d" tick={{fontSize:12,fill:C.muted}}/><YAxis tick={{fontSize:12,fill:C.muted}}/><Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13}}/><Legend wrapperStyle={{fontSize:12}} formatter={function(v){return v==="l"?"Yago":"HubSpot"}}/><Area type="monotone" dataKey="l" name="l" stroke={C.accent} fill="url(#ag)" strokeWidth={2}/><Area type="monotone" dataKey="hs" name="hs" stroke={C.orange} fill="url(#agHs)" strokeWidth={2}/></AreaChart></ResponsiveContainer></Cd>
         </div>
 
         {/* Benchmarks section (outbound only) */}

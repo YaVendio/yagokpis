@@ -53,7 +53,7 @@ export async function fetchThreadsFromPostHog(stepFilter) {
     "WHERE le.flow_id = 1\n" +
     "    AND le.sent_at >= '2026-02-03'" +
     stepClause +
-    "\nORDER BY t.thread_id\nLIMIT 10000";
+    "\nORDER BY t.thread_id";
 
   var result = await queryMetabase(query);
 
@@ -94,8 +94,7 @@ export async function fetchInboundThreadsFromPostHog() {
     '    t."values"::text AS values_json\n' +
     "FROM thread t\n" +
     "WHERE t.created_at >= '2026-02-03'\n" +
-    "ORDER BY t.thread_id\n" +
-    "LIMIT 10000";
+    "ORDER BY t.thread_id";
 
   var result = await queryMetabase(query);
 
@@ -144,6 +143,78 @@ export async function fetchLifecyclePhones() {
     }
   }
   return phones;
+}
+
+export async function fetchResponseStats(since) {
+  var query =
+    "WITH outbound AS (\n" +
+    "    SELECT COUNT(DISTINCT phone_number) AS outbound_total\n" +
+    "    FROM lifecycle_executions\n" +
+    "    WHERE flow_id = 1\n" +
+    "      AND status = 'sent'\n" +
+    "      AND sent_at >= '" + since + "'\n" +
+    "),\n" +
+    "outbound_responded AS (\n" +
+    "    SELECT COUNT(*) AS outbound_responded\n" +
+    "    FROM (\n" +
+    "        SELECT\n" +
+    "            metadata->>'phone_number' AS phone_number,\n" +
+    "            ROW_NUMBER() OVER (\n" +
+    "                PARTITION BY metadata->>'phone_number'\n" +
+    "                ORDER BY created_at DESC\n" +
+    "            ) AS rn\n" +
+    "        FROM thread\n" +
+    "        WHERE created_at >= '" + since + "'\n" +
+    "          AND COALESCE(metadata->>'channel', '') != 'cgr'\n" +
+    "          AND metadata->>'flow_id' = '1'\n" +
+    "          AND metadata->>'phone_number' IS NOT NULL\n" +
+    "          AND jsonb_array_length(COALESCE(values->'messages', '[]'::jsonb)) > 0\n" +
+    "          AND EXISTS (\n" +
+    "              SELECT 1 FROM jsonb_array_elements(values->'messages') m\n" +
+    "              WHERE m->>'type' = 'human'\n" +
+    "          )\n" +
+    "    ) t WHERE rn = 1\n" +
+    "),\n" +
+    "all_conversational AS (\n" +
+    "    SELECT COUNT(*) AS inbound\n" +
+    "    FROM (\n" +
+    "        SELECT\n" +
+    "            COALESCE(metadata->>'phone_number', thread_id::text) AS uid,\n" +
+    "            ROW_NUMBER() OVER (\n" +
+    "                PARTITION BY COALESCE(metadata->>'phone_number', thread_id::text)\n" +
+    "                ORDER BY created_at DESC\n" +
+    "            ) AS rn\n" +
+    "        FROM thread\n" +
+    "        WHERE created_at >= '" + since + "'\n" +
+    "          AND COALESCE(metadata->>'channel', '') != 'cgr'\n" +
+    "          AND jsonb_array_length(COALESCE(values->'messages', '[]'::jsonb)) > 0\n" +
+    "          AND (metadata->>'flow_id' IS DISTINCT FROM '1')\n" +
+    "          AND EXISTS (\n" +
+    "              SELECT 1 FROM jsonb_array_elements(values->'messages') m\n" +
+    "              WHERE m->>'type' = 'human'\n" +
+    "          )\n" +
+    "          AND EXISTS (\n" +
+    "              SELECT 1 FROM jsonb_array_elements(values->'messages') m\n" +
+    "              WHERE m->>'type' = 'ai'\n" +
+    "          )\n" +
+    "    ) t WHERE rn = 1\n" +
+    ")\n" +
+    "SELECT\n" +
+    "    o.outbound_total,\n" +
+    "    r.outbound_responded,\n" +
+    "    i.inbound\n" +
+    "FROM outbound o, outbound_responded r, all_conversational i";
+
+  var result = await queryMetabase(query);
+  if (!result || !result.results || result.results.length === 0) {
+    return { outboundTotal: 0, outboundResponded: 0, inbound: 0 };
+  }
+  var row = result.results[0];
+  return {
+    outboundTotal: row[0] || 0,
+    outboundResponded: row[1] || 0,
+    inbound: row[2] || 0,
+  };
 }
 
 export function expandInboundThreadMessages(threads) {
