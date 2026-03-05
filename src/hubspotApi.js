@@ -119,6 +119,35 @@ export async function fetchContactsByIds(contactIds) {
   return all;
 }
 
+// Search leads (object) from a date onwards, filtered by pipeline
+// Debug: list properties available on the leads object (0-136)
+export async function debugLeadProperties() {
+  var data = await callHubSpot("/crm/v3/properties/0-136");
+  console.log("[HS] Lead (0-136) properties:", data);
+  return data;
+}
+
+export async function fetchLeadsSince(sinceIso, pipelineId) {
+  var sinceMs = new Date(sinceIso).getTime();
+  var all = [];
+  var after = undefined;
+  while (true) {
+    var filters = [{ propertyName: "createdate", operator: "GTE", value: String(sinceMs) }];
+    if (pipelineId) filters.push({ propertyName: "hs_pipeline", operator: "EQ", value: pipelineId });
+    var searchBody = {
+      filterGroups: [{ filters: filters }],
+      properties: ["hs_pipeline", "hs_pipeline_stage", "createdate"],
+      limit: 100,
+    };
+    if (after) searchBody.after = after;
+    var data = await callHubSpot("/crm/v3/objects/0-136/search", null, searchBody);
+    if (data.results) all = all.concat(data.results);
+    if (!data.paging || !data.paging.next || !data.paging.next.after) break;
+    after = data.paging.next.after;
+  }
+  return all;
+}
+
 // Search deals from a date onwards
 export async function fetchDealsSince(sinceIso) {
   var sinceMs = new Date(sinceIso).getTime();
