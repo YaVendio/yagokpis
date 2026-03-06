@@ -248,7 +248,7 @@ var EMPTY_D={
   all:{resp:0,rate:"0%",topics:[],ig:0,igR:"0%",igLink:0,igLinkR:"0%",igAt:0,igAtR:"0%",mc:0,mR:"0%",tool:0,tR:"0%",eng:EMPTY_ENG,hours:new Array(24).fill(0),tpl:[],bcast:[],tplByStep:null},
   real:{resp:0,rate:"0%",topics:[],ig:0,igR:"0%",igLink:0,igLinkR:"0%",igAt:0,igAtR:"0%",mc:0,mR:"0%",tool:0,tR:"0%",eng:EMPTY_ENG,hours:new Array(24).fill(0),tpl:[],bcast:[],tplByStep:null}
 };
-var EMPTY_HEADER={totalContactados:0,leadsPerDay:0,dateRange:"",autoReplyCount:0,realesCount:0,esRate:"0",esResp:0,esTotal:0,ptRate:"0",ptResp:0,ptTotal:0};
+var EMPTY_HEADER={totalContactados:0,leadsPerDay:0,dateRange:"",autoReplyCount:0,realesCount:0,esRate:"0",esResp:0,esRespReal:0,esTotal:0,ptRate:"0",ptResp:0,ptRespReal:0,ptTotal:0,esRateReal:"0",ptRateReal:"0"};
 
 export default function Dashboard(){
   const [darkMode,setDarkMode]=useState(function(){try{return localStorage.getItem("yago_dark")==="1";}catch(e){return false;}});
@@ -265,6 +265,8 @@ export default function Dashboard(){
   const [mode,setMode]=useState(0);
   const [showM,setShowM]=useState(false);
   const [showA,setShowA]=useState(false);
+  const [showConfirmed,setShowConfirmed]=useState(false);
+  const [confirmedLeads,setConfirmedLeads]=useState([]);
   const [dbLoading,setDbLoading]=useState(true);
   const [loadError,setLoadError]=useState(null);
   const [stepFilter,setStepFilter]=useState(null);
@@ -389,7 +391,7 @@ export default function Dashboard(){
   },[daily,crmLeads]);
 
   function applyResult(result){
-    var hi={totalContactados:result.totalContactados,leadsPerDay:result.leadsPerDay,dateRange:result.dateRange,autoReplyCount:result.autoReplyCount,realesCount:result.realesCount,esRate:result.esRate,esResp:result.esResp,esTotal:result.esTotal,ptRate:result.ptRate,ptResp:result.ptResp,ptTotal:result.ptTotal};
+    var hi={totalContactados:result.totalContactados,leadsPerDay:result.leadsPerDay,dateRange:result.dateRange,autoReplyCount:result.autoReplyCount,realesCount:result.realesCount,esRate:result.esRate,esResp:result.esResp,esRespReal:result.esRespReal,esTotal:result.esTotal,ptRate:result.ptRate,ptResp:result.ptResp,ptRespReal:result.ptRespReal,ptTotal:result.ptTotal,esRateReal:result.esRateReal,ptRateReal:result.ptRateReal};
     setMeetings(result.MEETINGS);setTopicsAll(result.topicsAll);setDataD(result.D);setFunnelAll(result.funnelAll);setFunnelReal(result.funnelReal);setChBench(result.chBench);setDaily(result.daily);setBTable(result.bTable);setMeetByTplAll(result.meetByTplAll);setMeetByTplReal(result.meetByTplReal);setHeaderInfo(hi);
     if(result.allContactedPhones) setAllContactedPhones(result.allContactedPhones);
     if(result.allTemplateNames) setAllTemplateNames(result.allTemplateNames);
@@ -864,6 +866,9 @@ export default function Dashboard(){
   var mk=mode===0?"all":"real";var d=dataD[mk];var funnel=mode===0?funnelAll:funnelReal;var mbt=mode===0?meetByTplAll:meetByTplReal;
   var tc=(panel==="outbound"&&responseStats&&responseStats.outboundTotal)?responseStats.outboundTotal:headerInfo.totalContactados;
   var lpd=headerInfo.leadsPerDay;
+  var _jsTc=headerInfo.totalContactados;var _tplScale=(tc>0&&_jsTc>0&&tc>_jsTc)?tc/_jsTc:1;
+  function _cS(s){return _tplScale!==1?Math.round(s*_tplScale):s;}
+  function _cR(r,s){var cs=_cS(s);return cs>0?((r/cs)*100).toFixed(1)+"%":"0%";}
 
   if(dbLoading) return (<div style={{background:C.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:font}}>
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
@@ -888,6 +893,7 @@ export default function Dashboard(){
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
     {showM && <MeetModal leads={meetings.filter(function(l){return l.ml;})} mode={mode} onClose={function(){setShowM(false);}} title={"\u{1F4C5} Leads con Oferta de Reuni\u00F3n"}/>}
     {showA && <MeetModal leads={meetings} mode={mode} onClose={function(){setShowA(false);}} title={"\u{1F4AC} Todas las Conversaciones"}/>}
+    {showConfirmed && <MeetModal leads={confirmedLeads} mode={mode} onClose={function(){setShowConfirmed(false);}} title={"\u2705 Reuniones Confirmadas (Cruce HubSpot)"}/>}
     {selTpl && <TplModal tpl={selTpl} leads={meetings} mode={mode} onClose={function(){setSelTpl(null);}}/>}
     {topicModal && (function(){
       var tkw=TOPIC_KEYWORDS[topicModal];
@@ -957,21 +963,21 @@ export default function Dashboard(){
     <div style={{padding:"24px 28px",maxWidth:1300,margin:"0 auto"}}>
       {inboundLoading && <div style={{background:C.lPurple,border:"1px solid "+C.purple+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center"}}><div style={{width:20,height:20,border:"2px solid "+C.purple+"33",borderTopColor:C.purple,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.purple}}>Cargando datos inbound...</strong></div></div>}
 
-      {tab==="overview" && (function(){var cd=null;var isInb=panel==="inbound";var ix=inboundExtra; return (<>
+      {tab==="overview" && (function(){var cd=null;var isInb=panel==="inbound";var ix=inboundExtra;var inbTc=(responseStats&&responseStats.inbound)?responseStats.inbound:(ix?ix.uniqueLeadCount:0); return (<>
         {isInb && ix ? (<>
           {/* Inbound: 3 KPI cards */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))",gap:14,marginBottom:22}}>
             <Cd onClick={function(){setShowA(true);}} style={{cursor:"pointer",border:"2px solid "+C.purple+"44",position:"relative",overflow:"hidden"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4AC}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4AC}"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Leads Inbound</span><InfoTip dark={_isDark} data={TIPS.contactados}/></div>
-              <div style={{fontSize:36,fontWeight:900,fontFamily:mono,marginTop:6,lineHeight:1}}>{responseStats?responseStats.inbound:ix.uniqueLeadCount}</div>
+              <div style={{fontSize:36,fontWeight:900,fontFamily:mono,marginTop:6,lineHeight:1}}>{inbTc}</div>
               <div style={{fontSize:13,color:C.muted,marginTop:4}}>{lpd}/d{"\u00ED"}a {"\u00B7"} {tc} conversaciones</div>
               <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:6}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
             </Cd>
             <Cd style={{position:"relative",overflow:"hidden"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4CA}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4CA}"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Engagement</span><InfoTip dark={_isDark} data={TIPS.engagementDistribucion}/></div>
-              <div style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.accent,marginTop:6,lineHeight:1}}>{d.resp>0?((ix.engagedTotal/d.resp)*100).toFixed(1):"0"}%</div>
+              <div style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.accent,marginTop:6,lineHeight:1}}>{inbTc>0?((ix.engagedTotal/inbTc)*100).toFixed(1):"0"}%</div>
               <div style={{fontSize:13,color:C.muted,marginTop:4}}>{ix.engagedTotal} con 2+ msgs</div>
               <div style={{fontSize:12,fontWeight:600,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}><span style={{color:C.red}}>{ix.depthCounts.rebote} rebotes</span> {"\u00B7"} <span style={{color:C.accent}}>{ix.avgDepth} msgs/conv</span></div>
             </Cd>
@@ -980,7 +986,7 @@ export default function Dashboard(){
               <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Conversi{"\u00F3"}n Signup</span><InfoTip dark={_isDark} data={TIPS.conversionSignup}/></div>
               <div style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.green,marginTop:6,lineHeight:1}}>{ix.signupLinkCount}</div>
               <div style={{fontSize:13,color:C.muted,marginTop:4}}>recibieron link crear cuenta</div>
-              <div style={{fontSize:12,color:C.green,fontWeight:600,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{ix.signupCount} recibieron Step 1 ({ix.uniqueLeadCount>0?((ix.signupCount/ix.uniqueLeadCount)*100).toFixed(1):"0"}%)</div>
+              <div style={{fontSize:12,color:C.green,fontWeight:600,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{ix.signupCount} recibieron Step 1 ({inbTc>0?((ix.signupCount/inbTc)*100).toFixed(1):"0"}%)</div>
             </Cd>
           </div>
 
@@ -1019,9 +1025,9 @@ export default function Dashboard(){
             var sqlTotal=responseStats?responseStats.outboundTotal:null;
             var sqlResp=responseStats?responseStats.outboundResponded:null;
             var contactados=sqlTotal||tc;
-            var respCount=sqlResp!=null?sqlResp:d.resp;
+            var respCount=mode===1?d.resp:(sqlResp!=null?sqlResp:d.resp);
             var respRate=contactados>0?((respCount/contactados)*100).toFixed(1):"0";
-            var twoMsgCount=meetings.filter(function(m){return m.ms>=2;}).length;
+            var twoMsgCount=meetings.filter(function(m){return m.ms>=2&&(mode===0||!m.au);}).length;
             var twoMsgPct=respCount>0?((twoMsgCount/respCount)*100).toFixed(1):"0";
             var ofertaCount=d.mc;
             var ofertaVsResp=respCount>0?((ofertaCount/respCount)*100).toFixed(1):"0";
@@ -1045,11 +1051,27 @@ export default function Dashboard(){
             }
             // Cross only leads with ml:true (received meeting link) against HS meetings
             var actualMeetCount=0;
+            var confirmedArr=[];
             if(periodMeetPhones){
+              // Build expanded phone index: full digits + last 11 + last 10 for each HS phone
+              var phoneIdx={};
+              var mpKeys=Object.keys(periodMeetPhones);
+              for(var pi=0;pi<mpKeys.length;pi++){
+                var pd=mpKeys[pi];
+                phoneIdx[pd]=true;
+                if(pd.length>11)phoneIdx[pd.slice(-11)]=true;
+                if(pd.length>10)phoneIdx[pd.slice(-10)]=true;
+              }
               var ofertaLeadsArr=meetings.filter(function(l){return l.ml;});
               for(var ami=0;ami<ofertaLeadsArr.length;ami++){
                 var olPhone=(ofertaLeadsArr[ami].p||"").replace(/\D/g,"");
-                if(olPhone&&periodMeetPhones[olPhone])actualMeetCount++;
+                if(!olPhone)continue;
+                // Check full number + suffix variants against the index
+                var matched=false;
+                if(phoneIdx[olPhone])matched=true;
+                else if(olPhone.length>11&&phoneIdx[olPhone.slice(-11)])matched=true;
+                else if(olPhone.length>10&&phoneIdx[olPhone.slice(-10)])matched=true;
+                if(matched){actualMeetCount++;confirmedArr.push(ofertaLeadsArr[ami]);}
               }
             }
             var actualVsOferta=ofertaCount>0?((actualMeetCount/ofertaCount)*100).toFixed(1):"0";
@@ -1094,7 +1116,7 @@ export default function Dashboard(){
               <div style={{fontSize:11,color:C.pink,fontWeight:700,marginTop:6}}>{"\u{1F4C5} Ver contactos \u2192"}</div>
             </Cd>
             {/* Card 4: Reunión Confirmada (HubSpot cross-reference) */}
-            <Cd style={{position:"relative",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
+            <Cd onClick={function(){if(confirmedArr.length>0){setConfirmedLeads(confirmedArr);setShowConfirmed(true);}}} style={{position:"relative",cursor:periodMeetPhones&&actualMeetCount>0?"pointer":"default",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u2705"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div>
@@ -1103,7 +1125,7 @@ export default function Dashboard(){
               {periodMeetPhones?(<>
                 <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.green}}>{actualMeetCount}</div>
                 <div style={{fontSize:13,color:C.muted,marginTop:4}}>{actualVsOferta}% de ofertas {"\u00B7"} {actualVsTotal}% del total</div>
-                <div style={{fontSize:11,color:C.muted,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>Cruce con HubSpot Meetings</div>
+                <div style={{fontSize:11,color:C.green,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{actualMeetCount>0?"\u2705 Ver reuniones \u2192":"Cruce con HubSpot Meetings"}</div>
               </>):(<>
                 <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
                 <div style={{fontSize:12,color:C.muted,marginTop:4}}>{crmLoading?"Cargando HubSpot...":"Esperando datos HubSpot"}</div>
@@ -1126,7 +1148,8 @@ export default function Dashboard(){
                   var fOferta=meetings.filter(function(l){return l.ml;});
                   for(var mi2=0;mi2<fOferta.length;mi2++){var fp=(fOferta[mi2].p||"").replace(/\D/g,"");if(fp&&fMeetPhones[fp])actualMC++;}
                 }
-                var correctedFunnel=funnel.map(function(f,i){if(i===0&&tc>0)return{n:f.n,v:tc,c:f.c};return f;});
+                var funnelRespCount=mode===1?d.resp:(responseStats&&responseStats.outboundResponded!=null?responseStats.outboundResponded:d.resp);
+                var correctedFunnel=funnel.map(function(f,i){if(i===0&&tc>0)return{n:f.n,v:tc,c:f.c};if(i===1)return{n:f.n,v:funnelRespCount,c:f.c};return f;});
                 var funnelFull=correctedFunnel.concat([{n:"Reuni\u00F3n Confirmada",v:actualMC,c:C.green}]);
                 return funnelFull.map(function(f,i){var w=Math.max((f.v/(tc||1))*100,4);var prev=i>0?((f.v/(funnelFull[i-1].v||1))*100).toFixed(0):null;
                 return (<div key={i} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:C.sub,fontWeight:500}}><span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:6,background:f.c+"18",color:f.c,fontSize:11,fontWeight:800,marginRight:6}}>{i+1}</span>{f.n}</span><div><span style={{fontSize:17,fontWeight:800,fontFamily:mono}}>{f.v}</span><span style={{fontSize:13,color:C.muted,marginLeft:6}}>{(f.v/(tc||1)*100).toFixed(1)}%</span>{prev && <span style={{fontSize:12,color:parseFloat(prev)>=50?C.green:parseFloat(prev)>=20?C.yellow:C.red,marginLeft:6}}>({prev}%{"\u2193"})</span>}</div></div><div style={{height:24,background:C.rowAlt,borderRadius:6,overflow:"hidden"}}><div style={{height:"100%",width:w+"%",background:"linear-gradient(90deg, "+f.c+" 0%, "+f.c+"CC 100%)",borderRadius:6,transition:"width 0.5s ease"}}/></div></div>);});
@@ -1138,7 +1161,7 @@ export default function Dashboard(){
           </div>
         </>)}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-          <Cd><Sec tipKey="esVsPt">{"\u{1F1EA}\u{1F1F8} vs \u{1F1E7}\u{1F1F7}"}</Sec><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><div style={{background:C.lBlue,borderRadius:12,padding:16,textAlign:"center"}}><div style={{fontSize:12,color:C.accent,fontWeight:700}}>{"\u{1F1EA}\u{1F1F8} ESPA\u00D1OL"}</div><div style={{fontSize:34,fontWeight:900,color:C.accent,fontFamily:mono}}>{headerInfo.esRate}%</div><div style={{fontSize:13,color:C.muted}}>{headerInfo.esResp} de {headerInfo.esTotal}</div></div><div style={{background:C.lGreen,borderRadius:12,padding:16,textAlign:"center"}}><div style={{fontSize:12,color:C.green,fontWeight:700}}>{"\u{1F1E7}\u{1F1F7} PORTUGU\u00C9S"}</div><div style={{fontSize:34,fontWeight:900,color:C.green,fontFamily:mono}}>{headerInfo.ptRate}%</div><div style={{fontSize:13,color:C.muted}}>{headerInfo.ptResp} de {headerInfo.ptTotal}</div></div></div></Cd>
+          {(function(){var jsTotal=headerInfo.esTotal+headerInfo.ptTotal;var esFrac=jsTotal>0?headerInfo.esTotal/jsTotal:0.5;var corrEsTotal=tc>0?Math.round(tc*esFrac):headerInfo.esTotal;var corrPtTotal=tc>0?tc-corrEsTotal:headerInfo.ptTotal;var _esResp=mode===1?headerInfo.esRespReal:headerInfo.esResp;var _ptResp=mode===1?headerInfo.ptRespReal:headerInfo.ptResp;var _esRate=corrEsTotal>0?((_esResp/corrEsTotal)*100).toFixed(1):"0.0";var _ptRate=corrPtTotal>0?((_ptResp/corrPtTotal)*100).toFixed(1):"0.0";return <Cd><Sec tipKey="esVsPt">{"\u{1F1EA}\u{1F1F8} vs \u{1F1E7}\u{1F1F7}"}</Sec><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><div style={{background:C.lBlue,borderRadius:12,padding:16,textAlign:"center"}}><div style={{fontSize:12,color:C.accent,fontWeight:700}}>{"\u{1F1EA}\u{1F1F8} ESPA\u00D1OL"}</div><div style={{fontSize:34,fontWeight:900,color:C.accent,fontFamily:mono}}>{_esRate}%</div><div style={{fontSize:13,color:C.muted}}>{_esResp} de {corrEsTotal}</div></div><div style={{background:C.lGreen,borderRadius:12,padding:16,textAlign:"center"}}><div style={{fontSize:12,color:C.green,fontWeight:700}}>{"\u{1F1E7}\u{1F1F7} PORTUGU\u00C9S"}</div><div style={{fontSize:34,fontWeight:900,color:C.green,fontFamily:mono}}>{_ptRate}%</div><div style={{fontSize:13,color:C.muted}}>{_ptResp} de {corrPtTotal}</div></div></div></Cd>;})()}
           <Cd><Sec tipKey="leadsPorDia">Leads por D{"\u00ED"}a</Sec><ResponsiveContainer width="100%" height={180}><AreaChart data={dailyWithHs.length>0?dailyWithHs:daily} margin={{left:-15,right:5,top:5,bottom:0}}><defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.accent} stopOpacity={0.2}/><stop offset="100%" stopColor={C.accent} stopOpacity={0}/></linearGradient><linearGradient id="agHs" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.orange} stopOpacity={0.2}/><stop offset="100%" stopColor={C.orange} stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border}/><XAxis dataKey="d" tick={{fontSize:12,fill:C.muted}}/><YAxis tick={{fontSize:12,fill:C.muted}}/><Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13}}/><Legend wrapperStyle={{fontSize:12}} formatter={function(v){return v==="l"?"Yago":"HubSpot"}}/><Area type="monotone" dataKey="l" name="l" stroke={C.accent} fill="url(#ag)" strokeWidth={2}/><Area type="monotone" dataKey="hs" name="hs" stroke={C.orange} fill="url(#agHs)" strokeWidth={2}/></AreaChart></ResponsiveContainer></Cd>
         </div>
 
@@ -1154,7 +1177,10 @@ export default function Dashboard(){
 
       {tab==="engagement" && (function(){
         var isInb=panel==="inbound";var ix=inboundExtra;
-        var totalResp=headerInfo.realesCount+headerInfo.autoReplyCount;
+        var _sqlR=responseStats?responseStats.outboundResponded:null;
+        var totalResp=(!isInb&&_sqlR!=null)?_sqlR:(headerInfo.realesCount+headerInfo.autoReplyCount);
+        var corrRespCount=mode===1?d.resp:totalResp;
+        var corrRate=tc>0?((corrRespCount/tc)*100).toFixed(1)+"%":"0%";
         var autoP=totalResp>0?((headerInfo.autoReplyCount/totalResp)*100).toFixed(1):"0";
         var realP=totalResp>0?((headerInfo.realesCount/totalResp)*100).toFixed(1):"0";
         var peakH=0;var peakV=0;for(var hi=0;hi<d.hours.length;hi++){if(d.hours[hi]>peakV){peakV=d.hours[hi];peakH=hi;}}
@@ -1169,7 +1195,7 @@ export default function Dashboard(){
           ];
           var depthLabels={profunda:"Profunda (10+)",media:"Media (5-9)",corta:"Corta (2-4)",rebote:"Rebote (1 msg)"};
           /* Conversion step helpers */
-          var stLeads=ix.uniqueLeadCount;
+          var stLeads=(responseStats&&responseStats.inbound)?responseStats.inbound:ix.uniqueLeadCount;
           var stEngaged=ix.engagedTotal;
           var stLink=ix.signupLinkCount;
           var stStep1=ix.signupCount;
@@ -1235,7 +1261,7 @@ export default function Dashboard(){
                   <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1,display:"flex",alignItems:"center"}}>Leads Recurrentes<InfoTip dark={_isDark} data={TIPS.leadsRecurrentes}/></div>
                   <div style={{display:"flex",alignItems:"baseline",gap:6,marginTop:4}}>
                     <span style={{fontSize:32,fontWeight:900,fontFamily:mono,color:C.accent}}>{ix.multiDayCount}</span>
-                    <span style={{fontSize:14,fontWeight:700,color:C.accent}}>({d.resp>0?((ix.multiDayCount/d.resp)*100).toFixed(1):"0"}%)</span>
+                    <span style={{fontSize:14,fontWeight:700,color:C.accent}}>({stLeads>0?((ix.multiDayCount/stLeads)*100).toFixed(1):"0"}%)</span>
                   </div>
                   <div style={{fontSize:12,color:C.sub,marginTop:4}}>volvieron otro d{"\u00ED"}a</div>
                 </Cd>
@@ -1244,7 +1270,7 @@ export default function Dashboard(){
                   <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1,display:"flex",alignItems:"center"}}>Con Resultado<InfoTip dark={_isDark} data={TIPS.conResultado}/></div>
                   <div style={{display:"flex",alignItems:"baseline",gap:6,marginTop:4}}>
                     <span style={{fontSize:32,fontWeight:900,fontFamily:mono,color:C.green}}>{ix.outcomeCount}</span>
-                    <span style={{fontSize:14,fontWeight:700,color:C.green}}>({d.resp>0?((ix.outcomeCount/d.resp)*100).toFixed(1):"0"}%)</span>
+                    <span style={{fontSize:14,fontWeight:700,color:C.green}}>({stLeads>0?((ix.outcomeCount/stLeads)*100).toFixed(1):"0"}%)</span>
                   </div>
                   <div style={{fontSize:12,color:C.sub,marginTop:4}}>tool, IG o reuni{"\u00F3"}n</div>
                 </Cd>
@@ -1274,9 +1300,9 @@ export default function Dashboard(){
                     })}
                     <tr style={{borderTop:"2px solid "+C.border,fontWeight:800}}>
                       <td style={{padding:"12px 14px"}}>Total</td>
-                      <td style={{padding:"12px 14px",fontFamily:mono}}>{d.resp}</td>
+                      <td style={{padding:"12px 14px",fontFamily:mono}}>{stLeads}</td>
                       <td style={{padding:"12px 14px",fontFamily:mono,color:C.green}}>{ix.outcomeCount}</td>
-                      <td style={{padding:"12px 14px"}}><Bd color={C.accent}>{d.resp>0?((ix.outcomeCount/d.resp)*100).toFixed(1):"0"}%</Bd></td>
+                      <td style={{padding:"12px 14px"}}><Bd color={C.accent}>{stLeads>0?((ix.outcomeCount/stLeads)*100).toFixed(1):"0"}%</Bd></td>
                     </tr>
                   </tbody>
                 </table>
@@ -1320,8 +1346,8 @@ export default function Dashboard(){
         {/* Hero KPIs */}
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:22}}>
           {[
-            {l:"Total Respuestas",v:totalResp,ic:"\u{1F4AC}",c:C.purple,sub:dataD.all.rate+" tasa",tip:"respuestaRate"},
-            {l:"Tasa de Respuesta",v:d.rate,ic:"\u{1F4CA}",c:C.accent,sub:d.resp+" leads respondieron",tip:"respuestaRate"},
+            {l:"Total Respuestas",v:totalResp,ic:"\u{1F4AC}",c:C.purple,sub:(tc>0?((totalResp/tc)*100).toFixed(1):"0")+"% tasa",tip:"respuestaRate"},
+            {l:"Tasa de Respuesta",v:corrRate,ic:"\u{1F4CA}",c:C.accent,sub:corrRespCount+" leads respondieron",tip:"respuestaRate"},
             {l:mode===1?"Auto-replies excl.":"Auto-replies",v:headerInfo.autoReplyCount,ic:"\u{1F916}",c:mode===1?C.green:C.red,sub:mode===1?"Excluidos del an\u00E1lisis":autoP+"% del total",tip:"autoReply"},
             {l:"Leads Reales",v:headerInfo.realesCount,ic:"\u2705",c:C.green,sub:realP+"% son humanos reales",tip:"respuestaReales"}
           ].map(function(k,i){return (
@@ -1431,7 +1457,7 @@ export default function Dashboard(){
         var _qualGroups=[{key:"calificado",label:"Calificados",color:C.green},{key:"no_calificado",label:"No Calificados",color:C.orange},{key:"general",label:"General",color:C.accent}];
         function _abCard(gId){
           var pair=_abGrp[gId];var stA=_gts(pair[0]);var stB=_gts(pair[1]);
-          var rA=parseFloat(stA.rate)||0;var rB=parseFloat(stB.rate)||0;
+          var rA=parseFloat(_cR(stA.resp||0,stA.sent||0))||0;var rB=parseFloat(_cR(stB.resp||0,stB.sent||0))||0;
           var diff=Math.abs(rA-rB).toFixed(1);var w=rA>rB?0:(rB>rA?1:-1);var mx=Math.max(rA,rB,1);
           return (<div key={gId} style={{background:C.inputBg,border:"1px solid "+C.purple+"33",borderRadius:14,padding:0,overflow:"hidden"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 20px",background:C.lPurple,borderBottom:"1px solid "+C.purple+"22"}}>
@@ -1449,9 +1475,9 @@ export default function Dashboard(){
                   <div style={{fontSize:11,fontWeight:800,color:C.purple,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>{lb}</div>
                   <div style={{fontSize:13,fontWeight:700,fontFamily:mono,color:C.text,marginBottom:12,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{pair[idx]}</div>
                   <div style={{display:"flex",gap:16,marginBottom:10}}>
-                    <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Enviados</div><div style={{fontSize:18,fontWeight:800,color:C.text,fontFamily:mono}}>{st.sent||0}</div></div>
+                    <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Enviados</div><div style={{fontSize:18,fontWeight:800,color:C.text,fontFamily:mono}}>{_cS(st.sent||0)}</div></div>
                     <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Respuestas</div><div style={{fontSize:18,fontWeight:800,color:C.text,fontFamily:mono}}>{st.resp||0}</div></div>
-                    <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Tasa</div><div style={{fontSize:18,fontWeight:800,color:isW?C.green:C.text,fontFamily:mono}}>{st.rate||"0.0%"}</div></div>
+                    <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Tasa</div><div style={{fontSize:18,fontWeight:800,color:isW?C.green:C.text,fontFamily:mono}}>{_cR(st.resp||0,st.sent||0)}</div></div>
                   </div>
                   <div style={{background:C.rowAlt,borderRadius:6,height:8,overflow:"hidden"}}>
                     <div style={{height:"100%",borderRadius:6,background:isW?C.green:C.accent,width:(mx>0?(rate/mx*100):0)+"%",transition:"width 0.3s ease"}}></div>
@@ -1472,7 +1498,7 @@ export default function Dashboard(){
               var stepTplNames={};for(var sti=0;sti<sg.templates.length;sti++)stepTplNames[sg.templates[sti].name]=true;
               var stepAbKeys=_allAbKeys.filter(function(gId){if(_renderedAb[gId])return false;var pair=_abGrp[gId];return pair&&pair.length>=2&&stepTplNames[pair[0]]&&stepTplNames[pair[1]];});
               for(var sai=0;sai<stepAbKeys.length;sai++)_renderedAb[stepAbKeys[sai]]=true;
-              if(visTpls.length===0&&hidTpls.length===0&&stepAbKeys.length===0)return null;var rn=parseFloat(sg.totalRate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;
+              if(visTpls.length===0&&hidTpls.length===0&&stepAbKeys.length===0)return null;var _sgRate=_cR(sg.totalResp,sg.totalSent);var rn=parseFloat(_sgRate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;
               return (<div key={sk} style={{marginBottom:22}}>
                 <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,padding:"10px 16px",background:sg.color+"08",borderRadius:10,border:"1px solid "+sg.color+"22"}}>
                   <div style={{flex:1}}>
@@ -1480,8 +1506,8 @@ export default function Dashboard(){
                     <div style={{fontSize:18,fontWeight:800,color:sg.color}}>{sg.label}</div>
                   </div>
                   <div style={{textAlign:"right"}}>
-                    <div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{sg.totalRate}</div>
-                    <div style={{fontSize:13,color:C.muted}}>{sg.totalResp} de {sg.totalSent}</div>
+                    <div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{_sgRate}</div>
+                    <div style={{fontSize:13,color:C.muted}}>{sg.totalResp} de {_cS(sg.totalSent)}</div>
                   </div>
                 </div>
                 {stepAbKeys.length>0 && <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:12}}>
@@ -1490,9 +1516,9 @@ export default function Dashboard(){
                 {visTpls.length>0 && (function(){
                   var hasMultipleQuals=_qualGroups.filter(function(qg){return visTpls.some(function(t){return _getQ(t.name)===qg.key;});}).length>1;
                   if(!hasMultipleQuals){return (<div style={{display:"grid",gridTemplateColumns:visTpls.length===1?"1fr":"1fr 1fr",gap:12}}>
-                    {visTpls.map(function(t,i){var trn=parseFloat(t.rate);var tsc=trn>=20?C.green:trn>=12?C.yellow:C.red;
+                    {visTpls.map(function(t,i){var _tr=_cR(t.resp,t.sent);var trn=parseFloat(_tr);var tsc=trn>=20?C.green:trn>=12?C.yellow:C.red;
                       var tplItem=d.tpl.find(function(x){return x.key===t.name;});var _tName=t.name;
-                      return (<Cd key={_tName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_tName,step:sk});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_tName||dragTpl.step!==sk)return;var fromIdx=visTpls.findIndex(function(x){return x.name===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<visTpls.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(visTpls[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={Object.assign({},{cursor:tplItem?"pointer":"grab"},dragTpl&&dragTpl.name===_tName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:15}}>{t.displayName}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span>{t.region && <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.region==="br"?C.lGreen:C.lBlue,color:t.region==="br"?C.green:C.accent}}>{t.region==="br"?"BR":"LATAM"}</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
+                      return (<Cd key={_tName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_tName,step:sk});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_tName||dragTpl.step!==sk)return;var fromIdx=visTpls.findIndex(function(x){return x.name===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<visTpls.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(visTpls[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={Object.assign({},{cursor:tplItem?"pointer":"grab"},dragTpl&&dragTpl.name===_tName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:15}}>{t.displayName}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span>{t.region && <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.region==="br"?C.lGreen:C.lBlue,color:t.region==="br"?C.green:C.accent}}>{t.region==="br"?"BR":"LATAM"}</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{_tr}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {_cS(t.sent)}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
                     })}
                   </div>);}
                   return (<div>{_qualGroups.map(function(qg){
@@ -1505,9 +1531,9 @@ export default function Dashboard(){
                         <span style={{fontSize:11,color:C.muted}}>({qTpls.length})</span>
                       </div>
                       <div style={{display:"grid",gridTemplateColumns:qTpls.length===1?"1fr":"1fr 1fr",gap:12}}>
-                        {qTpls.map(function(t,i){var trn=parseFloat(t.rate);var tsc=trn>=20?C.green:trn>=12?C.yellow:C.red;
+                        {qTpls.map(function(t,i){var _tr=_cR(t.resp,t.sent);var trn=parseFloat(_tr);var tsc=trn>=20?C.green:trn>=12?C.yellow:C.red;
                           var tplItem=d.tpl.find(function(x){return x.key===t.name;});var _tName=t.name;
-                          return (<Cd key={_tName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_tName,step:sk});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_tName||dragTpl.step!==sk)return;var fromIdx=visTpls.findIndex(function(x){return x.name===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<visTpls.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(visTpls[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={Object.assign({},{cursor:tplItem?"pointer":"grab"},dragTpl&&dragTpl.name===_tName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:15}}>{t.displayName}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span>{t.region && <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.region==="br"?C.lGreen:C.lBlue,color:t.region==="br"?C.green:C.accent}}>{t.region==="br"?"BR":"LATAM"}</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {t.sent}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
+                          return (<Cd key={_tName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_tName,step:sk});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_tName||dragTpl.step!==sk)return;var fromIdx=visTpls.findIndex(function(x){return x.name===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<visTpls.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(visTpls[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={tplItem?function(){setSelTpl(tplItem);}:undefined} style={Object.assign({},{cursor:tplItem?"pointer":"grab"},dragTpl&&dragTpl.name===_tName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:15}}>{t.displayName}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style={{display:"flex",gap:6,marginTop:4}}><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.lang==="pt"?C.green+"15":C.accent+"15",color:t.lang==="pt"?C.green:C.accent}}>{t.lang==="pt"?"PT":"ES"}</span>{t.region && <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,background:t.region==="br"?C.lGreen:C.lBlue,color:t.region==="br"?C.green:C.accent}}>{t.region==="br"?"BR":"LATAM"}</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:24,fontWeight:800,color:tsc,fontFamily:mono}}>{_tr}</div><div style={{fontSize:12,color:C.muted}}>{t.resp} de {_cS(t.sent)}</div></div></div>{tplItem && <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div>}</Cd>);
                         })}
                       </div>
                     </div>);
@@ -1534,8 +1560,8 @@ export default function Dashboard(){
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+C.border+"66"}}><div style={{display:"flex",alignItems:"center",gap:0,fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700}}>Performance por Template<InfoTip dark={_isDark} data={TIPS.templatePerformance}/></div><button onClick={function(){setShowTplConfig(true);}} title="Configuraci\u00F3n de templates" style={{background:"none",border:"none",cursor:"pointer",color:C.muted,padding:4,borderRadius:6,display:"flex",alignItems:"center",transition:"color 0.15s"}} onMouseEnter={function(e){e.currentTarget.style.color=C.accent;}} onMouseLeave={function(e){e.currentTarget.style.color=C.muted;}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button></div>
           {_allAbKeys.length>0 && (<div style={{marginBottom:16}}><div style={{display:"flex",flexDirection:"column",gap:12}}>{_allAbKeys.map(function(gId){return _abCard(gId);})}</div></div>)}
           {(function(){var _flatVis=d.tpl.slice().filter(function(t){return !_isH(t.key||t.name);}).sort(function(a,b){var sa=_so(a.key||a.name);var sb=_so(b.key||b.name);if(sa!==sb)return sa-sb;return(a.name||"").localeCompare(b.name||"");});return (<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:22}}>
-            {_flatVis.map(function(t,i){var rn=parseFloat(t.rate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;var _fName=t.key||t.name;
-              return (<Cd key={_fName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_fName,step:"_flat"});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_fName||dragTpl.step!=="_flat")return;var fromIdx=_flatVis.findIndex(function(x){return(x.key||x.name)===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<_flatVis.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(_flatVis[wi].key||_flatVis[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={function(){setSelTpl(t);}} style={Object.assign({cursor:"pointer"},dragTpl&&dragTpl.name===_fName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:16}}>{t.name}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.key||t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><span style={{fontSize:12,color:C.muted,background:C.rowAlt,padding:"2px 8px",borderRadius:4}}>{t.day}</span></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:13,color:C.muted}}>{t.resp} de {t.sent}</div></div></div><div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div></Cd>);
+            {_flatVis.map(function(t,i){var _tr=_cR(t.resp,t.sent);var rn=parseFloat(_tr);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;var _fName=t.key||t.name;
+              return (<Cd key={_fName} draggable={true} onDragStart={function(e){e.dataTransfer.effectAllowed="move";setDragTpl({name:_fName,step:"_flat"});}} onDragOver={function(e){e.preventDefault();e.dataTransfer.dropEffect="move";e.currentTarget.style.outline="2px solid "+C.accent;e.currentTarget.style.outlineOffset="-2px";}} onDragLeave={function(e){e.currentTarget.style.outline="none";}} onDrop={function(e){e.preventDefault();e.currentTarget.style.outline="none";if(!dragTpl||dragTpl.name===_fName||dragTpl.step!=="_flat")return;var fromIdx=_flatVis.findIndex(function(x){return(x.key||x.name)===dragTpl.name;});var toIdx=i;if(fromIdx<0)return;for(var wi=0;wi<_flatVis.length;wi++){var newOrder=wi;if(fromIdx<toIdx){if(wi>fromIdx&&wi<=toIdx)newOrder=wi-1;else if(wi===fromIdx)newOrder=toIdx;}else{if(wi>=toIdx&&wi<fromIdx)newOrder=wi+1;else if(wi===fromIdx)newOrder=toIdx;}updateTemplateConfig(_flatVis[wi].key||_flatVis[wi].name,"sort_order",newOrder);}setDragTpl(null);}} onDragEnd={function(){setDragTpl(null);}} onClick={function(){setSelTpl(t);}} style={Object.assign({cursor:"pointer"},dragTpl&&dragTpl.name===_fName?{opacity:0.5}:{})}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:800,fontSize:16}}>{t.name}</span><button onClick={function(e){e.stopPropagation();updateTemplateConfig(t.key||t.name,"hidden",true);}} title="Ocultar template" style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:C.muted,opacity:0.5,flexShrink:0,display:"flex",alignItems:"center"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div><span style={{fontSize:12,color:C.muted,background:C.rowAlt,padding:"2px 8px",borderRadius:4}}>{t.day}</span></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{_tr}</div><div style={{fontSize:13,color:C.muted}}>{t.resp} de {_cS(t.sent)}</div></div></div><div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div></Cd>);
             })}
           </div>);})()}
           {(function(){var _flatHid=d.tpl.slice().filter(function(t){return _isH(t.key||t.name);});if(_flatHid.length===0)return null;return (<div style={{marginTop:10,marginBottom:22}}>
@@ -2147,8 +2173,8 @@ export default function Dashboard(){
                       if(pair.length<2) return null;
                       var stA=getTplStats(pair[0]);
                       var stB=getTplStats(pair[1]);
-                      var rateA=parseFloat(stA.rate)||0;
-                      var rateB=parseFloat(stB.rate)||0;
+                      var rateA=parseFloat(_cR(stA.resp||0,stA.sent||0))||0;
+                      var rateB=parseFloat(_cR(stB.resp||0,stB.sent||0))||0;
                       var diff=Math.abs(rateA-rateB).toFixed(1);
                       var winner=rateA>rateB?0:(rateB>rateA?1:-1);
                       var maxRate=Math.max(rateA,rateB,1);
@@ -2171,9 +2197,9 @@ export default function Dashboard(){
                               <div style={{fontSize:11,fontWeight:800,color:C.purple,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>{label}</div>
                               <div style={{fontSize:13,fontWeight:700,fontFamily:mono,color:C.text,marginBottom:12,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{pair[idx]}</div>
                               <div style={{display:"flex",gap:16,marginBottom:10}}>
-                                <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Enviados</div><div style={{fontSize:18,fontWeight:800,color:C.text,fontFamily:mono}}>{st.sent||0}</div></div>
+                                <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Enviados</div><div style={{fontSize:18,fontWeight:800,color:C.text,fontFamily:mono}}>{_cS(st.sent||0)}</div></div>
                                 <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Respuestas</div><div style={{fontSize:18,fontWeight:800,color:C.text,fontFamily:mono}}>{st.resp||0}</div></div>
-                                <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Tasa</div><div style={{fontSize:18,fontWeight:800,color:isWinner?C.green:C.text,fontFamily:mono}}>{st.rate||"0.0%"}</div></div>
+                                <div><div style={{fontSize:11,color:C.muted,fontWeight:600}}>Tasa</div><div style={{fontSize:18,fontWeight:800,color:isWinner?C.green:C.text,fontFamily:mono}}>{_cR(st.resp||0,st.sent||0)}</div></div>
                               </div>
                               <div style={{background:C.rowAlt,borderRadius:6,height:8,overflow:"hidden"}}>
                                 <div style={{height:"100%",borderRadius:6,background:isWinner?C.green:C.accent,width:(maxRate>0?(rate/maxRate*100):0)+"%",transition:"width 0.3s ease"}}></div>
