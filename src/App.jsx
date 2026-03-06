@@ -613,18 +613,14 @@ export default function Dashboard(){
     try{
       var fromApi=from?formatDateForApi(from):undefined;
       var toApi=to?formatDateForApi(to):undefined;
-      // Sequential calls — MeuGrupoVip API has 1 req/60s rate limit
-      var entryData=await fetchCampaignLeads(campaignId,fromApi,toApi,"entry");
-      var exitData=await fetchCampaignLeads(campaignId,fromApi,toApi,"exit");
-      var groupsData=await fetchCampaignGroups(campaignId);
-      // API returns {data:{leads:[...]}} or {data:{groups:[...]}}
-      var entryLeads=(entryData.data&&entryData.data.leads)||entryData.leads||[];
-      var exitLeads=(exitData.data&&exitData.data.leads)||exitData.leads||[];
-      var groups=(groupsData.data&&groupsData.data.groups)||groupsData.groups||[];
-      if(!Array.isArray(entryLeads))entryLeads=[];
-      if(!Array.isArray(exitLeads))exitLeads=[];
-      if(!Array.isArray(groups))groups=[];
-      setGruposEntryLeads(entryLeads);setGruposExitLeads(exitLeads);setGruposGroups(groups);
+      // Single call — each lead already has entry_date, departure_date, status
+      var leadsData=await fetchCampaignLeads(campaignId,fromApi,toApi,"entry");
+      var allLeads=(leadsData.data&&leadsData.data.leads)||leadsData.leads||[];
+      if(!Array.isArray(allLeads))allLeads=[];
+      // Derive entry and exit lists client-side
+      var entryLeads=allLeads;
+      var exitLeads=allLeads.filter(function(l){return l.status==="exited"&&l.departure_date;});
+      setGruposEntryLeads(entryLeads);setGruposExitLeads(exitLeads);
       // Build daily data for chart
       var dayMap={};
       for(var i=0;i<entryLeads.length;i++){
@@ -634,13 +630,19 @@ export default function Dashboard(){
         dayMap[dk].entries++;
       }
       for(var j=0;j<exitLeads.length;j++){
-        var dk2=parseMgvDate(exitLeads[j].departure_date||exitLeads[j].entry_date);
+        var dk2=parseMgvDate(exitLeads[j].departure_date);
         if(!dk2)continue;
         if(!dayMap[dk2])dayMap[dk2]={d:dk2,entries:0,exits:0};
         dayMap[dk2].exits++;
       }
       var dailyArr=Object.values(dayMap).sort(function(a,b){return a.d<b.d?-1:1;});
       setGruposDailyData(dailyArr);
+      // Fetch groups lazily (for detail cards — limit, retention, etc.)
+      fetchCampaignGroups(campaignId).then(function(groupsData){
+        var groups=(groupsData.data&&groupsData.data.groups)||groupsData.groups||[];
+        if(!Array.isArray(groups))groups=[];
+        setGruposGroups(groups);
+      }).catch(function(e){console.warn("[Grupos] Groups detail fetch failed:",e.message);});
     }catch(e){setGruposError(e.message);}
     finally{setGruposLoading(false);}
   }
