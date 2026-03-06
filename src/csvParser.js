@@ -608,10 +608,14 @@ export function processInboundRows(rows, regionFilter, lifecyclePhones) {
     realesCount: realesCount,
     esRate: esRate,
     esResp: esResp,
+    esRespReal: esResp,
     esTotal: esTotal,
     ptRate: ptRate,
     ptResp: ptResp,
+    ptRespReal: ptResp,
     ptTotal: ptTotal,
+    esRateReal: esRate,
+    ptRateReal: ptRate,
     depthCounts: depthCounts,
     multiDayCount: multiDayCount,
     outcomeCount: outcomeCount,
@@ -717,6 +721,7 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
   var mcCount = 0;
   var autoReplyThreads = 0;
   var esTotal = 0, esResp = 0, ptTotal = 0, ptResp = 0;
+  var esRespReal = 0, ptRespReal = 0;
 
   // Real (non-auto-reply) counters
   var engCountsReal = { alto: 0, medio: 0, bajo: 0, minimo: 0 };
@@ -864,6 +869,11 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
     // If first message was auto-reply but there were more human interactions,
     // treat as real lead (the person engaged beyond the auto-reply)
     if (isAuto && humanMsgCount > 1) isAuto = false;
+
+    // Real ES/PT response counts (after auto-correction)
+    if (phone && templatesSent.length > 0 && !isAuto) {
+      if (isES) esRespReal++; else ptRespReal++;
+    }
 
     // Engagement based on qualification
     var engagement = "minimo";
@@ -1262,6 +1272,8 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
   // ES vs PT stats
   var esRate = esTotal > 0 ? ((esResp / esTotal) * 100).toFixed(1) : "0.0";
   var ptRate = ptTotal > 0 ? ((ptResp / ptTotal) * 100).toFixed(1) : "0.0";
+  var esRateReal = esTotal > 0 ? ((esRespReal / esTotal) * 100).toFixed(1) : "0.0";
+  var ptRateReal = ptTotal > 0 ? ((ptRespReal / ptTotal) * 100).toFixed(1) : "0.0";
 
   // Leads per day for header
   var leadsPerDay = dailyArr.length > 0 ? Math.round(totalContactados / dailyArr.length) : 0;
@@ -1313,10 +1325,14 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
     realesCount: realesCount,
     esRate: esRate,
     esResp: esResp,
+    esRespReal: esRespReal,
     esTotal: esTotal,
     ptRate: ptRate,
     ptResp: ptResp,
+    ptRespReal: ptRespReal,
     ptTotal: ptTotal,
+    esRateReal: esRateReal,
+    ptRateReal: ptRateReal,
     allContactedPhones: allContactedPhones,
   };
 }
