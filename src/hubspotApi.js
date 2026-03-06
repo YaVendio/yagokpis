@@ -135,24 +135,40 @@ export async function debugLeadProperties() {
 }
 
 export async function fetchLeadsSince(sinceIso, pipelineId) {
-  var sinceMs = new Date(sinceIso).getTime();
+  // First, fetch a sample to discover property names
+  try {
+    var sample = await callHubSpot("/crm/v3/objects/0-136", { limit: "1" });
+    if (sample && sample.results && sample.results[0]) {
+      console.log("[HS] Lead sample properties:", Object.keys(sample.results[0].properties || {}).join(", "));
+    }
+  } catch (e) { console.warn("[HS] Lead sample fetch failed:", e.message); }
+
+  // Fetch all leads via list endpoint (GET with pagination) — avoids search filter issues
   var all = [];
   var after = undefined;
   while (true) {
-    var filters = [{ propertyName: "createdate", operator: "GTE", value: String(sinceMs) }];
-    if (pipelineId) filters.push({ propertyName: "hs_pipeline", operator: "EQ", value: pipelineId });
-    var searchBody = {
-      filterGroups: [{ filters: filters }],
-      properties: ["hs_pipeline", "hs_pipeline_stage", "createdate"],
-      limit: 100,
-    };
-    if (after) searchBody.after = after;
-    var data = await callHubSpot("/crm/v3/objects/0-136/search", null, searchBody);
+    var params = { limit: "100", properties: "hs_pipeline,hs_pipeline_stage,hs_lead_name,createdate,hs_createdate" };
+    if (after) params.after = after;
+    var data = await callHubSpot("/crm/v3/objects/0-136", params);
     if (data.results) all = all.concat(data.results);
     if (!data.paging || !data.paging.next || !data.paging.next.after) break;
     after = data.paging.next.after;
   }
-  return all;
+  console.log("[HS] Total leads fetched:", all.length);
+
+  // Filter client-side by pipeline and date
+  var sinceDate = new Date(sinceIso);
+  var filtered = all.filter(function(lead) {
+    var props = lead.properties || {};
+    // Filter by pipeline if specified
+    if (pipelineId && props.hs_pipeline !== pipelineId) return false;
+    // Filter by date
+    var cd = props.createdate || props.hs_createdate || lead.createdAt;
+    if (!cd) return false;
+    return new Date(cd) >= sinceDate;
+  });
+  console.log("[HS] Leads after filter (pipeline=" + pipelineId + ", since=" + sinceIso + "):", filtered.length);
+  return filtered;
 }
 
 // Search deals from a date onwards

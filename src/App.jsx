@@ -365,7 +365,8 @@ export default function Dashboard(){
     var hsMap={};
     for(var i=0;i<crmLeads.length;i++){
       var lead=crmLeads[i];
-      var cd=(lead.properties||{}).createdate;
+      var props=lead.properties||{};
+      var cd=props.createdate||props.hs_createdate||lead.createdAt;
       if(!cd)continue;
       var dt=new Date(cd);
       if(isNaN(dt.getTime()))continue;

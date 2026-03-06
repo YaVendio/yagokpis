@@ -27,13 +27,20 @@ export default async function handler(req, res) {
       url += "?" + qs;
     }
 
-    var resp = await fetch(url, {
-      method: "GET",
-      headers: {
-        "Authorization": "Bearer " + token,
-        "Accept": "application/json",
-      },
-    });
+    var resp;
+    var maxRetries = 3;
+    for (var attempt = 0; attempt <= maxRetries; attempt++) {
+      resp = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Authorization": "Bearer " + token,
+          "Accept": "application/json",
+        },
+      });
+      if (resp.status !== 429 || attempt === maxRetries) break;
+      var wait = Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s
+      await new Promise(function(r) { setTimeout(r, wait); });
+    }
 
     if (!resp.ok) {
       var errText = await resp.text();
