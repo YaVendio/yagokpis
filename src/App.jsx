@@ -613,11 +613,10 @@ export default function Dashboard(){
     try{
       var fromApi=from?formatDateForApi(from):undefined;
       var toApi=to?formatDateForApi(to):undefined;
-      var [entryData,exitData,groupsData]=await Promise.all([
-        fetchCampaignLeads(campaignId,fromApi,toApi,"entry"),
-        fetchCampaignLeads(campaignId,fromApi,toApi,"exit"),
-        fetchCampaignGroups(campaignId),
-      ]);
+      // Sequential calls — MeuGrupoVip API has 1 req/60s rate limit
+      var entryData=await fetchCampaignLeads(campaignId,fromApi,toApi,"entry");
+      var exitData=await fetchCampaignLeads(campaignId,fromApi,toApi,"exit");
+      var groupsData=await fetchCampaignGroups(campaignId);
       // API returns {data:{leads:[...]}} or {data:{groups:[...]}}
       var entryLeads=(entryData.data&&entryData.data.leads)||entryData.leads||[];
       var exitLeads=(exitData.data&&exitData.data.leads)||exitData.leads||[];
