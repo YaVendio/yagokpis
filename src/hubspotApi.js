@@ -123,7 +123,14 @@ export async function fetchContactsByIds(contactIds) {
 // Debug: list properties available on the leads object (0-136)
 export async function debugLeadProperties() {
   var data = await callHubSpot("/crm/v3/properties/0-136");
-  console.log("[HS] Lead (0-136) properties:", data);
+  if (data && data.results) {
+    var names = data.results.map(function(p) { return p.name; });
+    console.log("[HS] Lead property names:", names.join(", "));
+    var relevant = data.results.filter(function(p) {
+      return /pipe|create|date|stage/i.test(p.name);
+    });
+    console.log("[HS] Lead relevant properties:", relevant.map(function(p) { return p.name + " (" + p.label + ", " + p.type + ")"; }));
+  }
   return data;
 }
 
