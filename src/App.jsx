@@ -860,7 +860,7 @@ export default function Dashboard(){
   function onRegionChange(e){var v=e.target.value;setRegionFilter(v);if(panel==="inbound"&&inboundRawRows){var filtered=filterRowsByDate(inboundRawRows,dateFrom,dateTo);var result=processInboundRows(filtered,v,lifecyclePhonesData);applyResult(result);}else if(panel==="outbound"&&rawRows){var filtered2=filterRowsByDate(rawRows,dateFrom,dateTo);var result2=processCSVRows(filtered2,templateConfig,v);applyResult(result2);}}
 
   var mk=mode===0?"all":"real";var d=dataD[mk];var funnel=mode===0?funnelAll:funnelReal;var mbt=mode===0?meetByTplAll:meetByTplReal;
-  var tc=headerInfo.totalContactados;
+  var tc=(panel==="outbound"&&responseStats&&responseStats.outboundTotal)?responseStats.outboundTotal:headerInfo.totalContactados;
   var lpd=headerInfo.leadsPerDay;
 
   if(dbLoading) return (<div style={{background:C.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:font}}>
@@ -1124,7 +1124,8 @@ export default function Dashboard(){
                   var fOferta=meetings.filter(function(l){return l.ml;});
                   for(var mi2=0;mi2<fOferta.length;mi2++){var fp=(fOferta[mi2].p||"").replace(/\D/g,"");if(fp&&fMeetPhones[fp])actualMC++;}
                 }
-                var funnelFull=funnel.concat([{n:"Reuni\u00F3n Confirmada",v:actualMC,c:C.green}]);
+                var correctedFunnel=funnel.map(function(f,i){if(i===0&&tc>0)return{n:f.n,v:tc,c:f.c};return f;});
+                var funnelFull=correctedFunnel.concat([{n:"Reuni\u00F3n Confirmada",v:actualMC,c:C.green}]);
                 return funnelFull.map(function(f,i){var w=Math.max((f.v/(tc||1))*100,4);var prev=i>0?((f.v/(funnelFull[i-1].v||1))*100).toFixed(0):null;
                 return (<div key={i} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:C.sub,fontWeight:500}}><span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:6,background:f.c+"18",color:f.c,fontSize:11,fontWeight:800,marginRight:6}}>{i+1}</span>{f.n}</span><div><span style={{fontSize:17,fontWeight:800,fontFamily:mono}}>{f.v}</span><span style={{fontSize:13,color:C.muted,marginLeft:6}}>{(f.v/(tc||1)*100).toFixed(1)}%</span>{prev && <span style={{fontSize:12,color:parseFloat(prev)>=50?C.green:parseFloat(prev)>=20?C.yellow:C.red,marginLeft:6}}>({prev}%{"\u2193"})</span>}</div></div><div style={{height:24,background:C.rowAlt,borderRadius:6,overflow:"hidden"}}><div style={{height:"100%",width:w+"%",background:"linear-gradient(90deg, "+f.c+" 0%, "+f.c+"CC 100%)",borderRadius:6,transition:"width 0.5s ease"}}/></div></div>);});
               })()}
