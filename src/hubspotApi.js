@@ -255,13 +255,19 @@ export async function fetchDealPipelines() {
   return data;
 }
 
-// Fetch leads (0-136) for Growth tab with associated contact properties
+// Fetch leads (0-136) for Growth tab — uses denormalized properties on the lead itself
 export async function fetchGrowthLeads(sinceIso, pipelineId) {
-  // Step 1: Fetch all leads via list endpoint with pagination
   var all = [];
   var after = undefined;
+  var props = [
+    "hs_pipeline", "hs_pipeline_stage", "hs_lead_name", "createdate", "hs_createdate",
+    "hubspot_owner_id", "prioridad_plg", "prioridad_plg_mqlpql",
+    "hs_contact_analytics_source", "hs_contact_analytics_source_data_1",
+    "email", "numero_de_telefono", "industria", "lead_sales_channels",
+    "fuente_original_de_trafico", "fuente_yavendio", "hs_lead_label"
+  ].join(",");
   while (true) {
-    var params = { limit: "100", properties: "hs_pipeline,hs_pipeline_stage,hs_lead_name,createdate,hs_createdate" };
+    var params = { limit: "100", properties: props };
     if (after) params.after = after;
     var data = await callHubSpot("/crm/v3/objects/0-136", params);
     if (data.results) all = all.concat(data.results);
@@ -270,91 +276,30 @@ export async function fetchGrowthLeads(sinceIso, pipelineId) {
   }
   console.log("[HS Growth] Total leads fetched:", all.length);
 
-  // Debug: log unique pipeline values
-  var pipelineValues = {};
-  for (var pi = 0; pi < all.length; pi++) {
-    var pv = (all[pi].properties || {}).hs_pipeline || "(empty)";
-    if (!pipelineValues[pv]) pipelineValues[pv] = 0;
-    pipelineValues[pv]++;
-  }
-  console.log("[HS Growth] Unique pipelines:", JSON.stringify(pipelineValues));
-
-  // Step 2: Filter by pipeline and date client-side
+  // Filter by pipeline and date client-side
   var sinceDate = new Date(sinceIso);
   var filtered = all.filter(function(lead) {
-    var props = lead.properties || {};
-    if (pipelineId && props.hs_pipeline !== pipelineId) return false;
-    var cd = props.createdate || props.hs_createdate || lead.createdAt;
+    var p = lead.properties || {};
+    if (pipelineId && p.hs_pipeline !== pipelineId) return false;
+    var cd = p.createdate || p.hs_createdate || lead.createdAt;
     if (!cd) return false;
     return new Date(cd) >= sinceDate;
   });
   console.log("[HS Growth] Leads after filter (pipeline=" + pipelineId + ", since=" + sinceIso + "):", filtered.length);
 
-  if (filtered.length === 0) return filtered;
-
-  // Step 3: Batch fetch associations to contacts
-  console.log("[HS Growth] Fetching lead→contact associations...");
-  var assocMap = {};
-  var BATCH = 100;
-  for (var i = 0; i < filtered.length; i += BATCH) {
-    var chunk = filtered.slice(i, i + BATCH);
-    var inputs = chunk.map(function(lead) { return { id: lead.id }; });
-    try {
-      var batchData = await callHubSpot("/crm/v4/associations/0-136/contacts/batch/read", null, { inputs: inputs });
-      if (batchData.results) {
-        for (var r = 0; r < batchData.results.length; r++) {
-          var item = batchData.results[r];
-          var fromId = item.from && item.from.id;
-          if (fromId && item.to && item.to.length > 0) {
-            assocMap[fromId] = String(item.to[0].toObjectId);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn("[HS Growth] Batch association error for chunk", i, e.message);
-    }
-  }
-  console.log("[HS Growth] Associations mapped:", Object.keys(assocMap).length, "leads → contacts");
-
-  // Step 4: Batch read associated contacts with growth properties
-  var contactIds = [];
-  var seen = {};
-  for (var k = 0; k < filtered.length; k++) {
-    var cid = assocMap[filtered[k].id];
-    if (cid && !seen[cid]) { contactIds.push(cid); seen[cid] = true; }
-  }
-  console.log("[HS Growth] Unique contacts to fetch:", contactIds.length);
-
-  var contactMap = {};
-  for (var j = 0; j < contactIds.length; j += 100) {
-    var cBatch = contactIds.slice(j, j + 100);
-    var cInputs = cBatch.map(function(id) { return { id: id }; });
-    try {
-      var cData = await callHubSpot("/crm/v3/objects/contacts/batch/read", null, {
-        inputs: cInputs,
-        properties: [
-          "hubspot_owner_id", "prioridad_plg",
-          "hs_analytics_source", "hs_analytics_source_data_1", "initial_utm_campaign",
-          "industria", "sales_channels", "email", "phone"
-        ]
-      });
-      if (cData.results) {
-        for (var ci = 0; ci < cData.results.length; ci++) {
-          contactMap[cData.results[ci].id] = cData.results[ci];
-        }
-      }
-    } catch (e) {
-      console.warn("[HS Growth] Batch contact read error for chunk", j, e.message);
-    }
-  }
-  console.log("[HS Growth] Contacts fetched:", Object.keys(contactMap).length);
-
-  // Step 5: Stitch contact properties onto leads
-  for (var m = 0; m < filtered.length; m++) {
-    var contactId = assocMap[filtered[m].id];
-    var contact = contactId && contactMap[contactId];
-    filtered[m]._contact = contact || null;
-    filtered[m]._contactProps = contact && contact.properties || {};
+  // Map lead properties into _contactProps for compatibility with UI code
+  for (var i = 0; i < filtered.length; i++) {
+    var lp = filtered[i].properties || {};
+    filtered[i]._contactProps = {
+      hubspot_owner_id: lp.hubspot_owner_id || "",
+      prioridad_plg: lp.prioridad_plg || "",
+      hs_analytics_source: lp.hs_contact_analytics_source || lp.fuente_original_de_trafico || "",
+      hs_analytics_source_data_1: lp.hs_contact_analytics_source_data_1 || "",
+      initial_utm_campaign: lp.fuente_yavendio || "",
+      email: lp.email || "",
+      phone: lp.numero_de_telefono || "",
+      industria: lp.industria || "",
+    };
   }
 
   return filtered;
