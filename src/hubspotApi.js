@@ -270,6 +270,15 @@ export async function fetchGrowthLeads(sinceIso, pipelineId) {
   }
   console.log("[HS Growth] Total leads fetched:", all.length);
 
+  // Debug: log unique pipeline values
+  var pipelineValues = {};
+  for (var pi = 0; pi < all.length; pi++) {
+    var pv = (all[pi].properties || {}).hs_pipeline || "(empty)";
+    if (!pipelineValues[pv]) pipelineValues[pv] = 0;
+    pipelineValues[pv]++;
+  }
+  console.log("[HS Growth] Unique pipelines:", JSON.stringify(pipelineValues));
+
   // Step 2: Filter by pipeline and date client-side
   var sinceDate = new Date(sinceIso);
   var filtered = all.filter(function(lead) {
