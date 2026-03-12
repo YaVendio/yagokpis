@@ -1,26 +1,20 @@
+import { supabase } from "./supabase";
+
 export async function callHubSpot(endpoint, params, body) {
   var password = sessionStorage.getItem("dashboard_password") || "";
-  var payload = { endpoint: endpoint };
+  var payload = { endpoint: endpoint, password: password };
   if (body) payload.body = body;
   else if (params) payload.params = params;
-  var resp = await fetch("/api/hubspot", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-dashboard-password": password,
-    },
-    body: JSON.stringify(payload),
+  var { data, error } = await supabase.functions.invoke("hubspot", {
+    body: payload,
   });
-  if (resp.status === 401) {
-    window.dispatchEvent(new Event("auth-required"));
-    throw new Error("Unauthorized");
+  if (error) {
+    var status = error.context && error.context.status;
+    if (status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
+    var msg = data && data.error || error.message || "HubSpot API error";
+    throw new Error(msg);
   }
-  if (!resp.ok) {
-    var errText = await resp.text();
-    try { var errJson = JSON.parse(errText); errText = errJson.error || errText; } catch(e) {}
-    throw new Error("HubSpot API error: " + errText);
-  }
-  return await resp.json();
+  return data;
 }
 
 export async function fetchAllContacts() {
@@ -259,6 +253,102 @@ export async function fetchAllDeals() {
 export async function fetchDealPipelines() {
   var data = await callHubSpot("/crm/v3/pipelines/deals");
   return data;
+}
+
+// Fetch leads (0-136) for Growth tab with associated contact properties
+export async function fetchGrowthLeads(sinceIso, pipelineId) {
+  // Step 1: Fetch all leads via list endpoint with pagination
+  var all = [];
+  var after = undefined;
+  while (true) {
+    var params = { limit: "100", properties: "hs_pipeline,hs_pipeline_stage,hs_lead_name,createdate,hs_createdate" };
+    if (after) params.after = after;
+    var data = await callHubSpot("/crm/v3/objects/0-136", params);
+    if (data.results) all = all.concat(data.results);
+    if (!data.paging || !data.paging.next || !data.paging.next.after) break;
+    after = data.paging.next.after;
+  }
+  console.log("[HS Growth] Total leads fetched:", all.length);
+
+  // Step 2: Filter by pipeline and date client-side
+  var sinceDate = new Date(sinceIso);
+  var filtered = all.filter(function(lead) {
+    var props = lead.properties || {};
+    if (pipelineId && props.hs_pipeline !== pipelineId) return false;
+    var cd = props.createdate || props.hs_createdate || lead.createdAt;
+    if (!cd) return false;
+    return new Date(cd) >= sinceDate;
+  });
+  console.log("[HS Growth] Leads after filter (pipeline=" + pipelineId + ", since=" + sinceIso + "):", filtered.length);
+
+  if (filtered.length === 0) return filtered;
+
+  // Step 3: Batch fetch associations to contacts
+  console.log("[HS Growth] Fetching lead→contact associations...");
+  var assocMap = {};
+  var BATCH = 100;
+  for (var i = 0; i < filtered.length; i += BATCH) {
+    var chunk = filtered.slice(i, i + BATCH);
+    var inputs = chunk.map(function(lead) { return { id: lead.id }; });
+    try {
+      var batchData = await callHubSpot("/crm/v4/associations/0-136/contacts/batch/read", null, { inputs: inputs });
+      if (batchData.results) {
+        for (var r = 0; r < batchData.results.length; r++) {
+          var item = batchData.results[r];
+          var fromId = item.from && item.from.id;
+          if (fromId && item.to && item.to.length > 0) {
+            assocMap[fromId] = String(item.to[0].toObjectId);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[HS Growth] Batch association error for chunk", i, e.message);
+    }
+  }
+  console.log("[HS Growth] Associations mapped:", Object.keys(assocMap).length, "leads → contacts");
+
+  // Step 4: Batch read associated contacts with growth properties
+  var contactIds = [];
+  var seen = {};
+  for (var k = 0; k < filtered.length; k++) {
+    var cid = assocMap[filtered[k].id];
+    if (cid && !seen[cid]) { contactIds.push(cid); seen[cid] = true; }
+  }
+  console.log("[HS Growth] Unique contacts to fetch:", contactIds.length);
+
+  var contactMap = {};
+  for (var j = 0; j < contactIds.length; j += 100) {
+    var cBatch = contactIds.slice(j, j + 100);
+    var cInputs = cBatch.map(function(id) { return { id: id }; });
+    try {
+      var cData = await callHubSpot("/crm/v3/objects/contacts/batch/read", null, {
+        inputs: cInputs,
+        properties: [
+          "hubspot_owner_id", "prioridad_plg",
+          "hs_analytics_source", "hs_analytics_source_data_1", "initial_utm_campaign",
+          "industria", "sales_channels", "email", "phone"
+        ]
+      });
+      if (cData.results) {
+        for (var ci = 0; ci < cData.results.length; ci++) {
+          contactMap[cData.results[ci].id] = cData.results[ci];
+        }
+      }
+    } catch (e) {
+      console.warn("[HS Growth] Batch contact read error for chunk", j, e.message);
+    }
+  }
+  console.log("[HS Growth] Contacts fetched:", Object.keys(contactMap).length);
+
+  // Step 5: Stitch contact properties onto leads
+  for (var m = 0; m < filtered.length; m++) {
+    var contactId = assocMap[filtered[m].id];
+    var contact = contactId && contactMap[contactId];
+    filtered[m]._contact = contact || null;
+    filtered[m]._contactProps = contact && contact.properties || {};
+  }
+
+  return filtered;
 }
 
 export function extractHubSpotPhones(contacts) {

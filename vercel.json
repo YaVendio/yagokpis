@@ -1,8 +1,5 @@
 {
   "rewrites": [
-    { "source": "/api/metabase", "destination": "/api/metabase" },
-    { "source": "/api/meugrupovip", "destination": "/api/meugrupovip" },
-    { "source": "/api/hubspot", "destination": "/api/hubspot" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

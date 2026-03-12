@@ -1,13 +1,16 @@
 import { useState, useEffect, useRef } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Legend } from "recharts";
 import { processCSVRows, processInboundRows, parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
-import { fetchThreadsFromPostHog, expandThreadMessages, fetchInboundThreadsFromPostHog, expandInboundThreadMessages, fetchLifecyclePhones, queryMetabase, fetchResponseStats } from "./posthogApi";
+import { fetchThreads, expandThreadMessages, fetchInboundThreads, expandInboundThreadMessages, fetchLifecyclePhones, queryMetabase, fetchResponseStats } from "./metabaseApi";
 import { DEFAULT_MEETINGS as _RAW_MEETINGS } from "./defaultData";
 import { supabase } from "./supabase";
 import InfoTip from "./components/InfoTip";
 import TIPS from "./tooltips";
 import { fetchCampaigns, fetchCampaignGroups, fetchCampaignLeads, formatDateForApi } from "./gruposApi";
-import { fetchAllContacts, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones, fetchMeetingsSince, fetchContactsByIds, fetchDealsSince, fetchLeadsSince, debugLeadProperties } from "./hubspotApi";
+import { fetchAllContacts, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones, fetchMeetingsSince, fetchContactsByIds, fetchDealsSince, fetchLeadsSince, debugLeadProperties, fetchGrowthLeads } from "./hubspotApi";
+import { fetchEmailCampaigns, aggregateWorkflowStats, calculateMetrics } from "./brevoApi.js";
+
+function getFirstOfMonth(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";}
 
 var font="'Source Sans 3', sans-serif";
 var mono="'JetBrains Mono', monospace";
@@ -164,6 +167,84 @@ function MeetModal({leads,onClose,mode,title}){
   </div>);
 }
 
+function GrowthContactsModal({contacts,onClose,title}){
+  var pqlColors={"ALTA":C.green,"MEDIA":C.accent,"M\u00C9DIA":C.accent,"BAJA":C.yellow,"BAIXA":C.yellow};
+  var srcColors={"PAID_SOCIAL":"#2563EB","DIRECT_TRAFFIC":"#7C3AED","ORGANIC_SEARCH":"#059669","REFERRALS":"#0891B2","OFFLINE":"#EA580C","OTHER_CAMPAIGNS":"#EC4899","EMAIL_MARKETING":"#D97706","ORGANIC_SOCIAL":"#DC2626","PAID_SEARCH":"#6366F1"};
+  // Sort by lead createdate descending
+  var sorted=contacts.slice().sort(function(a,b){
+    var pa=a.properties||{};var pb=b.properties||{};
+    var da=new Date(pa.createdate||pa.hs_createdate||a.createdAt||0);
+    var db=new Date(pb.createdate||pb.hs_createdate||b.createdAt||0);
+    return db-da;
+  });
+
+  return (<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#00000044",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:20,animation:"fadeInModal 0.2s ease-out"}} onClick={onClose}>
+    <div style={{background:C.card,borderRadius:20,padding:28,maxWidth:1060,width:"100%",maxHeight:"92vh",boxShadow:"0 25px 60px #00000025",animation:"scaleInModal 0.2s ease-out"}} onClick={function(e){e.stopPropagation();}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div>
+          <div style={{fontSize:19,fontWeight:900}}>{title}</div>
+          <div style={{fontSize:14,color:C.muted,marginTop:2}}>{sorted.length} leads</div>
+        </div>
+        <button onClick={onClose} style={{background:C.rowAlt,border:"none",borderRadius:8,width:36,height:36,fontSize:18,cursor:"pointer",color:C.muted,fontWeight:700}}>{"\u2715"}</button>
+      </div>
+      <div style={{maxHeight:"74vh",overflowY:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,fontFamily:font}}>
+          <thead>
+            <tr style={{borderBottom:"2px solid "+C.border,position:"sticky",top:0,background:C.card,zIndex:1}}>
+              {["Lead","Stage","Email","Tel\u00E9fono","Prioridad","Fuente","Detalle fuente","Campa\u00F1a UTM","Industria","Fecha"].map(function(h){
+                return <th key={h} style={{textAlign:"left",padding:"10px 8px",fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{h}</th>;
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(function(lead,idx){
+              var lp=lead.properties||{};
+              var cp=lead._contactProps||{};
+              var prio=(cp.prioridad_plg||"").toUpperCase();
+              var prioColor=pqlColors[prio]||C.muted;
+              var src=cp.hs_analytics_source||"";
+              var srcColor=srcColors[src]||C.muted;
+              var cd=lp.createdate||lp.hs_createdate||lead.createdAt;
+              var dt=cd?new Date(cd):null;
+              var dateStr=dt?String(dt.getDate()).padStart(2,"0")+"/"+String(dt.getMonth()+1).padStart(2,"0")+" "+String(dt.getHours()).padStart(2,"0")+":"+String(dt.getMinutes()).padStart(2,"0"):"";
+              return <tr key={lead.id||idx} style={{borderBottom:"1px solid "+C.border,background:idx%2===0?"transparent":C.rowAlt}}>
+                <td style={{padding:"10px 8px",fontWeight:600,maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lp.hs_lead_name||"Lead #"+lead.id}</td>
+                <td style={{padding:"10px 8px",fontSize:12,color:C.sub}}>{lp.hs_pipeline_stage||"-"}</td>
+                <td style={{padding:"10px 8px",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cp.email||"-"}</td>
+                <td style={{padding:"10px 8px",fontFamily:mono,fontSize:12}}>{cp.phone||"-"}</td>
+                <td style={{padding:"10px 8px"}}>{prio?<span style={{background:prioColor+"15",color:prioColor,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,border:"1px solid "+prioColor+"30"}}>{prio}</span>:<span style={{color:C.muted}}>-</span>}</td>
+                <td style={{padding:"10px 8px"}}><span style={{background:srcColor+"15",color:srcColor,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,border:"1px solid "+srcColor+"30"}}>{src||"-"}</span></td>
+                <td style={{padding:"10px 8px",fontSize:12,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:C.sub}}>{cp.hs_analytics_source_data_1||"-"}</td>
+                <td style={{padding:"10px 8px",fontSize:12,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:C.sub}}>{cp.initial_utm_campaign||"-"}</td>
+                <td style={{padding:"10px 8px",fontSize:12,color:C.sub}}>{cp.industria||"-"}</td>
+                <td style={{padding:"10px 8px",fontSize:12,fontFamily:mono,color:C.muted,whiteSpace:"nowrap"}}>{dateStr}</td>
+              </tr>;
+            })}
+            {sorted.length===0 && <tr><td colSpan={10} style={{textAlign:"center",padding:30,color:C.muted}}>No hay leads para mostrar</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {/* Summary stats at bottom */}
+      <div style={{display:"flex",gap:12,marginTop:16,flexWrap:"wrap"}}>
+        {(function(){
+          var pqlCount=0;var srcMap={};
+          for(var i=0;i<sorted.length;i++){
+            var pr=(sorted[i]._contactProps&&sorted[i]._contactProps.prioridad_plg||"").toLowerCase();
+            if(pr==="alta"||pr==="media"||pr==="m\u00E9dia")pqlCount++;
+            var sr=sorted[i]._contactProps&&sorted[i]._contactProps.hs_analytics_source||"UNKNOWN";
+            if(!srcMap[sr])srcMap[sr]=0;srcMap[sr]++;
+          }
+          var topSources=Object.keys(srcMap).map(function(k){return{s:k,n:srcMap[k]};}).sort(function(a,b){return b.n-a.n;}).slice(0,4);
+          return <>
+            <div style={{background:C.lPurple,borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,color:C.purple}}>PQLs: {pqlCount} ({sorted.length>0?(pqlCount/sorted.length*100).toFixed(1):0}%)</div>
+            {topSources.map(function(ts){return <div key={ts.s} style={{background:C.rowAlt,borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:C.sub}}>{ts.s}: {ts.n}</div>;})}
+          </>;
+        })()}
+      </div>
+    </div>
+  </div>);
+}
+
 function TplModal({tpl,leads,mode,onClose}){
   const [sel,setSel]=useState(null);
   var eC={alto:C.green,medio:C.accent,bajo:C.yellow,minimo:C.red,profunda:C.green,media:C.accent,corta:C.yellow,rebote:C.red};
@@ -261,7 +342,10 @@ export default function Dashboard(){
   const [loginError,setLoginError]=useState("");
   const [loginLoading,setLoginLoading]=useState(false);
 
-  const [tab,setTab]=useState("overview");
+  const SECTIONS={outbound:{label:"Outbound",icon:"\uD83C\uDFAF",subTabs:["resumen","engagement","templates"]},inbound:{label:"Inbound",icon:"\uD83D\uDCE5",subTabs:["resumen","engagement"]},canales:{label:"Canales",icon:"\uD83D\uDCE1",subTabs:["grupos","email","crm"]},growth:{label:"Growth",icon:"\uD83D\uDCC8",subTabs:[]}};
+  const [section,setSection]=useState("outbound");
+  const [subTab,setSubTab]=useState("resumen");
+  const [searchOpen,setSearchOpen]=useState(false);
   const [mode,setMode]=useState(0);
   const [showM,setShowM]=useState(false);
   const [showA,setShowA]=useState(false);
@@ -270,7 +354,6 @@ export default function Dashboard(){
   const [dbLoading,setDbLoading]=useState(true);
   const [loadError,setLoadError]=useState(null);
   const [stepFilter,setStepFilter]=useState(null);
-  const [panel,setPanel]=useState("outbound");
   const [inboundLoading,setInboundLoading]=useState(false);
   const [inboundRawRows,setInboundRawRows]=useState(null);
   const [lifecyclePhonesData,setLifecyclePhonesData]=useState(null);
@@ -335,16 +418,48 @@ export default function Dashboard(){
   const [crmMeetingPhones,setCrmMeetingPhones]=useState(null);
   const [crmLeads,setCrmLeads]=useState([]);
 
+  // Email (Brevo) tab state
+  const [emailLoading,setEmailLoading]=useState(false);
+  const [emailError,setEmailError]=useState(null);
+  const [emailData,setEmailData]=useState(null);
+  const [emailInited,setEmailInited]=useState(false);
+  const [emailDetail,setEmailDetail]=useState(null);
+
+  // Growth tab state
+  const [growthLoading,setGrowthLoading]=useState(false);
+  const [growthError,setGrowthError]=useState(null);
+  const [growthData,setGrowthData]=useState(null);
+  const [growthInited,setGrowthInited]=useState(false);
+  const [growthGoals,setGrowthGoals]=useState({latam:{signups:0,pqls:0},brasil:{signups:0,pqls:0}});
+  const [growthMonth,setGrowthMonth]=useState(function(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");});
+  const [showGoalsEditor,setShowGoalsEditor]=useState(false);
+  const [growthModal,setGrowthModal]=useState(null);
+
   useEffect(function(){
     function onAuthRequired(){sessionStorage.removeItem("dashboard_password");setIsAuthenticated(false);setLoginError("Sesión expirada. Ingrese de nuevo.");}
     window.addEventListener("auth-required",onAuthRequired);
     return function(){window.removeEventListener("auth-required",onAuthRequired);};
   },[]);
 
-  // Auto-init Grupos tab when selected for the first time
+  // Auto-init Grupos when selected for the first time
   useEffect(function(){
-    if(tab==="grupos"&&gruposCampaigns.length===0&&!gruposLoading&&!gruposError){initGrupos();}
-  },[tab]);
+    if(section==="canales"&&subTab==="grupos"&&gruposCampaigns.length===0&&!gruposLoading&&!gruposError){initGrupos();}
+  },[section,subTab]);
+
+  // Auto-init Email when selected for the first time
+  useEffect(function(){
+    if(section==="canales"&&subTab==="email"&&!emailInited&&!emailLoading&&!emailError){initEmail();}
+  },[section,subTab]);
+
+  // Auto-init Growth when selected for the first time
+  useEffect(function(){
+    if(section==="growth"&&!growthInited&&!growthLoading&&!growthError){initGrowth();}
+  },[section]);
+
+  // Auto-load inbound data when navigating to inbound section
+  useEffect(function(){
+    if(section==="inbound"&&!inboundRawRows&&!inboundLoading) loadInboundData();
+  },[section]);
 
   // Auto-load CRM data once authenticated (used by both overview and CRM tab)
   useEffect(function(){
@@ -420,11 +535,12 @@ export default function Dashboard(){
 
   useEffect(function(){
     if(!configLoaded) return;
-    async function loadFromPostHog(){
+    async function loadThreads(){
       setDbLoading(true);
       setLoadError(null);
       try{
-        var [threads,stats]=await Promise.all([fetchThreadsFromPostHog(stepFilter),fetchResponseStats('2026-02-02')]);
+        var since=getFirstOfMonth();
+        var [threads,stats]=await Promise.all([fetchThreads(stepFilter,since),fetchResponseStats(since)]);
         setResponseStats(stats);
         var csvRows=expandThreadMessages(threads);
         setRawRows(csvRows);
@@ -455,7 +571,7 @@ export default function Dashboard(){
       }
       setDbLoading(false);
     }
-    loadFromPostHog();
+    loadThreads();
   },[stepFilter,configLoaded]);
 
   // Reprocess when templateConfig changes (only if rawRows already loaded)
@@ -463,7 +579,7 @@ export default function Dashboard(){
   useEffect(function(){
     if(templateConfigRef.current===templateConfig) return; // skip initial
     templateConfigRef.current=templateConfig;
-    if(!rawRows||panel!=="outbound") return;
+    if(!rawRows||section!=="outbound") return;
     var filtered=filterRowsByDate(rawRows,dateFrom,dateTo);
     var result=processCSVRows(filtered,templateConfig,regionFilter);
     applyResult(result);
@@ -474,10 +590,12 @@ export default function Dashboard(){
     setLoginLoading(true);setLoginError("");
     sessionStorage.setItem("dashboard_password",loginPassword);
     try{
-      var resp=await fetch("/api/metabase",{method:"POST",headers:{"Content-Type":"application/json","x-dashboard-password":loginPassword},body:JSON.stringify({sql:"SELECT 1"})});
-      if(resp.status===401){sessionStorage.removeItem("dashboard_password");setLoginError("Contraseña incorrecta");setLoginLoading(false);return;}
+      await queryMetabase("SELECT 1");
       setIsAuthenticated(true);
-    }catch(err){sessionStorage.removeItem("dashboard_password");setLoginError("Error de conexión");
+    }catch(err){
+      sessionStorage.removeItem("dashboard_password");
+      if(err.message==="Unauthorized") setLoginError("Contraseña incorrecta");
+      else setLoginError("Error de conexión");
     }finally{setLoginLoading(false);}
   }
 
@@ -693,7 +811,7 @@ export default function Dashboard(){
   }
 
   // --- CRM (HubSpot) tab functions ---
-  var CRM_SINCE="2026-02-02";
+  var CRM_SINCE=getFirstOfMonth();
   async function initCrm(){
     setCrmLoading(true);setCrmError(null);
     try{
@@ -805,47 +923,224 @@ export default function Dashboard(){
     finally{setCrmCrossLoading(false);}
   }
 
-  function switchPanel(newPanel){
-    if(newPanel===panel) return;
-    // If switching to inbound and current tab is not supported, reset to overview
-    if(newPanel==="inbound"&&tab==="templates"){
-      setTab("overview");
-    }
-    setPanel(newPanel);
-    if(newPanel==="inbound"){
-      setMode(0);
-      if(inboundRawRows){
-        var filtered=filterRowsByDate(inboundRawRows,dateFrom,dateTo);
-        var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData);
-        applyResult(result);
-      }else{
-        setInboundLoading(true);
-        var spPromise=fetchLifecyclePhones().catch(function(e){console.warn("Lifecycle phones query failed:",e);return {};});
-        Promise.all([fetchInboundThreadsFromPostHog(),spPromise]).then(function(res){
-          var threads=res[0];var sp=res[1];
-          var csvRows=expandInboundThreadMessages(threads);
-          setInboundRawRows(csvRows);
-          setLifecyclePhonesData(sp);
-          var filtered=filterRowsByDate(csvRows,dateFrom,dateTo);
-          var result=processInboundRows(filtered,regionFilter,sp);
-          applyResult(result);
-          setInboundLoading(false);
-        }).catch(function(e){
-          console.error("Inbound load error:",e);
-          setInboundLoading(false);
-        });
+  // --- Email (Brevo) tab functions ---
+  var EMAIL_WORKFLOW_IDS=[4,5];
+  async function initEmail(){
+    setEmailLoading(true);setEmailError(null);
+    try{
+      console.log("[Email] Fetching Brevo trigger campaigns...");
+      var campaigns=await fetchEmailCampaigns();
+      console.log("[Email] Total trigger campaigns:",campaigns.length);
+      if(campaigns.length>0)console.log("[Email] Sample campaign keys:",Object.keys(campaigns[0]));
+      // Group campaigns by automation/workflow ID
+      var wf4=[],wf5=[],other=[];
+      for(var i=0;i<campaigns.length;i++){
+        var c=campaigns[i];
+        var wfId=c.automationId||c.workflowId||null;
+        if(wfId===4)wf4.push(c);
+        else if(wfId===5)wf5.push(c);
+        else other.push(c);
       }
+      console.log("[Email] WF#4:",wf4.length,"campaigns | WF#5:",wf5.length,"campaigns | Other:",other.length);
+      // If no campaigns matched by automationId, try matching by name/tag
+      if(wf4.length===0&&wf5.length===0&&campaigns.length>0){
+        console.log("[Email] No automationId match. Trying name-based matching...");
+        for(var j=0;j<campaigns.length;j++){
+          var nm=(campaigns[j].name||"").toLowerCase();
+          var tg=(campaigns[j].tag||"").toLowerCase();
+          if(nm.indexOf("workflow 4")>=0||nm.indexOf("wf4")>=0||nm.indexOf("wf 4")>=0||tg.indexOf("workflow-4")>=0)wf4.push(campaigns[j]);
+          else if(nm.indexOf("workflow 5")>=0||nm.indexOf("wf5")>=0||nm.indexOf("wf 5")>=0||tg.indexOf("workflow-5")>=0)wf5.push(campaigns[j]);
+        }
+        console.log("[Email] After name match — WF#4:",wf4.length,"| WF#5:",wf5.length);
+        // If still no match, treat ALL campaigns as total (no per-workflow split)
+        if(wf4.length===0&&wf5.length===0){
+          console.log("[Email] Could not identify workflows. Using all",campaigns.length,"campaigns as total.");
+        }
+      }
+      var statsWf4=aggregateWorkflowStats(wf4);
+      var statsWf5=aggregateWorkflowStats(wf5);
+      var allWfCampaigns=wf4.concat(wf5);
+      // If no per-workflow match, use all campaigns for total
+      var statsTotal=aggregateWorkflowStats(allWfCampaigns.length>0?allWfCampaigns:campaigns);
+      var metricsWf4=calculateMetrics(statsWf4);
+      var metricsWf5=calculateMetrics(statsWf5);
+      var metricsTotal=calculateMetrics(statsTotal);
+      setEmailData({wf4:{campaigns:wf4,stats:statsWf4,metrics:metricsWf4},wf5:{campaigns:wf5,stats:statsWf5,metrics:metricsWf5},total:{campaigns:allWfCampaigns.length>0?allWfCampaigns:campaigns,stats:statsTotal,metrics:metricsTotal}});
+      setEmailInited(true);
+      console.log("[Email] Done. Total sent:",metricsTotal.sent,"Open rate:",metricsTotal.openRate+"%");
+    }catch(e){console.error("[Email] Error:",e);setEmailError(e.message);}
+    finally{setEmailLoading(false);}
+  }
+
+  var BRASIL_OWNER_ID="79360573";
+  var SOURCE_COLORS={"PAID_SOCIAL":C.accent,"DIRECT_TRAFFIC":C.purple,"ORGANIC_SEARCH":C.green,"REFERRALS":C.cyan,"OFFLINE":C.orange,"OTHER_CAMPAIGNS":C.pink,"EMAIL_MARKETING":C.yellow,"ORGANIC_SOCIAL":C.red,"PAID_SEARCH":"#6366F1"};
+
+  async function initGrowth(monthOverride){
+    var selMonth=monthOverride||growthMonth;
+    setGrowthLoading(true);setGrowthError(null);
+    try{
+      // Parse month
+      var parts=selMonth.split("-");
+      var year=parseInt(parts[0]);var mo=parseInt(parts[1])-1;
+      var firstDay=new Date(year,mo,1);
+      var lastDay=new Date(year,mo+1,0);
+      var now=new Date();
+      var currentDay=now.getFullYear()===year&&now.getMonth()===mo?now.getDate():lastDay.getDate();
+      var totalDays=lastDay.getDate();
+
+      // Fetch goals from Supabase
+      var goalsResult=await supabase.from("growth_goals").select("*").eq("month",selMonth);
+      var goalsRows=goalsResult.data||[];
+      var goals={latam:{signups:0,pqls:0},brasil:{signups:0,pqls:0}};
+      for(var gi=0;gi<goalsRows.length;gi++){
+        var gr=goalsRows[gi];
+        if(gr.region==="latam"){goals.latam.signups=Number(gr.signups_goal);goals.latam.pqls=Number(gr.pqls_goal);}
+        if(gr.region==="brasil"){goals.brasil.signups=Number(gr.signups_goal);goals.brasil.pqls=Number(gr.pqls_goal);}
+      }
+      setGrowthGoals(goals);
+
+      // Fetch leads from HubSpot (0-136 object, pipeline 56997428)
+      console.log("[Growth] Fetching leads since",firstDay.toISOString());
+      var leads=await fetchGrowthLeads(firstDay.toISOString(),"56997428");
+
+      // Filter to selected month only (leads already filtered by date, but double-check month boundary)
+      var monthEnd=new Date(year,mo+1,0,23,59,59,999);
+      var filtered=leads.filter(function(l){
+        var props=l.properties||{};
+        var cd=props.createdate||props.hs_createdate||l.createdAt;
+        if(!cd)return false;
+        var d=new Date(cd);
+        return d>=firstDay&&d<=monthEnd;
+      });
+      console.log("[Growth] Leads in month:",filtered.length);
+
+      // Split by region using associated contact's hubspot_owner_id
+      var latamContacts=[];var brasilContacts=[];
+      for(var i=0;i<filtered.length;i++){
+        var ownerId=(filtered[i]._contactProps&&filtered[i]._contactProps.hubspot_owner_id)||"";
+        if(ownerId===BRASIL_OWNER_ID)brasilContacts.push(filtered[i]);
+        else latamContacts.push(filtered[i]);
+      }
+
+      // Count PQLs using associated contact's prioridad_plg
+      function countPqls(arr){var n=0;for(var j=0;j<arr.length;j++){var p=(arr[j]._contactProps&&arr[j]._contactProps.prioridad_plg)||"";var lo=p.toLowerCase();if(lo==="alta"||lo==="media"||lo==="m\u00E9dia")n++;}return n;}
+      var latamPqls=countPqls(latamContacts);
+      var brasilPqls=countPqls(brasilContacts);
+
+      // Compute metrics per region
+      function computeRegion(signups,pqls,goal){
+        var metaToDateSignups=totalDays>0?goal.signups*currentDay/totalDays:0;
+        var metaToDatePqls=totalDays>0?goal.pqls*currentDay/totalDays:0;
+        return {
+          signups:signups,pqls:pqls,
+          signupsGoal:goal.signups,pqlsGoal:goal.pqls,
+          metaToDateSignups:metaToDateSignups,metaToDatePqls:metaToDatePqls,
+          avanceSignups:goal.signups>0?(signups/goal.signups*100):0,
+          avancePqls:goal.pqls>0?(pqls/goal.pqls*100):0,
+          avanceToDateSignups:metaToDateSignups>0?(signups/metaToDateSignups*100):0,
+          avanceToDatePqls:metaToDatePqls>0?(pqls/metaToDatePqls*100):0,
+        };
+      }
+      var latamMetrics=computeRegion(latamContacts.length,latamPqls,goals.latam);
+      var brasilMetrics=computeRegion(brasilContacts.length,brasilPqls,goals.brasil);
+
+      // Source breakdown (from associated contact)
+      function sourceBreakdown(arr){
+        var map={};
+        for(var s=0;s<arr.length;s++){
+          var src=(arr[s]._contactProps&&arr[s]._contactProps.hs_analytics_source)||"UNKNOWN";
+          if(!map[src])map[src]=0;
+          map[src]++;
+        }
+        var items=Object.keys(map).map(function(k){return{source:k,count:map[k]};});
+        items.sort(function(a,b){return b.count-a.count;});
+        return items;
+      }
+      var latamSources=sourceBreakdown(latamContacts);
+      var brasilSources=sourceBreakdown(brasilContacts);
+
+      // Build summary text
+      var pctF=function(v){return v.toFixed(1)+"%";};
+      var summary="Growth Update "+selMonth+"\n\n";
+      summary+="LATAM\n";
+      summary+="Signups: "+latamMetrics.signups+" / "+latamMetrics.signupsGoal+" ("+pctF(latamMetrics.avanceSignups)+" del mes)\n";
+      summary+="PQLs: "+latamMetrics.pqls+" / "+latamMetrics.pqlsGoal+" ("+pctF(latamMetrics.avancePqls)+" del mes)\n";
+      summary+="Avance to Date: Signups "+pctF(latamMetrics.avanceToDateSignups)+" | PQLs "+pctF(latamMetrics.avanceToDatePqls)+"\n\n";
+      summary+="BRASIL\n";
+      summary+="Signups: "+brasilMetrics.signups+" / "+brasilMetrics.signupsGoal+" ("+pctF(brasilMetrics.avanceSignups)+" del mes)\n";
+      summary+="PQLs: "+brasilMetrics.pqls+" / "+brasilMetrics.pqlsGoal+" ("+pctF(brasilMetrics.avancePqls)+" del mes)\n";
+      summary+="Avance to Date: Signups "+pctF(brasilMetrics.avanceToDateSignups)+" | PQLs "+pctF(brasilMetrics.avanceToDatePqls)+"\n\n";
+      summary+="Sources (LATAM)\n";
+      for(var si=0;si<latamSources.length;si++)summary+="  "+latamSources[si].source+": "+latamSources[si].count+"\n";
+      summary+="\nSources (Brasil)\n";
+      for(var sj=0;sj<brasilSources.length;sj++)summary+="  "+brasilSources[sj].source+": "+brasilSources[sj].count+"\n";
+
+      setGrowthData({
+        latam:latamMetrics,brasil:brasilMetrics,
+        latamSources:latamSources,brasilSources:brasilSources,
+        latamContacts:latamContacts,brasilContacts:brasilContacts,
+        summary:summary,currentDay:currentDay,totalDays:totalDays,
+      });
+      setGrowthInited(true);
+      console.log("[Growth] Done. LATAM:",latamContacts.length,"Brasil:",brasilContacts.length);
+    }catch(e){console.error("[Growth] Error:",e);setGrowthError(e.message);}
+    finally{setGrowthLoading(false);}
+  }
+
+  async function saveGrowthGoals(newGoals){
+    var month=growthMonth;
+    try{
+      await supabase.from("growth_goals").upsert([
+        {month:month,region:"latam",signups_goal:newGoals.latam.signups,pqls_goal:newGoals.latam.pqls,updated_at:new Date().toISOString()},
+        {month:month,region:"brasil",signups_goal:newGoals.brasil.signups,pqls_goal:newGoals.brasil.pqls,updated_at:new Date().toISOString()},
+      ],{onConflict:"month,region"});
+      setGrowthGoals(newGoals);
+      setShowGoalsEditor(false);
+      setGrowthInited(false);
+      initGrowth();
+    }catch(e){console.error("[Growth] Save goals error:",e);}
+  }
+
+  function loadInboundData(){
+    setMode(0);
+    if(inboundRawRows){
+      var filtered=filterRowsByDate(inboundRawRows,dateFrom,dateTo);
+      var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData);
+      applyResult(result);
     }else{
-      if(rawRows){
-        var filtered2=filterRowsByDate(rawRows,dateFrom,dateTo);
-        var result2=processCSVRows(filtered2,templateConfig,regionFilter);
-        applyResult(result2);
-      }
+      setInboundLoading(true);
+      var spPromise=fetchLifecyclePhones().catch(function(e){console.warn("Lifecycle phones query failed:",e);return {};});
+      Promise.all([fetchInboundThreads(getFirstOfMonth()),spPromise]).then(function(res){
+        var threads=res[0];var sp=res[1];
+        var csvRows=expandInboundThreadMessages(threads);
+        setInboundRawRows(csvRows);
+        setLifecyclePhonesData(sp);
+        var filtered=filterRowsByDate(csvRows,dateFrom,dateTo);
+        var result=processInboundRows(filtered,regionFilter,sp);
+        applyResult(result);
+        setInboundLoading(false);
+      }).catch(function(e){
+        console.error("Inbound load error:",e);
+        setInboundLoading(false);
+      });
+    }
+  }
+
+  function navigateTo(sec,sub){
+    var info=SECTIONS[sec];
+    var defaultSub=info&&info.subTabs.length>0?info.subTabs[0]:null;
+    setSection(sec);
+    setSubTab(sub||defaultSub||"");
+    if(sec==="inbound") loadInboundData();
+    else if(sec==="outbound"&&rawRows){
+      var filtered2=filterRowsByDate(rawRows,dateFrom,dateTo);
+      var result2=processCSVRows(filtered2,templateConfig,regionFilter);
+      applyResult(result2);
     }
   }
 
   function applyDateFilter(from,to){
-    if(panel==="inbound"){
+    if(section==="inbound"){
       if(!inboundRawRows) return;
       var filtered=filterRowsByDate(inboundRawRows,from,to);
       var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData);
@@ -861,10 +1156,10 @@ export default function Dashboard(){
   function onDateFromChange(e){var v=e.target.value;setDateFrom(v);applyDateFilter(v,dateTo);}
   function onDateToChange(e){var v=e.target.value;setDateTo(v);applyDateFilter(dateFrom,v);}
   function clearDateFilter(){setDateFrom("");setDateTo("");applyDateFilter("","");}
-  function onRegionChange(e){var v=e.target.value;setRegionFilter(v);if(panel==="inbound"&&inboundRawRows){var filtered=filterRowsByDate(inboundRawRows,dateFrom,dateTo);var result=processInboundRows(filtered,v,lifecyclePhonesData);applyResult(result);}else if(panel==="outbound"&&rawRows){var filtered2=filterRowsByDate(rawRows,dateFrom,dateTo);var result2=processCSVRows(filtered2,templateConfig,v);applyResult(result2);}}
+  function onRegionChange(e){var v=e.target.value;setRegionFilter(v);if(section==="inbound"&&inboundRawRows){var filtered=filterRowsByDate(inboundRawRows,dateFrom,dateTo);var result=processInboundRows(filtered,v,lifecyclePhonesData);applyResult(result);}else if(section==="outbound"&&rawRows){var filtered2=filterRowsByDate(rawRows,dateFrom,dateTo);var result2=processCSVRows(filtered2,templateConfig,v);applyResult(result2);}}
 
   var mk=mode===0?"all":"real";var d=dataD[mk];var funnel=mode===0?funnelAll:funnelReal;var mbt=mode===0?meetByTplAll:meetByTplReal;
-  var tc=(panel==="outbound"&&responseStats&&responseStats.outboundTotal)?responseStats.outboundTotal:headerInfo.totalContactados;
+  var tc=(section==="outbound"&&responseStats&&responseStats.outboundTotal)?responseStats.outboundTotal:headerInfo.totalContactados;
   var lpd=headerInfo.leadsPerDay;
   var _jsTc=headerInfo.totalContactados;var _tplScale=(tc>0&&_jsTc>0&&tc>_jsTc)?tc/_jsTc:1;
   function _cS(s){return _tplScale!==1?Math.round(s*_tplScale):s;}
@@ -885,64 +1180,24 @@ export default function Dashboard(){
       <div style={{width:48,height:48,borderRadius:"50%",background:C.lRed,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}><span style={{fontSize:24,color:C.red}}>!</span></div>
       <div style={{fontSize:18,fontWeight:700,color:C.text,marginBottom:6}}>Error al cargar datos</div>
       <div style={{fontSize:14,color:C.muted,lineHeight:1.6,marginBottom:16}}>{loadError}</div>
-      <button onClick={function(){setLoadError(null);setDbLoading(true);fetchThreadsFromPostHog(stepFilter).then(function(threads){var csvRows=expandThreadMessages(threads);setRawRows(csvRows);var result=processCSVRows(csvRows,templateConfig,regionFilter);applyResult(result);setDbLoading(false);}).catch(function(e){setLoadError(e.message||"Error");setDbLoading(false);});}} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font}}>Reintentar</button>
+      <button onClick={function(){setLoadError(null);setDbLoading(true);fetchThreads(stepFilter,getFirstOfMonth()).then(function(threads){var csvRows=expandThreadMessages(threads);setRawRows(csvRows);var result=processCSVRows(csvRows,templateConfig,regionFilter);applyResult(result);setDbLoading(false);}).catch(function(e){setLoadError(e.message||"Error");setDbLoading(false);});}} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font}}>Reintentar</button>
     </div>
   </div>);
 
-  return (<div style={{background:C.bg,minHeight:"100vh",color:C.text,fontFamily:font,fontSize:15}}>
-    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
-    {showM && <MeetModal leads={meetings.filter(function(l){return l.ml;})} mode={mode} onClose={function(){setShowM(false);}} title={"\u{1F4C5} Leads con Oferta de Reuni\u00F3n"}/>}
-    {showA && <MeetModal leads={meetings} mode={mode} onClose={function(){setShowA(false);}} title={"\u{1F4AC} Todas las Conversaciones"}/>}
-    {showConfirmed && <MeetModal leads={confirmedLeads} mode={mode} onClose={function(){setShowConfirmed(false);}} title={"\u2705 Reuniones Confirmadas (Cruce HubSpot)"}/>}
-    {selTpl && <TplModal tpl={selTpl} leads={meetings} mode={mode} onClose={function(){setSelTpl(null);}}/>}
-    {topicModal && (function(){
-      var tkw=TOPIC_KEYWORDS[topicModal];
-      var useHumanOnly=panel==="inbound";
-      var filtered=meetings.filter(function(l){
-        var txt="";for(var ci=0;ci<l.c.length;ci++){if(useHumanOnly?l.c[ci][0]===1:(l.c[ci][0]===1||l.c[ci][0]===2))txt+=" "+l.c[ci][1];}
-        var lower=txt.toLowerCase();
-        if(!tkw)return false;
-        for(var ki=0;ki<tkw.kw.length;ki++){if(lower.includes(tkw.kw[ki]))return true;}
-        return false;
-      });
-      return <MeetModal leads={filtered} mode={mode} onClose={function(){setTopicModal(null);}} title={(tkw?tkw.e+" ":"")+"T\u00F3pico: "+topicModal+" ("+filtered.length+" leads)"}/>;
-    })()}
-
-    <div style={{background:"linear-gradient(135deg, "+C.gradFrom+" 0%, "+C.gradTo+" 100%)",borderBottom:"1px solid "+C.border,padding:"16px 28px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
-      <div style={{display:"flex",alignItems:"center",gap:14}}>
-        <h1 style={{margin:0,fontSize:22,fontWeight:900}}><span style={{background:"linear-gradient(135deg, #2563EB, #7C3AED)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>YAGO</span> <span style={{color:C.muted,fontWeight:400}}>KPI{"'"}s</span></h1>
-        <div style={{width:1,height:24,background:C.border}}/>
-        <span style={{fontSize:13,color:C.muted,background:C.rowAlt,padding:"4px 10px",borderRadius:6,fontWeight:600}}>{headerInfo.dateRange} {"\u00B7"} {tc} leads</span>
-      </div>
-      <div style={{display:"flex",alignItems:"center",gap:10}}>
-        <div style={{display:"flex",gap:2,background:C.rowAlt,borderRadius:10,padding:3,boxShadow:"inset 0 1px 2px #00000008"}}>
-          {[{id:"overview",l:"Resumen"},{id:"engagement",l:"Engagement"},{id:"templates",l:"Templates",ib:true},{id:"grupos",l:"Grupos"},{id:"crm",l:"CRM"},{id:"lookup",l:"Buscar"},].map(function(t){
-            var disabled=t.ib&&panel==="inbound";
-            var active=tab===t.id&&!disabled;
-            return <button key={t.id} onClick={disabled?undefined:function(){setTab(t.id);}} style={{background:active?C.card:"transparent",color:disabled?C.border:active?C.text:C.muted,border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:disabled?"default":"pointer",fontFamily:font,boxShadow:active?"0 1px 3px #0000000f":"none"}}>{t.l}</button>;
-          })}
-        </div>
-        <button onClick={function(){var next=!darkMode;setDarkMode(next);try{localStorage.setItem("yago_dark",next?"1":"0");}catch(e){}}} title={darkMode?"Modo claro":"Modo oscuro"} style={{background:"none",border:"1px solid "+C.border,borderRadius:8,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:C.muted,flexShrink:0}}>
-          {darkMode?<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>}
-        </button>
-      </div>
-    </div>
-
-    <div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+  var _secKeys=Object.keys(SECTIONS);
+  function renderFilterBar(){
+    if(section==="outbound") return (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
       <div style={{display:"flex",background:C.rowAlt,borderRadius:10,padding:3,gap:2,boxShadow:"inset 0 1px 2px #00000008"}}>
-        {[{id:"outbound",l:"Outbound",c:C.accent},{id:"inbound",l:"Inbound",c:C.purple}].map(function(p){var a=panel===p.id;return <button key={p.id} onClick={function(){switchPanel(p.id);}} style={{background:a?p.c:"transparent",color:a?"#fff":C.muted,border:"none",borderRadius:8,padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>{p.l}</button>;})}
-      </div>
-      {panel==="outbound" && <div style={{display:"flex",background:C.rowAlt,borderRadius:10,padding:3,gap:2,boxShadow:"inset 0 1px 2px #00000008"}}>
         {[{l:"Todas",c:C.accent},{l:"Reales",c:C.green}].map(function(o,i){var a=mode===i;return <button key={i} onClick={function(){setMode(i);}} style={{background:a?o.c:"transparent",color:a?"#fff":C.muted,border:"none",borderRadius:8,padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>{o.l}</button>;})}
-      </div>}
+      </div>
       <div style={{width:1,height:24,background:C.border}}/>
-      {panel==="outbound" && <select value={stepFilter||""} onChange={function(ev){var v=ev.target.value;setStepFilter(v||null);setDateFrom("");setDateTo("");}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
+      <select value={stepFilter||""} onChange={function(ev){var v=ev.target.value;setStepFilter(v||null);setDateFrom("");setDateTo("");}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
         <option value="">Todos los steps</option>
         <option value="1">Step 1 (D+0)</option>
         <option value="2">Step 2 (D+1)</option>
         <option value="3">Step 3 (D+3)</option>
         <option value="4">Step 4 (D+5)</option>
-      </select>}
+      </select>
       <select value={regionFilter} onChange={onRegionChange} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
         <option value="all">LATAM + BR</option>
         <option value="es">LATAM (ES)</option>
@@ -957,69 +1212,137 @@ export default function Dashboard(){
         <input type="date" value={dateTo} onChange={onDateToChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
       </div>
       {(dateFrom||dateTo) && <button onClick={clearDateFilter} style={{background:C.lRed,color:C.red,border:"1px solid "+C.redBorder,borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Limpiar</button>}
-      {(dateFrom||dateTo) && <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6}}>{tc} leads en período</span>}
-    </div>
+      {(dateFrom||dateTo) && <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6}}>{tc} leads en per\u00EDodo</span>}
+    </div>);
+    if(section==="inbound") return (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+      <select value={regionFilter} onChange={onRegionChange} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
+        <option value="all">LATAM + BR</option>
+        <option value="es">LATAM (ES)</option>
+        <option value="pt">Brasil (PT)</option>
+      </select>
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <span style={{fontSize:12,color:C.muted}}>De</span>
+        <input type="date" value={dateFrom} onChange={onDateFromChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <span style={{fontSize:12,color:C.muted}}>Hasta</span>
+        <input type="date" value={dateTo} onChange={onDateToChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+      </div>
+      {(dateFrom||dateTo) && <button onClick={clearDateFilter} style={{background:C.lRed,color:C.red,border:"1px solid "+C.redBorder,borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Limpiar</button>}
+      {(dateFrom||dateTo) && <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6}}>{tc} leads en per\u00EDodo</span>}
+    </div>);
+    return null;
+  }
 
-    <div style={{padding:"24px 28px",maxWidth:1300,margin:"0 auto"}}>
-      {inboundLoading && <div style={{background:C.lPurple,border:"1px solid "+C.purple+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center"}}><div style={{width:20,height:20,border:"2px solid "+C.purple+"33",borderTopColor:C.purple,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.purple}}>Cargando datos inbound...</strong></div></div>}
+  var _curSec=SECTIONS[section]||{};
+  var _subTabs=_curSec.subTabs||[];
+  var _subTabLabels={resumen:"Resumen",engagement:"Engagement",templates:"Templates",grupos:"Grupos",email:"Email",crm:"CRM"};
 
-      {tab==="overview" && (function(){var cd=null;var isInb=panel==="inbound";var ix=inboundExtra;var inbTc=(responseStats&&responseStats.inbound)?responseStats.inbound:(ix?ix.uniqueLeadCount:0); return (<>
-        {isInb && ix ? (<>
-          {/* Inbound: 3 KPI cards */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))",gap:14,marginBottom:22}}>
-            <Cd onClick={function(){setShowA(true);}} style={{cursor:"pointer",border:"2px solid "+C.purple+"44",position:"relative",overflow:"hidden"}}>
-              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4AC}"}</div>
-              <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4AC}"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Leads Inbound</span><InfoTip dark={_isDark} data={TIPS.contactados}/></div>
-              <div style={{fontSize:36,fontWeight:900,fontFamily:mono,marginTop:6,lineHeight:1}}>{inbTc}</div>
-              <div style={{fontSize:13,color:C.muted,marginTop:4}}>{lpd}/d{"\u00ED"}a {"\u00B7"} {tc} conversaciones</div>
-              <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:6}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
-            </Cd>
-            <Cd style={{position:"relative",overflow:"hidden"}}>
-              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4CA}"}</div>
-              <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4CA}"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Engagement</span><InfoTip dark={_isDark} data={TIPS.engagementDistribucion}/></div>
-              <div style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.accent,marginTop:6,lineHeight:1}}>{inbTc>0?((ix.engagedTotal/inbTc)*100).toFixed(1):"0"}%</div>
-              <div style={{fontSize:13,color:C.muted,marginTop:4}}>{ix.engagedTotal} con 2+ msgs</div>
-              <div style={{fontSize:12,fontWeight:600,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}><span style={{color:C.red}}>{ix.depthCounts.rebote} rebotes</span> {"\u00B7"} <span style={{color:C.accent}}>{ix.avgDepth} msgs/conv</span></div>
-            </Cd>
-            <Cd style={{position:"relative",overflow:"hidden"}}>
-              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u2705"}</div>
-              <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Conversi{"\u00F3"}n Signup</span><InfoTip dark={_isDark} data={TIPS.conversionSignup}/></div>
-              <div style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.green,marginTop:6,lineHeight:1}}>{ix.signupLinkCount}</div>
-              <div style={{fontSize:13,color:C.muted,marginTop:4}}>recibieron link crear cuenta</div>
-              <div style={{fontSize:12,color:C.green,fontWeight:600,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{ix.signupCount} recibieron Step 1 ({inbTc>0?((ix.signupCount/inbTc)*100).toFixed(1):"0"}%)</div>
-            </Cd>
+  return (<div style={{display:"flex",background:C.bg,minHeight:"100vh",color:C.text,fontFamily:font,fontSize:15}}>
+    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
+    {showM && <MeetModal leads={meetings.filter(function(l){return l.ml;})} mode={mode} onClose={function(){setShowM(false);}} title={"\u{1F4C5} Leads con Oferta de Reuni\u00F3n"}/>}
+    {showA && <MeetModal leads={meetings} mode={mode} onClose={function(){setShowA(false);}} title={"\u{1F4AC} Todas las Conversaciones"}/>}
+    {showConfirmed && <MeetModal leads={confirmedLeads} mode={mode} onClose={function(){setShowConfirmed(false);}} title={"\u2705 Reuniones Confirmadas (Cruce HubSpot)"}/>}
+    {selTpl && <TplModal tpl={selTpl} leads={meetings} mode={mode} onClose={function(){setSelTpl(null);}}/>}
+    {topicModal && (function(){
+      var tkw=TOPIC_KEYWORDS[topicModal];
+      var useHumanOnly=section==="inbound";
+      var filtered=meetings.filter(function(l){
+        var txt="";for(var ci=0;ci<l.c.length;ci++){if(useHumanOnly?l.c[ci][0]===1:(l.c[ci][0]===1||l.c[ci][0]===2))txt+=" "+l.c[ci][1];}
+        var lower=txt.toLowerCase();
+        if(!tkw)return false;
+        for(var ki=0;ki<tkw.kw.length;ki++){if(lower.includes(tkw.kw[ki]))return true;}
+        return false;
+      });
+      return <MeetModal leads={filtered} mode={mode} onClose={function(){setTopicModal(null);}} title={(tkw?tkw.e+" ":"")+"T\u00F3pico: "+topicModal+" ("+filtered.length+" leads)"}/>;
+    })()}
+
+    {/* Search Modal */}
+    {searchOpen && (<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#00000044",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:20,animation:"fadeInModal 0.2s ease-out"}} onClick={function(){setSearchOpen(false);setSearchSel(null);setSearchThreadData(null);}}>
+      <div style={{background:C.card,borderRadius:20,padding:28,maxWidth:700,width:"100%",maxHeight:"88vh",overflowY:"auto",boxShadow:"0 25px 60px #00000025",animation:"scaleInModal 0.2s ease-out"}} onClick={function(e){e.stopPropagation();}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+          <div style={{fontSize:19,fontWeight:900}}>Buscar Conversaci\u00F3n</div>
+          <button onClick={function(){setSearchOpen(false);setSearchSel(null);setSearchThreadData(null);}} style={{background:C.rowAlt,border:"none",borderRadius:8,width:36,height:36,fontSize:18,cursor:"pointer",color:C.muted,fontWeight:700}}>{"\u2715"}</button>
+        </div>
+        <form onSubmit={function(e){e.preventDefault();handleSearch(searchQuery);}} style={{display:"flex",gap:10,marginBottom:14}}>
+          <input value={searchQuery} onChange={function(e){setSearchQuery(e.target.value);}} placeholder="Tel\u00E9fono o Thread ID..." style={{flex:1,padding:"12px 16px",border:"1px solid "+C.border,borderRadius:10,fontSize:15,fontFamily:mono,outline:"none",background:C.rowBg,color:C.text}}/>
+          <button type="submit" disabled={searchLoading} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"12px 24px",fontSize:14,fontWeight:700,cursor:searchLoading?"wait":"pointer",fontFamily:font,opacity:searchLoading?0.6:1}}>{searchLoading?"Buscando...":"Buscar"}</button>
+        </form>
+        <div style={{fontSize:12,color:C.muted,marginBottom:14}}>Busca por n\u00FAmero de tel\u00E9fono (parcial). Busca en los datos cargados.</div>
+        {searchLoading && <div style={{textAlign:"center",padding:40,color:C.muted,fontSize:15}}>Buscando...</div>}
+        {searchResults!==null&&!searchLoading&&searchResults.length===0 && (
+          <div style={{textAlign:"center",padding:40}}>
+            <div style={{fontSize:36,marginBottom:8}}>{"?"}</div>
+            <div style={{fontSize:16,fontWeight:700,color:C.muted}}>No se encontraron resultados</div>
+            <div style={{fontSize:13,color:C.muted,marginTop:4}}>Intenta con otro n\u00FAmero o thread ID</div>
           </div>
-
-          {/* Inbound: Funnel */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:22}}>
-            <Cd><Sec tipKey="funnel">Embudo de Conversi&oacute;n</Sec>
-              {funnel.map(function(f,i){var base=funnel[0].v||1;var w=Math.max((f.v/base)*100,3);var prev=i>0?((f.v/(funnel[i-1].v||1))*100).toFixed(0):null;
-                return (<div key={i} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:C.sub,fontWeight:500}}><span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:6,background:f.c+"18",color:f.c,fontSize:11,fontWeight:800,marginRight:6}}>{i+1}</span>{f.n}</span><div><span style={{fontSize:17,fontWeight:800,fontFamily:mono}}>{f.v}</span><span style={{fontSize:13,color:C.muted,marginLeft:6}}>{(f.v/base*100).toFixed(1)}%</span>{prev && <span style={{fontSize:12,color:parseFloat(prev)>=50?C.green:parseFloat(prev)>=20?C.yellow:C.red,marginLeft:6}}>({prev}%{"\u2193"})</span>}</div></div><div style={{height:24,background:C.rowAlt,borderRadius:6,overflow:"hidden"}}><div style={{height:"100%",width:w+"%",background:"linear-gradient(90deg, "+f.c+" 0%, "+f.c+"CC 100%)",borderRadius:6,transition:"width 0.5s ease"}}/></div></div>);})}
-            </Cd>
-
-            {/* Topics ranking */}
-            <Cd><Sec tipKey="temasAbordados">{"\u00BF"}Qu{"\u00E9"} buscan?</Sec>
-              {d.topics.map(function(tp,i){
-                var topicColors=[C.accent,C.purple,C.cyan,C.yellow,C.green,C.red];
-                var bC=topicColors[i%topicColors.length];
-                return (
-                  <div key={i} onClick={function(){setTopicModal(tp.t);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:i<d.topics.length-1?"1px solid "+C.border+"44":"none",cursor:"pointer"}}>
-                    <span style={{fontSize:22}}>{tp.e}</span>
-                    <div style={{flex:1}}>
-                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                        <span style={{fontSize:14,fontWeight:700}}>{tp.t}</span>
-                        <span style={{fontSize:14,fontWeight:800,fontFamily:mono,color:bC}}>{tp.n} <span style={{fontSize:12,fontWeight:600,color:C.muted}}>({tp.p}%)</span></span>
-                      </div>
-                      <div style={{height:6,background:C.rowAlt,borderRadius:3,overflow:"hidden"}}>
-                        <div style={{height:"100%",width:tp.p+"%",background:bC,borderRadius:3,opacity:0.7}}/>
-                      </div>
+        )}
+        {searchResults!==null&&searchResults.length>0&&searchSel===null && (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div style={{fontSize:16,fontWeight:800}}>{searchResults.length} resultado{searchResults.length!==1?"s":""}</div>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {searchResults.map(function(r,i){
+                var l=r.lead;var eC2={alto:C.green,medio:C.accent,bajo:C.yellow,minimo:C.red};var ql=qualLabel(l.q);
+                return (<div key={i} onClick={function(){selectSearchResult(i);}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:C.rowBg,borderRadius:12,cursor:"pointer",border:"2px solid transparent"}}>
+                  <span style={{fontSize:20}}>{l.co}</span>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontFamily:mono,fontWeight:700,fontSize:16}}>{l.p}</span>
+                      <Bd color={eC2[l.e]||C.muted}>{l.e}</Bd>
+                      <Bd color={ql.c}>{ql.t}</Bd>
+                      {l.au && <Bd color={C.red}>AUTO</Bd>}
+                    </div>
+                    <div style={{fontSize:12,color:C.muted,marginTop:3}}>
+                      {l.ms} msgs {"\u00B7"} {l.w.toLocaleString()} pal. {"\u00B7"} Tpls: <strong>{l.tr.join(", ")||"N/A"}</strong>
                     </div>
                   </div>
-                );
+                  <div style={{color:C.accent,fontSize:18,fontWeight:700}}>{"\u2192"}</div>
+                </div>);
               })}
-            </Cd>
+            </div>
           </div>
-        </>) : (<>
+        )}
+        {searchSel!==null&&searchResults&&searchResults[searchSel] && (function(){
+          var item=searchResults[searchSel];var lead=item.lead;
+          return <ConvView lead={lead} onBack={function(){setSearchSel(null);setSearchThreadData(null);}}/>;
+        })()}
+      </div>
+    </div>)}
+
+    {/* Sidebar */}
+    <nav style={{width:56,minHeight:"100vh",background:C.card,borderRight:"1px solid "+C.border,display:"flex",flexDirection:"column",alignItems:"center",position:"sticky",top:0,height:"100vh",flexShrink:0,paddingTop:12,gap:4,zIndex:10}}>
+      <div style={{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg, #2563EB, #7C3AED)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:900,fontSize:16,marginBottom:12,flexShrink:0}}>Y</div>
+      {_secKeys.map(function(sk){var s=SECTIONS[sk];var a=section===sk;return <button key={sk} onClick={function(){navigateTo(sk);}} title={s.label} style={{width:40,height:40,borderRadius:10,border:"none",background:a?(C.accent+"18"):"transparent",color:a?C.accent:C.muted,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",transition:"all 0.15s ease"}}>{a&&<div style={{position:"absolute",left:0,top:8,bottom:8,width:3,borderRadius:"0 3px 3px 0",background:C.accent}}/>}{s.icon}</button>;})}
+      <div style={{flex:1}}/>
+      <button onClick={function(){setSearchOpen(true);}} title="Buscar" style={{width:40,height:40,borderRadius:10,border:"none",background:"transparent",color:C.muted,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>{"\uD83D\uDD0D"}</button>
+      <button onClick={function(){var next=!darkMode;setDarkMode(next);try{localStorage.setItem("yago_dark",next?"1":"0");}catch(e){}}} title={darkMode?"Modo claro":"Modo oscuro"} style={{width:40,height:40,borderRadius:10,border:"none",background:"transparent",color:C.muted,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:8}}>{darkMode?"\u2600\uFE0F":"\uD83C\uDF19"}</button>
+    </nav>
+
+    {/* Content Area */}
+    <div style={{flex:1,minWidth:0}}>
+      {/* Header */}
+      <div style={{background:"linear-gradient(135deg, "+C.gradFrom+" 0%, "+C.gradTo+" 100%)",borderBottom:"1px solid "+C.border,padding:"14px 28px",display:"flex",alignItems:"center",gap:14}}>
+        <h1 style={{margin:0,fontSize:20,fontWeight:900}}><span style={{background:"linear-gradient(135deg, #2563EB, #7C3AED)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>YAGO</span> <span style={{color:C.muted,fontWeight:400}}>KPI{"'"}s</span></h1>
+        <div style={{width:1,height:24,background:C.border}}/>
+        <span style={{fontSize:14,fontWeight:800,color:C.text}}>{_curSec.icon} {_curSec.label}</span>
+        <span style={{fontSize:13,color:C.muted,background:C.rowAlt,padding:"4px 10px",borderRadius:6,fontWeight:600}}>{headerInfo.dateRange} {"\u00B7"} {tc} leads</span>
+      </div>
+
+      {/* Sub-tab bar */}
+      {_subTabs.length>0 && (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"8px 28px",display:"flex",gap:4}}>
+        {_subTabs.map(function(st){var a=subTab===st;return <button key={st} onClick={function(){setSubTab(st);}} style={{background:a?C.accent:"transparent",color:a?"#fff":C.muted,border:"none",borderRadius:8,padding:"6px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font,transition:"all 0.15s ease"}}>{_subTabLabels[st]||st}</button>;})}
+      </div>)}
+
+      {/* Filter bar */}
+      {renderFilterBar()}
+
+      {/* Content */}
+      <div style={{padding:"24px 28px",maxWidth:1300,margin:"0 auto"}}>
+      {inboundLoading && <div style={{background:C.lPurple,border:"1px solid "+C.purple+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center"}}><div style={{width:20,height:20,border:"2px solid "+C.purple+"33",borderTopColor:C.purple,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.purple}}>Cargando datos inbound...</strong></div></div>}
+
+      {section==="outbound"&&subTab==="resumen" && (function(){var cd=null; return (<>
           {/* Outbound: 4 KPI funnel cards */}
           {(function(){
             var sqlTotal=responseStats?responseStats.outboundTotal:null;
@@ -1159,34 +1482,77 @@ export default function Dashboard(){
               {chBench.map(function(b,i){return (<div key={i} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:b.y?C.text:C.muted,fontWeight:b.y?700:400}}>{b.ch}</span><span style={{fontSize:15,fontWeight:800,color:b.y?C.accent:C.muted,fontFamily:mono}}>{b.r}%</span></div><div style={{height:8,background:C.rowAlt,borderRadius:4}}><div style={{height:"100%",width:(b.r/45)*100+"%",background:b.y?C.accent:C.muted,borderRadius:4,opacity:b.y?0.8:0.3}}/></div></div>);})}
             </Cd>
           </div>
-        </>)}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
           {(function(){var jsTotal=headerInfo.esTotal+headerInfo.ptTotal;var esFrac=jsTotal>0?headerInfo.esTotal/jsTotal:0.5;var corrEsTotal=tc>0?Math.round(tc*esFrac):headerInfo.esTotal;var corrPtTotal=tc>0?tc-corrEsTotal:headerInfo.ptTotal;var _esResp=mode===1?headerInfo.esRespReal:headerInfo.esResp;var _ptResp=mode===1?headerInfo.ptRespReal:headerInfo.ptResp;var _esRate=corrEsTotal>0?((_esResp/corrEsTotal)*100).toFixed(1):"0.0";var _ptRate=corrPtTotal>0?((_ptResp/corrPtTotal)*100).toFixed(1):"0.0";return <Cd><Sec tipKey="esVsPt">{"\u{1F1EA}\u{1F1F8} vs \u{1F1E7}\u{1F1F7}"}</Sec><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><div style={{background:C.lBlue,borderRadius:12,padding:16,textAlign:"center"}}><div style={{fontSize:12,color:C.accent,fontWeight:700}}>{"\u{1F1EA}\u{1F1F8} ESPA\u00D1OL"}</div><div style={{fontSize:34,fontWeight:900,color:C.accent,fontFamily:mono}}>{_esRate}%</div><div style={{fontSize:13,color:C.muted}}>{_esResp} de {corrEsTotal}</div></div><div style={{background:C.lGreen,borderRadius:12,padding:16,textAlign:"center"}}><div style={{fontSize:12,color:C.green,fontWeight:700}}>{"\u{1F1E7}\u{1F1F7} PORTUGU\u00C9S"}</div><div style={{fontSize:34,fontWeight:900,color:C.green,fontFamily:mono}}>{_ptRate}%</div><div style={{fontSize:13,color:C.muted}}>{_ptResp} de {corrPtTotal}</div></div></div></Cd>;})()}
           <Cd><Sec tipKey="leadsPorDia">Leads por D{"\u00ED"}a</Sec><ResponsiveContainer width="100%" height={180}><AreaChart data={dailyWithHs.length>0?dailyWithHs:daily} margin={{left:-15,right:5,top:5,bottom:0}}><defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.accent} stopOpacity={0.2}/><stop offset="100%" stopColor={C.accent} stopOpacity={0}/></linearGradient><linearGradient id="agHs" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.orange} stopOpacity={0.2}/><stop offset="100%" stopColor={C.orange} stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border}/><XAxis dataKey="d" tick={{fontSize:12,fill:C.muted}}/><YAxis tick={{fontSize:12,fill:C.muted}}/><Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13}}/><Legend wrapperStyle={{fontSize:12}} formatter={function(v){return v==="l"?"Yago":"HubSpot"}}/><Area type="monotone" dataKey="l" name="l" stroke={C.accent} fill="url(#ag)" strokeWidth={2}/><Area type="monotone" dataKey="hs" name="hs" stroke={C.orange} fill="url(#agHs)" strokeWidth={2}/></AreaChart></ResponsiveContainer></Cd>
         </div>
-
-        {/* Benchmarks section (outbound only) */}
-        {!isInb && (<>
         <Cd style={{marginTop:22,marginBottom:22,overflowX:"auto"}}><Sec tipKey="benchmarkComparacion">{"Comparaci\u00F3n vs Benchmarks (Warm Leads)"}</Sec>
           <div style={{fontSize:13,color:C.muted,marginBottom:14}}>{"Leads que se registraron en la plataforma = warm/opt-in. Benchmarks: Twilio, Meta, Respond.io, ChatArchitect (2024-2025)."}</div>
           <table style={{width:"100%",borderCollapse:"separate",borderSpacing:"0 4px",fontSize:14}}><thead><tr>{["M\u00E9trica","Yago","Benchmark","\u0394",""].map(function(h,i){return <th key={i} style={{padding:"10px 14px",textAlign:"left",color:C.muted,fontWeight:700,fontSize:12,textTransform:"uppercase",borderBottom:"2px solid "+C.border}}>{h}</th>;})}</tr></thead>
           <tbody>{bTable.map(function(r,i){return(<tr key={i} style={{background:i%2===0?C.rowBg:"transparent"}}><td style={{padding:"12px 14px",fontWeight:600,borderRadius:"8px 0 0 8px"}}>{r.m}</td><td style={{padding:"12px 14px",fontWeight:800,fontFamily:mono,fontSize:15}}>{r.y}</td><td style={{padding:"12px 14px",color:C.muted}}>{r.b}</td><td style={{padding:"12px 14px",fontWeight:700,fontFamily:mono,color:r.s?C.green:C.red}}>{r.d}</td><td style={{padding:"12px 14px",borderRadius:"0 8px 8px 0"}}><Bd color={r.s?C.green:C.red}>{r.s?"\u2713 ARRIBA":"\u2717 ABAJO"}</Bd></td></tr>);})}</tbody></table>
         </Cd>
-        </>)}
       </>);})()}
 
-      {tab==="engagement" && (function(){
-        var isInb=panel==="inbound";var ix=inboundExtra;
-        var _sqlR=responseStats?responseStats.outboundResponded:null;
-        var totalResp=(!isInb&&_sqlR!=null)?_sqlR:(headerInfo.realesCount+headerInfo.autoReplyCount);
-        var corrRespCount=mode===1?d.resp:totalResp;
-        var corrRate=tc>0?((corrRespCount/tc)*100).toFixed(1)+"%":"0%";
-        var autoP=totalResp>0?((headerInfo.autoReplyCount/totalResp)*100).toFixed(1):"0";
-        var realP=totalResp>0?((headerInfo.realesCount/totalResp)*100).toFixed(1):"0";
+      {section==="inbound"&&subTab==="resumen" && (function(){var ix=inboundExtra;var inbTc=(responseStats&&responseStats.inbound)?responseStats.inbound:(ix?ix.uniqueLeadCount:0); return (<>
+        {ix ? (<>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))",gap:14,marginBottom:22}}>
+            <Cd onClick={function(){setShowA(true);}} style={{cursor:"pointer",border:"2px solid "+C.purple+"44",position:"relative",overflow:"hidden"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4AC}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4AC}"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Leads Inbound</span><InfoTip dark={_isDark} data={TIPS.contactados}/></div>
+              <div style={{fontSize:36,fontWeight:900,fontFamily:mono,marginTop:6,lineHeight:1}}>{inbTc}</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:4}}>{lpd}/d{"\u00ED"}a {"\u00B7"} {tc} conversaciones</div>
+              <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:6}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
+            </Cd>
+            <Cd style={{position:"relative",overflow:"hidden"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4CA}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4CA}"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Engagement</span><InfoTip dark={_isDark} data={TIPS.engagementDistribucion}/></div>
+              <div style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.accent,marginTop:6,lineHeight:1}}>{inbTc>0?((ix.engagedTotal/inbTc)*100).toFixed(1):"0"}%</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:4}}>{ix.engagedTotal} con 2+ msgs</div>
+              <div style={{fontSize:12,fontWeight:600,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}><span style={{color:C.red}}>{ix.depthCounts.rebote} rebotes</span> {"\u00B7"} <span style={{color:C.accent}}>{ix.avgDepth} msgs/conv</span></div>
+            </Cd>
+            <Cd style={{position:"relative",overflow:"hidden"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u2705"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Conversi{"\u00F3"}n Signup</span><InfoTip dark={_isDark} data={TIPS.conversionSignup}/></div>
+              <div style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.green,marginTop:6,lineHeight:1}}>{ix.signupLinkCount}</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:4}}>recibieron link crear cuenta</div>
+              <div style={{fontSize:12,color:C.green,fontWeight:600,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{ix.signupCount} recibieron Step 1 ({inbTc>0?((ix.signupCount/inbTc)*100).toFixed(1):"0"}%)</div>
+            </Cd>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:22}}>
+            <Cd><Sec tipKey="funnel">Embudo de Conversi&oacute;n</Sec>
+              {funnel.map(function(f,i){var base=funnel[0].v||1;var w=Math.max((f.v/base)*100,3);var prev=i>0?((f.v/(funnel[i-1].v||1))*100).toFixed(0):null;
+                return (<div key={i} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:C.sub,fontWeight:500}}><span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:6,background:f.c+"18",color:f.c,fontSize:11,fontWeight:800,marginRight:6}}>{i+1}</span>{f.n}</span><div><span style={{fontSize:17,fontWeight:800,fontFamily:mono}}>{f.v}</span><span style={{fontSize:13,color:C.muted,marginLeft:6}}>{(f.v/base*100).toFixed(1)}%</span>{prev && <span style={{fontSize:12,color:parseFloat(prev)>=50?C.green:parseFloat(prev)>=20?C.yellow:C.red,marginLeft:6}}>({prev}%{"\u2193"})</span>}</div></div><div style={{height:24,background:C.rowAlt,borderRadius:6,overflow:"hidden"}}><div style={{height:"100%",width:w+"%",background:"linear-gradient(90deg, "+f.c+" 0%, "+f.c+"CC 100%)",borderRadius:6,transition:"width 0.5s ease"}}/></div></div>);})}
+            </Cd>
+            <Cd><Sec tipKey="temasAbordados">{"\u00BF"}Qu{"\u00E9"} buscan?</Sec>
+              {d.topics.map(function(tp,i){
+                var topicColors=[C.accent,C.purple,C.cyan,C.yellow,C.green,C.red];
+                var bC=topicColors[i%topicColors.length];
+                return (
+                  <div key={i} onClick={function(){setTopicModal(tp.t);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:i<d.topics.length-1?"1px solid "+C.border+"44":"none",cursor:"pointer"}}>
+                    <span style={{fontSize:22}}>{tp.e}</span>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                        <span style={{fontSize:14,fontWeight:700}}>{tp.t}</span>
+                        <span style={{fontSize:14,fontWeight:800,fontFamily:mono,color:bC}}>{tp.n} <span style={{fontSize:12,fontWeight:600,color:C.muted}}>({tp.p}%)</span></span>
+                      </div>
+                      <div style={{height:6,background:C.rowAlt,borderRadius:3,overflow:"hidden"}}>
+                        <div style={{height:"100%",width:tp.p+"%",background:bC,borderRadius:3,opacity:0.7}}/>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </Cd>
+          </div>
+        </>) : (<div style={{textAlign:"center",padding:40,color:C.muted}}>Cargando datos inbound...</div>)}
+      </>);})()}
+
+      {section==="inbound"&&subTab==="engagement" && (function(){
+        var ix=inboundExtra;
         var peakH=0;var peakV=0;for(var hi=0;hi<d.hours.length;hi++){if(d.hours[hi]>peakV){peakV=d.hours[hi];peakH=hi;}}
         var topicColors=[C.accent,C.purple,C.cyan,C.yellow,C.green,C.red];
-
-        if(isInb&&ix){
+        if(!ix) return <div style={{textAlign:"center",padding:40,color:C.muted}}>Cargando datos inbound...</div>;
+        if(ix){
           var depthItems=[
             {k:"rebote",n:"Rebote: 1 msg",c:C.red,bg:C.lRed,ic:"\u{1F4A4}"},
             {k:"corta",n:"Corta: 2-4 msgs",c:C.yellow,bg:C.lYellow,ic:"\u{1F610}"},
@@ -1338,8 +1704,18 @@ export default function Dashboard(){
             </Cd>
           </>);
         }
+        return null;
+      })()}
 
-        /* Outbound engagement */
+      {section==="outbound"&&subTab==="engagement" && (function(){
+        var _sqlR=responseStats?responseStats.outboundResponded:null;
+        var totalResp=(_sqlR!=null)?_sqlR:(headerInfo.realesCount+headerInfo.autoReplyCount);
+        var corrRespCount=mode===1?d.resp:totalResp;
+        var corrRate=tc>0?((corrRespCount/tc)*100).toFixed(1)+"%":"0%";
+        var autoP=totalResp>0?((headerInfo.autoReplyCount/totalResp)*100).toFixed(1):"0";
+        var realP=totalResp>0?((headerInfo.realesCount/totalResp)*100).toFixed(1):"0";
+        var peakH=0;var peakV=0;for(var hi=0;hi<d.hours.length;hi++){if(d.hours[hi]>peakV){peakV=d.hours[hi];peakH=hi;}}
+        var topicColors=[C.accent,C.purple,C.cyan,C.yellow,C.green,C.red];
         var engIcons={alto:"\u{1F525}",medio:"\u{1F44D}",bajo:"\u{1F610}",minimo:"\u{1F4A4}"};
         var engLabels={alto:"Alto",medio:"Medio",bajo:"Bajo",minimo:"M\u00EDnimo"};
         return (<>
@@ -1446,7 +1822,7 @@ export default function Dashboard(){
       </>);
       })()}
 
-      {tab==="templates" && (function(){
+      {section==="outbound"&&subTab==="templates" && (function(){
         var _mk=mode===0?"all":"real";var _abD=dataD[_mk];
         var _abGrp={};var _ck=Object.keys(templateConfig);
         for(var _i=0;_i<_ck.length;_i++){var _k=_ck[_i];var _v=templateConfig[_k];if(_v&&_v.ab_group){if(!_abGrp[_v.ab_group])_abGrp[_v.ab_group]=[];_abGrp[_v.ab_group].push(_k);}}
@@ -1592,7 +1968,7 @@ export default function Dashboard(){
         </div>
       </>);})()}
 
-      {tab==="grupos" && (<>
+      {section==="canales"&&subTab==="grupos" && (<>
         {/* Selector + Filtros */}
         <Cd style={{marginBottom:22}}>
           <Sec>Grupos WhatsApp — MeuGrupoVip</Sec>
@@ -1724,7 +2100,7 @@ export default function Dashboard(){
         </>)}
       </>)}
 
-      {tab==="crm" && (function(){
+      {section==="canales"&&subTab==="crm" && (function(){
         // Build pipeline stage map
         var stageMap={};
         if(crmPipelines&&crmPipelines.results){
@@ -2000,62 +2376,386 @@ export default function Dashboard(){
         </>);
       })()}
 
-      {tab==="lookup" && (<>
-        <Cd style={{marginBottom:22}}>
-          <Sec>Buscar Conversaci&oacute;n</Sec>
-          <form onSubmit={function(e){e.preventDefault();handleSearch(searchQuery);}} style={{display:"flex",gap:10}}>
-            <input value={searchQuery} onChange={function(e){setSearchQuery(e.target.value);}} placeholder="Tel\u00E9fono o Thread ID..." style={{flex:1,padding:"12px 16px",border:"1px solid "+C.border,borderRadius:10,fontSize:15,fontFamily:mono,outline:"none",background:C.rowBg,color:C.text}}/>
-            <button type="submit" disabled={searchLoading} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"12px 24px",fontSize:14,fontWeight:700,cursor:searchLoading?"wait":"pointer",fontFamily:font,opacity:searchLoading?0.6:1}}>{searchLoading?"Buscando...":"Buscar"}</button>
-          </form>
-          <div style={{fontSize:12,color:C.muted,marginTop:8}}>Busca por n&uacute;mero de tel&eacute;fono (parcial). Busca en los datos cargados.</div>
-        </Cd>
+      {section==="canales"&&subTab==="email" && (function(){
+        var ed=emailData||{};
+        var mt=ed.total&&ed.total.metrics||{};
+        var m4=ed.wf4&&ed.wf4.metrics||{};
+        var m5=ed.wf5&&ed.wf5.metrics||{};
+        var hasWfSplit=(ed.wf4&&ed.wf4.campaigns&&ed.wf4.campaigns.length>0)||(ed.wf5&&ed.wf5.campaigns&&ed.wf5.campaigns.length>0);
+        var allCampaigns=ed.total&&ed.total.campaigns||[];
 
-        {searchLoading && <div style={{textAlign:"center",padding:40,color:C.muted,fontSize:15}}>Buscando...</div>}
+        function better(a,b,higher){if(higher)return parseFloat(a)>parseFloat(b)?"wf4":parseFloat(b)>parseFloat(a)?"wf5":"tie";return parseFloat(a)<parseFloat(b)?"wf4":parseFloat(b)<parseFloat(a)?"wf5":"tie";}
 
-        {searchResults!==null&&!searchLoading&&searchResults.length===0 && (
-          <Cd style={{textAlign:"center",padding:40}}>
-            <div style={{fontSize:36,marginBottom:8}}>{"?"}</div>
-            <div style={{fontSize:16,fontWeight:700,color:C.muted}}>No se encontraron resultados</div>
-            <div style={{fontSize:13,color:C.muted,marginTop:4}}>Intenta con otro n&uacute;mero o thread ID</div>
-          </Cd>
-        )}
+        return (<>
+          {emailLoading && <div style={{textAlign:"center",padding:40,color:C.muted,fontSize:15}}><div style={{width:30,height:30,border:"3px solid "+C.border,borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto 12px"}}/>Cargando datos de Brevo...</div>}
+          {emailError && <div style={{color:C.red,fontSize:13,fontWeight:600,marginBottom:16,background:C.lRed,padding:"12px 18px",borderRadius:10,border:"1px solid "+C.redBorder}}>Error: {emailError} <button onClick={function(){setEmailError(null);setEmailInited(false);}} style={{marginLeft:12,background:C.accent,color:"#fff",border:"none",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Reintentar</button></div>}
 
-        {searchResults!==null&&searchResults.length>0&&searchSel===null && (
-          <Cd>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-              <div style={{fontSize:16,fontWeight:800}}>{searchResults.length} resultado{searchResults.length!==1?"s":""}</div>
-              <div style={{fontSize:12,color:C.muted}}>Click en un resultado para ver detalles</div>
+          {!emailLoading && emailInited && (<>
+            {/* Hero KPIs */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:22}}>
+              <Cd onClick={function(){setEmailDetail(emailDetail==="sent"?null:"sent");}} style={{cursor:"pointer",border:"2px solid "+(emailDetail==="sent"?C.accent:C.accent+"44"),background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Total Enviados</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.accent,fontFamily:mono,marginTop:6}}>{(mt.sent||0).toLocaleString()}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{(mt.delivered||0).toLocaleString()} entregados ({mt.deliveryRate||0}%)</div>
+              </Cd>
+              <Cd onClick={function(){setEmailDetail(emailDetail==="opens"?null:"opens");}} style={{cursor:"pointer",border:"2px solid "+(emailDetail==="opens"?C.purple:C.purple+"44"),background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Tasa de Apertura</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.purple,fontFamily:mono,marginTop:6}}>{mt.openRate||0}%</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{(mt.uniqueOpens||0).toLocaleString()} aperturas {"\u00FA"}nicas</div>
+              </Cd>
+              <Cd onClick={function(){setEmailDetail(emailDetail==="clicks"?null:"clicks");}} style={{cursor:"pointer",border:"2px solid "+(emailDetail==="clicks"?C.cyan:C.cyan+"44"),background:"linear-gradient(135deg, "+C.card+" 0%, #ECFEFF 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Tasa de Clics</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.cyan,fontFamily:mono,marginTop:6}}>{mt.clickRate||0}%</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{(mt.uniqueClicks||0).toLocaleString()} clics {"\u00FA"}nicos</div>
+              </Cd>
+              <Cd onClick={function(){setEmailDetail(emailDetail==="bounces"?null:"bounces");}} style={{cursor:"pointer",border:"2px solid "+(emailDetail==="bounces"?C.red:C.red+"44"),background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Tasa de Bounce</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.red,fontFamily:mono,marginTop:6}}>{mt.bounceRate||0}%</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{(mt.hardBounces||0).toLocaleString()} hard + {(mt.softBounces||0).toLocaleString()} soft</div>
+              </Cd>
             </div>
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {searchResults.map(function(r,i){
-                var l=r.lead;var eC={alto:C.green,medio:C.accent,bajo:C.yellow,minimo:C.red};var ql=qualLabel(l.q);
-                return (<div key={i} onClick={function(){selectSearchResult(i);}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:C.rowBg,borderRadius:12,cursor:"pointer",border:"2px solid transparent"}}>
-                  <span style={{fontSize:20}}>{l.co}</span>
-                  <div style={{flex:1}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                      <span style={{fontFamily:mono,fontWeight:700,fontSize:16}}>{l.p}</span>
-                      <Bd color={eC[l.e]||C.muted}>{l.e}</Bd>
-                      <Bd color={ql.c}>{ql.t}</Bd>
-                      {l.au && <Bd color={C.red}>AUTO</Bd>}
+
+            {/* Drill-down panel for selected KPI */}
+            {emailDetail && (function(){
+              var detailConfig={
+                sent:{title:"Detalle: Enviados",color:C.accent,sortKey:"sent",columns:[
+                  {h:"Enviados",k:"sent"},{h:"Entregados",k:"delivered"},{h:"Entrega %",k:"deliveryPct"}
+                ]},
+                opens:{title:"Detalle: Aperturas",color:C.purple,sortKey:"uniqueOpens",columns:[
+                  {h:"Aperturas",k:"uniqueOpens"},{h:"Enviados",k:"sent"},{h:"Tasa %",k:"openPct"}
+                ]},
+                clicks:{title:"Detalle: Clics",color:C.cyan,sortKey:"uniqueClicks",columns:[
+                  {h:"Clics",k:"uniqueClicks"},{h:"Entregados",k:"delivered"},{h:"Tasa %",k:"clickPct"}
+                ]},
+                bounces:{title:"Detalle: Bounces",color:C.red,sortKey:"totalBounces",columns:[
+                  {h:"Bounces",k:"totalBounces"},{h:"Hard",k:"hardBounces"},{h:"Soft",k:"softBounces"},{h:"Tasa %",k:"bouncePct"}
+                ]},
+                unsubs:{title:"Detalle: Unsubscribes",color:C.yellow,sortKey:"unsubscriptions",columns:[
+                  {h:"Unsubs",k:"unsubscriptions"},{h:"Entregados",k:"delivered"},{h:"Tasa %",k:"unsubPct"}
+                ]},
+                complaints:{title:"Detalle: Quejas / Spam",color:C.orange,sortKey:"complaints",columns:[
+                  {h:"Quejas",k:"complaints"},{h:"Entregados",k:"delivered"},{h:"Tasa %",k:"complaintPct"}
+                ]},
+              };
+              var cfg=detailConfig[emailDetail];
+              if(!cfg)return null;
+
+              // Build rows from campaigns with computed fields
+              var rows=allCampaigns.map(function(c){
+                var gs=c.statistics&&c.statistics.globalStats||{};
+                var s=gs.sent||0,d=gs.delivered||0,o=gs.uniqueOpens||0,cl=gs.uniqueClicks||0;
+                var hb=gs.hardBounces||0,sb=gs.softBounces||0,tb=hb+sb,un=gs.unsubscriptions||0,co=gs.complaints||0;
+                return {
+                  name:c.name||"Campaign #"+c.id,id:c.id,
+                  sent:s,delivered:d,uniqueOpens:o,uniqueClicks:cl,
+                  hardBounces:hb,softBounces:sb,totalBounces:tb,
+                  unsubscriptions:un,complaints:co,
+                  deliveryPct:s>0?(d/s*100).toFixed(1):"0",
+                  openPct:d>0?(o/d*100).toFixed(1):"0",
+                  clickPct:d>0?(cl/d*100).toFixed(1):"0",
+                  bouncePct:s>0?(tb/s*100).toFixed(1):"0",
+                  unsubPct:d>0?(un/d*100).toFixed(2):"0",
+                  complaintPct:d>0?(co/d*100).toFixed(3):"0",
+                  wf:ed.wf4&&ed.wf4.campaigns&&ed.wf4.campaigns.indexOf(c)>=0?"WF#4":ed.wf5&&ed.wf5.campaigns&&ed.wf5.campaigns.indexOf(c)>=0?"WF#5":null,
+                };
+              }).sort(function(a,b){return (b[cfg.sortKey]||0)-(a[cfg.sortKey]||0);});
+
+              return <Cd style={{marginBottom:22,border:"2px solid "+cfg.color+"44"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                  <Sec style={{marginBottom:0}}>{cfg.title}</Sec>
+                  <button onClick={function(){setEmailDetail(null);}} style={{background:C.rowAlt,color:C.muted,border:"none",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Cerrar</button>
+                </div>
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,fontFamily:font}}>
+                    <thead>
+                      <tr style={{borderBottom:"2px solid "+C.border}}>
+                        <th style={{textAlign:"left",padding:"10px 8px",fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>Campa{"\u00F1"}a</th>
+                        {cfg.columns.map(function(col){return <th key={col.h} style={{textAlign:"right",padding:"10px 8px",fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{col.h}</th>;})}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map(function(r,idx){
+                        return <tr key={r.id||idx} style={{borderBottom:"1px solid "+C.border,background:idx%2===0?"transparent":C.rowAlt}}>
+                          <td style={{padding:"10px 8px",fontWeight:600,maxWidth:300,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            {r.name}
+                            {r.wf && <span style={{marginLeft:8,fontSize:10,fontWeight:800,color:r.wf==="WF#4"?C.accent:C.purple,background:(r.wf==="WF#4"?C.accent:C.purple)+"15",padding:"2px 6px",borderRadius:4}}>{r.wf}</span>}
+                          </td>
+                          {cfg.columns.map(function(col){
+                            var val=r[col.k];
+                            var display=col.k.indexOf("Pct")>=0?val+"%":typeof val==="number"?val.toLocaleString():val;
+                            return <td key={col.h} style={{padding:"10px 8px",fontFamily:mono,textAlign:"right",color:col===cfg.columns[0]?cfg.color:C.text,fontWeight:col===cfg.columns[0]?800:400}}>{display}</td>;
+                          })}
+                        </tr>;
+                      })}
+                      {rows.length===0 && <tr><td colSpan={cfg.columns.length+1} style={{textAlign:"center",padding:20,color:C.muted}}>No hay datos para mostrar</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </Cd>;
+            })()}
+
+            {/* Workflow Comparison */}
+            {hasWfSplit && <Cd style={{marginBottom:22}}>
+              <Sec>Comparaci{"\u00F3"}n Workflow #4 vs #5</Sec>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+                {[{label:"Workflow #4",m:m4,c:C.accent,count:(ed.wf4&&ed.wf4.campaigns||[]).length},{label:"Workflow #5",m:m5,c:C.purple,count:(ed.wf5&&ed.wf5.campaigns||[]).length}].map(function(wf){
+                  return <div key={wf.label} style={{background:C.rowBg,borderRadius:12,padding:18}}>
+                    <div style={{fontSize:15,fontWeight:800,color:wf.c,marginBottom:14}}>{wf.label} <span style={{fontSize:12,fontWeight:500,color:C.muted}}>({wf.count} campa{"\u00F1"}as)</span></div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                      {[
+                        {label:"Enviados",val:(wf.m.sent||0).toLocaleString(),best:better(m4.sent,m5.sent,true)===(wf.label==="Workflow #4"?"wf4":"wf5")},
+                        {label:"Entregados",val:(wf.m.delivered||0).toLocaleString(),best:better(m4.delivered,m5.delivered,true)===(wf.label==="Workflow #4"?"wf4":"wf5")},
+                        {label:"Abiertos %",val:(wf.m.openRate||0)+"%",best:better(m4.openRate,m5.openRate,true)===(wf.label==="Workflow #4"?"wf4":"wf5")},
+                        {label:"Clicados %",val:(wf.m.clickRate||0)+"%",best:better(m4.clickRate,m5.clickRate,true)===(wf.label==="Workflow #4"?"wf4":"wf5")},
+                        {label:"Bounces",val:(wf.m.totalBounces||0).toLocaleString(),best:better(m4.totalBounces,m5.totalBounces,false)===(wf.label==="Workflow #4"?"wf4":"wf5")},
+                        {label:"Unsubs",val:(wf.m.unsubscriptions||0).toLocaleString(),best:better(m4.unsubscriptions,m5.unsubscriptions,false)===(wf.label==="Workflow #4"?"wf4":"wf5")},
+                      ].map(function(row){return <div key={row.label} style={{padding:"8px 10px",borderRadius:8,background:row.best?C.lGreen:"transparent"}}>
+                        <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{row.label}</div>
+                        <div style={{fontSize:20,fontWeight:800,fontFamily:mono,color:C.text,marginTop:2}}>{row.val}</div>
+                        {row.best && <div style={{fontSize:10,color:C.green,fontWeight:700,marginTop:1}}>Mejor</div>}
+                      </div>;})}
                     </div>
-                    <div style={{fontSize:12,color:C.muted,marginTop:3}}>
-                      {l.ms} msgs {"\u00B7"} {l.w.toLocaleString()} pal. {"\u00B7"} Tpls: <strong>{l.tr.join(", ")||"N/A"}</strong>
-                    </div>
+                  </div>;
+                })}
+              </div>
+            </Cd>}
+
+            {/* Campaign detail table */}
+            <Cd style={{marginBottom:22}}>
+              <Sec>Detalle por Campa{"\u00F1"}a</Sec>
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,fontFamily:font}}>
+                  <thead>
+                    <tr style={{borderBottom:"2px solid "+C.border}}>
+                      {["Campa\u00F1a","Enviados","Entregados","Abiertos (%)","Clicados (%)","Bounces","Quejas"].map(function(h){
+                        return <th key={h} style={{textAlign:"left",padding:"10px 8px",fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{h}</th>;
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allCampaigns.map(function(c,idx){
+                      var gs=c.statistics&&c.statistics.globalStats||{};
+                      var cSent=gs.sent||0;var cDel=gs.delivered||0;var cOpen=gs.uniqueOpens||0;var cClick=gs.uniqueClicks||0;
+                      var cBounce=(gs.hardBounces||0)+(gs.softBounces||0);var cComplaints=gs.complaints||0;
+                      var openPct=cDel>0?(cOpen/cDel*100).toFixed(1):"0";
+                      var clickPct=cDel>0?(cClick/cDel*100).toFixed(1):"0";
+                      var wfTag=null;
+                      if(ed.wf4&&ed.wf4.campaigns&&ed.wf4.campaigns.indexOf(c)>=0)wfTag="WF#4";
+                      else if(ed.wf5&&ed.wf5.campaigns&&ed.wf5.campaigns.indexOf(c)>=0)wfTag="WF#5";
+                      return <tr key={c.id||idx} style={{borderBottom:"1px solid "+C.border,background:idx%2===0?"transparent":C.rowAlt}}>
+                        <td style={{padding:"10px 8px",fontWeight:600,maxWidth:280,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                          {c.name||"Campaign #"+c.id}
+                          {wfTag && <span style={{marginLeft:8,fontSize:10,fontWeight:800,color:wfTag==="WF#4"?C.accent:C.purple,background:(wfTag==="WF#4"?C.accent:C.purple)+"15",padding:"2px 6px",borderRadius:4}}>{wfTag}</span>}
+                        </td>
+                        <td style={{padding:"10px 8px",fontFamily:mono}}>{cSent.toLocaleString()}</td>
+                        <td style={{padding:"10px 8px",fontFamily:mono}}>{cDel.toLocaleString()}</td>
+                        <td style={{padding:"10px 8px",fontFamily:mono}}>{cOpen.toLocaleString()} <span style={{color:C.muted}}>({openPct}%)</span></td>
+                        <td style={{padding:"10px 8px",fontFamily:mono}}>{cClick.toLocaleString()} <span style={{color:C.muted}}>({clickPct}%)</span></td>
+                        <td style={{padding:"10px 8px",fontFamily:mono}}>{cBounce.toLocaleString()}</td>
+                        <td style={{padding:"10px 8px",fontFamily:mono}}>{cComplaints.toLocaleString()}</td>
+                      </tr>;
+                    })}
+                    {allCampaigns.length===0 && <tr><td colSpan={7} style={{textAlign:"center",padding:20,color:C.muted}}>No hay campa{"\u00F1"}as de email para mostrar</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </Cd>
+
+            {/* Additional cards: Unsubscribes & Complaints */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:22}}>
+              <Cd onClick={function(){setEmailDetail(emailDetail==="unsubs"?null:"unsubs");}} style={{cursor:"pointer",border:emailDetail==="unsubs"?"2px solid "+C.yellow:undefined}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div>
+                    <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Unsubscribes</div>
+                    <div style={{fontSize:36,fontWeight:900,color:C.yellow,fontFamily:mono,marginTop:6}}>{(mt.unsubscriptions||0).toLocaleString()}</div>
                   </div>
-                  <div style={{color:C.accent,fontSize:18,fontWeight:700}}>{"\u2192"}</div>
-                </div>);
-              })}
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:28,fontWeight:800,color:C.yellow,fontFamily:mono}}>{mt.unsubRate||0}%</div>
+                    <div style={{fontSize:12,color:C.muted}}>del total entregado</div>
+                  </div>
+                </div>
+              </Cd>
+              <Cd onClick={function(){setEmailDetail(emailDetail==="complaints"?null:"complaints");}} style={{cursor:"pointer",border:emailDetail==="complaints"?"2px solid "+C.orange:undefined}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div>
+                    <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Quejas / Spam</div>
+                    <div style={{fontSize:36,fontWeight:900,color:C.orange,fontFamily:mono,marginTop:6}}>{(mt.complaints||0).toLocaleString()}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:28,fontWeight:800,color:C.orange,fontFamily:mono}}>{mt.complaintRate||0}%</div>
+                    <div style={{fontSize:12,color:C.muted}}>del total entregado</div>
+                  </div>
+                </div>
+              </Cd>
             </div>
-          </Cd>
-        )}
+          </>)}
+        </>);
+      })()}
 
-        {searchSel!==null&&searchResults&&searchResults[searchSel] && (function(){
-          var item=searchResults[searchSel];var lead=item.lead;
-          return (<Cd>
-            <ConvView lead={lead} onBack={function(){setSearchSel(null);setSearchThreadData(null);}}/>
-          </Cd>);
-        })()}
-      </>)}
+      {section==="growth" && (function(){
+        var gd=growthData||{};
+        var lat=gd.latam||{};var bra=gd.brasil||{};
+        var latS=gd.latamSources||[];var braS=gd.brasilSources||[];
+        var latC=gd.latamContacts||[];var braC=gd.brasilContacts||[];
+
+        function filterPqls(arr){return arr.filter(function(c){var p=(c._contactProps&&c._contactProps.prioridad_plg||"").toLowerCase();return p==="alta"||p==="media"||p==="m\u00E9dia";});}
+        function filterBySource(arr,src){return arr.filter(function(c){return(c._contactProps&&c._contactProps.hs_analytics_source||"")=== src;});}
+
+        function openModal(title,contacts){setGrowthModal({title:title,contacts:contacts});}
+
+        function kpiCard(label,actual,goal,pct,color,metaToDate,avanceToDate,onClick){
+          var ahead=avanceToDate>=100;
+          return <Cd onClick={onClick} style={{cursor:"pointer",border:"2px solid "+color+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+color+"08 100%)"}}>
+            <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>{label}</div>
+            <div style={{fontSize:32,fontWeight:900,color:color,fontFamily:mono,marginTop:6}}>{actual.toLocaleString()}</div>
+            <div style={{fontSize:12,color:C.muted,marginTop:2}}>Meta: {Math.round(goal).toLocaleString()} ({pct.toFixed(1)}% del mes)</div>
+            <div style={{marginTop:6,fontSize:12}}>
+              <span style={{color:C.muted}}>To Date: </span>
+              <span style={{fontWeight:700,color:ahead?C.green:C.red}}>{Math.round(metaToDate).toLocaleString()}</span>
+              <span style={{marginLeft:8,fontWeight:800,color:ahead?C.green:C.red}}>{avanceToDate.toFixed(1)}%</span>
+              <span style={{marginLeft:4,fontSize:11,color:ahead?C.green:C.red}}>{ahead?"\u25B2":"\u25BC"}</span>
+            </div>
+            <div style={{fontSize:11,color:C.accent,marginTop:8,fontWeight:600}}>Click para ver contactos {"\u2192"}</div>
+          </Cd>;
+        }
+
+        function sourceChart(sources,label,regionContacts,regionName){
+          var maxCount=sources.length>0?sources[0].count:1;
+          return <Cd style={{flex:1,minWidth:300}}>
+            <Sec>{label}</Sec>
+            {sources.map(function(s,idx){
+              var pct=maxCount>0?(s.count/maxCount*100):0;
+              var clr=SOURCE_COLORS[s.source]||C.muted;
+              return <div key={s.source} onClick={function(){openModal(regionName+" — "+s.source+" ("+s.count+")",filterBySource(regionContacts,s.source));}} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,cursor:"pointer",padding:"4px 6px",borderRadius:8,transition:"background 0.15s"}} onMouseEnter={function(e){e.currentTarget.style.background=C.rowAlt;}} onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}>
+                <div style={{width:140,fontSize:12,fontWeight:600,color:C.sub,textAlign:"right",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.source}</div>
+                <div style={{flex:1,background:C.barTrack,borderRadius:6,height:22,overflow:"hidden"}}>
+                  <div style={{height:"100%",borderRadius:6,background:clr,width:pct+"%",transition:"width 0.3s ease"}}/>
+                </div>
+                <div style={{width:50,fontSize:13,fontWeight:800,fontFamily:mono,color:C.text}}>{s.count}</div>
+              </div>;
+            })}
+            {sources.length===0 && <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:20}}>Sin datos</div>}
+          </Cd>;
+        }
+
+        return (<>
+          {growthModal && <GrowthContactsModal contacts={growthModal.contacts} title={growthModal.title} onClose={function(){setGrowthModal(null);}}/>}
+
+          {growthLoading && <div style={{textAlign:"center",padding:40,color:C.muted,fontSize:15}}><div style={{width:30,height:30,border:"3px solid "+C.border,borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto 12px"}}/>Cargando datos de Growth...</div>}
+          {growthError && <div style={{color:C.red,fontSize:13,fontWeight:600,marginBottom:16,background:C.lRed,padding:"12px 18px",borderRadius:10,border:"1px solid "+C.redBorder}}>Error: {growthError} <button onClick={function(){setGrowthError(null);setGrowthInited(false);}} style={{marginLeft:12,background:C.accent,color:"#fff",border:"none",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Reintentar</button></div>}
+
+          {/* Header bar */}
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:18,flexWrap:"wrap"}}>
+            <input type="month" value={growthMonth} onChange={function(e){setGrowthMonth(e.target.value);setGrowthInited(false);}} style={{padding:"8px 14px",border:"1px solid "+C.border,borderRadius:10,fontSize:14,fontFamily:font,background:C.inputBg,color:C.text,outline:"none"}}/>
+            <button onClick={function(){setGrowthInited(false);initGrowth();}} disabled={growthLoading} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"8px 20px",fontSize:13,fontWeight:700,cursor:growthLoading?"wait":"pointer",fontFamily:font,opacity:growthLoading?0.6:1}}>Actualizar</button>
+            <button onClick={function(){setShowGoalsEditor(true);}} style={{background:C.rowAlt,color:C.muted,border:"1px solid "+C.border,borderRadius:10,padding:"8px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Configurar Metas</button>
+            {gd.currentDay && <span style={{fontSize:12,color:C.muted,background:C.rowAlt,padding:"4px 10px",borderRadius:6,fontWeight:600}}>D{"\u00ED"}a {gd.currentDay} de {gd.totalDays}</span>}
+          </div>
+
+          {!growthLoading && growthInited && (<>
+            {/* LATAM KPIs */}
+            <Sec>LATAM</Sec>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:22}}>
+              {kpiCard("Signups",lat.signups||0,lat.signupsGoal||0,lat.avanceSignups||0,C.accent,lat.metaToDateSignups||0,lat.avanceToDateSignups||0,function(){openModal("LATAM — Todos los Signups ("+latC.length+")",latC);})}
+              {kpiCard("PQLs",lat.pqls||0,lat.pqlsGoal||0,lat.avancePqls||0,C.purple,lat.metaToDatePqls||0,lat.avanceToDatePqls||0,function(){openModal("LATAM — PQLs ("+(lat.pqls||0)+")",filterPqls(latC));})}
+              <Cd onClick={function(){openModal("LATAM — Todos los Signups ("+latC.length+")",latC);}} style={{cursor:"pointer"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Meta to Date (Signups)</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.cyan,fontFamily:mono,marginTop:6}}>{Math.round(lat.metaToDateSignups||0).toLocaleString()}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>Pro-rata d{"\u00ED"}a {gd.currentDay||0} / {gd.totalDays||0}</div>
+                <div style={{fontSize:11,color:C.accent,marginTop:8,fontWeight:600}}>Click para ver contactos {"\u2192"}</div>
+              </Cd>
+              <Cd onClick={function(){openModal("LATAM — Todos los Signups ("+latC.length+")",latC);}} style={{cursor:"pointer"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Avance to Date</div>
+                <div style={{fontSize:32,fontWeight:900,color:(lat.avanceToDateSignups||0)>=100?C.green:C.red,fontFamily:mono,marginTop:6}}>{(lat.avanceToDateSignups||0).toFixed(1)}%</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{(lat.avanceToDateSignups||0)>=100?"Por encima de la meta":"Por debajo de la meta"}</div>
+                <div style={{fontSize:11,color:C.accent,marginTop:8,fontWeight:600}}>Click para ver contactos {"\u2192"}</div>
+              </Cd>
+            </div>
+
+            {/* Brasil KPIs */}
+            <Sec>Brasil</Sec>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:22}}>
+              {kpiCard("Signups",bra.signups||0,bra.signupsGoal||0,bra.avanceSignups||0,C.green,bra.metaToDateSignups||0,bra.avanceToDateSignups||0,function(){openModal("Brasil — Todos los Signups ("+braC.length+")",braC);})}
+              {kpiCard("PQLs",bra.pqls||0,bra.pqlsGoal||0,bra.avancePqls||0,C.orange,bra.metaToDatePqls||0,bra.avanceToDatePqls||0,function(){openModal("Brasil — PQLs ("+(bra.pqls||0)+")",filterPqls(braC));})}
+              <Cd onClick={function(){openModal("Brasil — Todos los Signups ("+braC.length+")",braC);}} style={{cursor:"pointer"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Meta to Date (Signups)</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.cyan,fontFamily:mono,marginTop:6}}>{Math.round(bra.metaToDateSignups||0).toLocaleString()}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>Pro-rata d{"\u00ED"}a {gd.currentDay||0} / {gd.totalDays||0}</div>
+                <div style={{fontSize:11,color:C.accent,marginTop:8,fontWeight:600}}>Click para ver contactos {"\u2192"}</div>
+              </Cd>
+              <Cd onClick={function(){openModal("Brasil — Todos los Signups ("+braC.length+")",braC);}} style={{cursor:"pointer"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Avance to Date</div>
+                <div style={{fontSize:32,fontWeight:900,color:(bra.avanceToDateSignups||0)>=100?C.green:C.red,fontFamily:mono,marginTop:6}}>{(bra.avanceToDateSignups||0).toFixed(1)}%</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{(bra.avanceToDateSignups||0)>=100?"Por encima de la meta":"Por debajo de la meta"}</div>
+                <div style={{fontSize:11,color:C.accent,marginTop:8,fontWeight:600}}>Click para ver contactos {"\u2192"}</div>
+              </Cd>
+            </div>
+
+            {/* Sources breakdown */}
+            <Sec>Breakdown por Fuente</Sec>
+            <div style={{display:"flex",gap:16,marginBottom:22,flexWrap:"wrap"}}>
+              {sourceChart(latS,"LATAM Sources",latC,"LATAM")}
+              {sourceChart(braS,"Brasil Sources",braC,"Brasil")}
+            </div>
+
+            {/* Resumen para compartir */}
+            <Cd style={{marginBottom:22}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+                <Sec>Resumen para Compartir</Sec>
+                <button onClick={function(){navigator.clipboard.writeText(gd.summary||"");}} style={{background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"6px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Copiar</button>
+              </div>
+              <pre style={{background:C.rowBg,borderRadius:10,padding:16,fontSize:12,fontFamily:mono,color:C.sub,whiteSpace:"pre-wrap",lineHeight:1.6,margin:0,border:"1px solid "+C.border}}>{gd.summary||""}</pre>
+            </Cd>
+
+            {/* PostHog placeholder */}
+            <Cd style={{marginBottom:22,opacity:0.5}}>
+              <Sec>Eventos de Producto (PostHog)</Sec>
+              <div style={{textAlign:"center",padding:30,color:C.muted,fontSize:13}}>Pr{"\u00F3"}ximamente: eventos de producto en tiempo real desde PostHog</div>
+            </Cd>
+          </>)}
+
+          {/* Goals editor modal */}
+          {showGoalsEditor && (function(){
+            var lg=growthGoals;
+            var tmpRef={latamSignups:lg.latam.signups,latamPqls:lg.latam.pqls,brasilSignups:lg.brasil.signups,brasilPqls:lg.brasil.pqls};
+            function onSave(){
+              var ls=parseFloat(document.getElementById("ge-ls").value)||0;
+              var lp=parseFloat(document.getElementById("ge-lp").value)||0;
+              var bs=parseFloat(document.getElementById("ge-bs").value)||0;
+              var bp=parseFloat(document.getElementById("ge-bp").value)||0;
+              saveGrowthGoals({latam:{signups:ls,pqls:lp},brasil:{signups:bs,pqls:bp}});
+            }
+            return <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#00000066",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={function(e){if(e.target===e.currentTarget)setShowGoalsEditor(false);}}>
+              <div style={{background:C.card,borderRadius:16,padding:28,width:420,maxWidth:"90vw",boxShadow:"0 20px 60px #00000033"}}>
+                <div style={{fontSize:18,fontWeight:800,color:C.text,marginBottom:20}}>Configurar Metas — {growthMonth}</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+                  <div>
+                    <label style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:0.5}}>LATAM Signups</label>
+                    <input id="ge-ls" type="number" defaultValue={tmpRef.latamSignups} style={{width:"100%",padding:"10px 12px",border:"1px solid "+C.border,borderRadius:8,fontSize:15,fontFamily:mono,background:C.inputBg,color:C.text,marginTop:4,boxSizing:"border-box"}}/>
+                  </div>
+                  <div>
+                    <label style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:0.5}}>LATAM PQLs</label>
+                    <input id="ge-lp" type="number" defaultValue={tmpRef.latamPqls} style={{width:"100%",padding:"10px 12px",border:"1px solid "+C.border,borderRadius:8,fontSize:15,fontFamily:mono,background:C.inputBg,color:C.text,marginTop:4,boxSizing:"border-box"}}/>
+                  </div>
+                  <div>
+                    <label style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:0.5}}>Brasil Signups</label>
+                    <input id="ge-bs" type="number" defaultValue={tmpRef.brasilSignups} style={{width:"100%",padding:"10px 12px",border:"1px solid "+C.border,borderRadius:8,fontSize:15,fontFamily:mono,background:C.inputBg,color:C.text,marginTop:4,boxSizing:"border-box"}}/>
+                  </div>
+                  <div>
+                    <label style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:0.5}}>Brasil PQLs</label>
+                    <input id="ge-bp" type="number" defaultValue={tmpRef.brasilPqls} style={{width:"100%",padding:"10px 12px",border:"1px solid "+C.border,borderRadius:8,fontSize:15,fontFamily:mono,background:C.inputBg,color:C.text,marginTop:4,boxSizing:"border-box"}}/>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:12,marginTop:20,justifyContent:"flex-end"}}>
+                  <button onClick={function(){setShowGoalsEditor(false);}} style={{background:C.rowAlt,color:C.muted,border:"1px solid "+C.border,borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Cancelar</button>
+                  <button onClick={onSave} style={{background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Guardar</button>
+                </div>
+              </div>
+            </div>;
+          })()}
+        </>);
+      })()}
+
 
       {showTplConfig && (function(){
         var mk=mode===0?"all":"real";var abD=dataD[mk];
@@ -2221,6 +2921,7 @@ export default function Dashboard(){
           </div>
         </div>);
       })()}
+    </div>
     </div>
   </div>);
 }

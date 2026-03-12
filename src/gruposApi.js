@@ -1,22 +1,17 @@
+import { supabase } from "./supabase";
+
 export async function callMeuGrupoVip(endpoint, params) {
   var password = sessionStorage.getItem("dashboard_password") || "";
-  var resp = await fetch("/api/meugrupovip", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-dashboard-password": password,
-    },
-    body: JSON.stringify({ endpoint: endpoint, params: params || {} }),
+  var { data, error } = await supabase.functions.invoke("meugrupovip", {
+    body: { endpoint: endpoint, params: params || {}, password: password },
   });
-  if (resp.status === 401) {
-    window.dispatchEvent(new Event("auth-required"));
-    throw new Error("Unauthorized");
+  if (error) {
+    var status = error.context && error.context.status;
+    if (status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
+    var msg = data && data.error || error.message || "MeuGrupoVip API error";
+    throw new Error(msg);
   }
-  if (!resp.ok) {
-    var errText = await resp.text();
-    throw new Error("MeuGrupoVip API error " + resp.status + ": " + errText);
-  }
-  return await resp.json();
+  return data;
 }
 
 export async function fetchCampaigns() {
