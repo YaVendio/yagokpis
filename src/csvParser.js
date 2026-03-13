@@ -400,9 +400,9 @@ export function processInboundRows(rows, regionFilter, lifecyclePhones, hubspotP
       var type = msg.message_type;
       var dt = formatDatetime(msg.message_datetime);
 
+      if (content.includes("meetings.hubspot.com/") || content.includes("yavendio.com/meetings")) hasMeetingLink = true;
+
       if (type === "ai") {
-        // Only count meeting links sent by Yago (AI), not pasted by human
-        if (content.includes("meetings.hubspot.com/") || content.includes("yavendio.com/meetings")) hasMeetingLink = true;
         if (/yavendio\.com|yavendió\.com|crear\s+(?:tu\s+)?cuenta|criar\s+(?:sua\s+)?conta|crea\s+una\s+cuenta|registr(?:ar|ate|o)/i.test(content)) hasSignupLink = true;
         conversation.push([2, content, dt]);
       } else if (type === "human") {
@@ -835,9 +835,9 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
       var type = msg.message_type;
       var dt = formatDatetime(msg.message_datetime);
 
+      if (content.includes("meetings.hubspot.com/") || content.includes("yavendio.com/meetings")) hasMeetingLink = true;
+
       if (type === "ai") {
-        // Only count meeting links sent by Yago (AI), not pasted by human
-        if (content.includes("meetings.hubspot.com/") || content.includes("yavendio.com/meetings")) hasMeetingLink = true;
         if (isTemplate(content) || msg.template_name) {
           // Use template_name from CSV row if available, otherwise classify from content
           var tplName = msg.template_name || classifyTemplate(content);

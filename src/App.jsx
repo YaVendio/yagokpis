@@ -1663,6 +1663,110 @@ export default function Dashboard(){
               {(function(){var _cResp=(regionFilter==="all"&&responseStats&&responseStats.outboundResponded!=null)?responseStats.outboundResponded:d.resp;var _cRespReal=(regionFilter==="all"&&responseStats&&responseStats.outboundRespondedReal!=null)?responseStats.outboundRespondedReal:d.resp;var _cRateTodas=tc>0?parseFloat(((_cResp/tc)*100).toFixed(1)):0;var _cRateReales=tc>0?parseFloat(((_cRespReal/tc)*100).toFixed(1)):0;var _corrBench=chBench.map(function(b){if(b.ch==="Yago (todas)")return{ch:b.ch,r:_cRateTodas,y:b.y};if(b.ch==="Yago (reales)")return{ch:b.ch,r:_cRateReales,y:b.y};return b;});return _corrBench.map(function(b,i){return (<div key={i} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:b.y?C.text:C.muted,fontWeight:b.y?700:400}}>{b.ch}</span><span style={{fontSize:15,fontWeight:800,color:b.y?C.accent:C.muted,fontFamily:mono}}>{b.r}%</span></div><div style={{height:8,background:C.rowAlt,borderRadius:4}}><div style={{height:"100%",width:(b.r/45)*100+"%",background:b.y?C.accent:C.muted,borderRadius:4,opacity:b.y?0.8:0.3}}/></div></div>);});})()}
             </Cd>
           </div>
+        {/* Daily chart: Ofertadas vs Confirmadas (no qualification filter, self-contained) */}
+        {(function(){
+          // Ofertadas by day: leads with ml:true, grouped by meeting link message date
+          var allMlLeads=meetings.filter(function(l){return l.ml&&(mode===0||!l.au);});
+          var ofertaByDay={};
+          for(var odi=0;odi<allMlLeads.length;odi++){
+            var lead=allMlLeads[odi];
+            var mlDate=null;
+            if(lead.c){
+              for(var ci2=0;ci2<lead.c.length;ci2++){
+                var msg=lead.c[ci2];
+                if(msg[0]===2&&msg[1]&&(msg[1].indexOf("meetings.hubspot.com/")>=0||msg[1].indexOf("yavendio.com/meetings")>=0)){
+                  if(msg[2])mlDate=parseDatetime(msg[2]);
+                  break;
+                }
+              }
+              if(!mlDate&&lead.c[0]&&lead.c[0][2])mlDate=parseDatetime(lead.c[0][2]);
+            }
+            if(mlDate&&!isNaN(mlDate.getTime())){
+              var dk=String(mlDate.getDate()).padStart(2,"0")+"/"+String(mlDate.getMonth()+1).padStart(2,"0");
+              if(!ofertaByDay[dk])ofertaByDay[dk]=0;
+              ofertaByDay[dk]++;
+            }
+          }
+          // Confirmadas: rebuild phone matching (self-contained, same logic as KPI cards)
+          var confirmedByDay={};
+          if(crmMeetings.length>0&&crmContacts.length>0){
+            var gFromD=dateFrom?new Date(dateFrom+"T00:00:00"):null;
+            var gToD=dateTo?new Date(dateTo+"T23:59:59"):null;
+            var gFiltM=crmMeetings;
+            if(gFromD||gToD){gFiltM=crmMeetings.filter(function(m){var st=m.properties&&m.properties.hs_meeting_start_time;if(!st)return false;var md=new Date(st);if(gFromD&&md<gFromD)return false;if(gToD&&md>gToD)return false;return true;});}
+            // Build contact phone map (both phone + mobilephone)
+            var gContactPhones={};
+            for(var gci=0;gci<crmContacts.length;gci++){
+              var gcc=crmContacts[gci];var gps=[];
+              if(gcc.properties){
+                if(gcc.properties.phone){var gp1=gcc.properties.phone.replace(/\D/g,"");if(gp1)gps.push(gp1);}
+                if(gcc.properties.mobilephone){var gp2=gcc.properties.mobilephone.replace(/\D/g,"");if(gp2&&gps.indexOf(gp2)<0)gps.push(gp2);}
+              }
+              if(gps.length>0)gContactPhones[gcc.id]=gps;
+            }
+            // Build meeting→phones→date map
+            var gPhoneToMeetDate={};
+            for(var gmi=0;gmi<gFiltM.length;gmi++){
+              var gm=gFiltM[gmi];
+              var gAssoc=gm.associations&&gm.associations.contacts&&gm.associations.contacts.results;
+              if(!gAssoc)continue;
+              var gSt=gm.properties&&gm.properties.hs_meeting_start_time;
+              if(!gSt)continue;
+              for(var gak=0;gak<gAssoc.length;gak++){
+                var gCPs=gContactPhones[gAssoc[gak].id];
+                if(!gCPs)continue;
+                for(var gpi=0;gpi<gCPs.length;gpi++){
+                  var gph=gCPs[gpi];
+                  gPhoneToMeetDate[gph]=gSt;
+                  if(gph.length>11)gPhoneToMeetDate[gph.slice(-11)]=gSt;
+                  if(gph.length>10)gPhoneToMeetDate[gph.slice(-10)]=gSt;
+                  if(gph.length>9)gPhoneToMeetDate[gph.slice(-9)]=gSt;
+                  if(gph.length>8)gPhoneToMeetDate[gph.slice(-8)]=gSt;
+                }
+              }
+            }
+            // Match leads and group by HS meeting date
+            for(var gli=0;gli<allMlLeads.length;gli++){
+              var glP=(allMlLeads[gli].p||"").replace(/\D/g,"");
+              if(!glP)continue;
+              var gMSt=gPhoneToMeetDate[glP]||(glP.length>11&&gPhoneToMeetDate[glP.slice(-11)])||(glP.length>10&&gPhoneToMeetDate[glP.slice(-10)])||(glP.length>9&&gPhoneToMeetDate[glP.slice(-9)])||(glP.length>8&&gPhoneToMeetDate[glP.slice(-8)])||null;
+              if(gMSt){
+                var gMD=new Date(gMSt);
+                if(!isNaN(gMD.getTime())){
+                  var gdk=String(gMD.getDate()).padStart(2,"0")+"/"+String(gMD.getMonth()+1).padStart(2,"0");
+                  if(!confirmedByDay[gdk])confirmedByDay[gdk]=0;
+                  confirmedByDay[gdk]++;
+                }
+              }
+            }
+          }
+          // Merge into sorted array
+          var allDays={};
+          var odKeys=Object.keys(ofertaByDay);for(var oki=0;oki<odKeys.length;oki++)allDays[odKeys[oki]]=true;
+          var cdKeys=Object.keys(confirmedByDay);for(var cki=0;cki<cdKeys.length;cki++)allDays[cdKeys[cki]]=true;
+          var chartData=Object.keys(allDays).sort(function(a,b){
+            var pa=a.split("/"),pb=b.split("/");
+            var da=parseInt(pa[1])*100+parseInt(pa[0]),db=parseInt(pb[1])*100+parseInt(pb[0]);
+            return da-db;
+          }).map(function(dk){return{d:dk,ofertadas:ofertaByDay[dk]||0,confirmadas:confirmedByDay[dk]||0};});
+          if(chartData.length===0)return null;
+          return (
+            <Cd style={{marginBottom:16}}>
+              <Sec>Reuniones Ofertadas vs Confirmadas por D{"\u00ED"}a</Sec>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={chartData} margin={{left:-15,right:5,top:5,bottom:0}}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                  <XAxis dataKey="d" tick={{fontSize:11,fill:C.muted}}/>
+                  <YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
+                  <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}}/>
+                  <Legend wrapperStyle={{fontSize:12}}/>
+                  <Bar dataKey="ofertadas" name="Ofertadas" fill={C.pink} radius={[4,4,0,0]}/>
+                  <Bar dataKey="confirmadas" name="Confirmadas" fill={C.green} radius={[4,4,0,0]}/>
+                </BarChart>
+              </ResponsiveContainer>
+            </Cd>
+          );
+        })()}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
           {(function(){var jsTotal=headerInfo.esTotal+headerInfo.ptTotal;var esFrac=jsTotal>0?headerInfo.esTotal/jsTotal:0.5;var corrEsTotal=tc>0?Math.round(tc*esFrac):headerInfo.esTotal;var corrPtTotal=tc>0?tc-corrEsTotal:headerInfo.ptTotal;var _esResp=mode===1?headerInfo.esRespReal:headerInfo.esResp;var _ptResp=mode===1?headerInfo.ptRespReal:headerInfo.ptResp;var _esRate=corrEsTotal>0?((_esResp/corrEsTotal)*100).toFixed(1):"0.0";var _ptRate=corrPtTotal>0?((_ptResp/corrPtTotal)*100).toFixed(1):"0.0";return <Cd><Sec tipKey="esVsPt">{"\u{1F1EA}\u{1F1F8} vs \u{1F1E7}\u{1F1F7}"}</Sec><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><div style={{background:C.lBlue,borderRadius:12,padding:16,textAlign:"center"}}><div style={{fontSize:12,color:C.accent,fontWeight:700}}>{"\u{1F1EA}\u{1F1F8} ESPA\u00D1OL"}</div><div style={{fontSize:34,fontWeight:900,color:C.accent,fontFamily:mono}}>{_esRate}%</div><div style={{fontSize:13,color:C.muted}}>{_esResp} de {corrEsTotal}</div></div><div style={{background:C.lGreen,borderRadius:12,padding:16,textAlign:"center"}}><div style={{fontSize:12,color:C.green,fontWeight:700}}>{"\u{1F1E7}\u{1F1F7} PORTUGU\u00C9S"}</div><div style={{fontSize:34,fontWeight:900,color:C.green,fontFamily:mono}}>{_ptRate}%</div><div style={{fontSize:13,color:C.muted}}>{_ptResp} de {corrPtTotal}</div></div></div></Cd>;})()}
           <Cd><Sec tipKey="leadsPorDia">Leads por D{"\u00ED"}a</Sec><ResponsiveContainer width="100%" height={180}><AreaChart data={dailyWithHs.length>0?dailyWithHs:daily} margin={{left:-15,right:5,top:5,bottom:0}}><defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.accent} stopOpacity={0.2}/><stop offset="100%" stopColor={C.accent} stopOpacity={0}/></linearGradient><linearGradient id="agHs" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.orange} stopOpacity={0.2}/><stop offset="100%" stopColor={C.orange} stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border}/><XAxis dataKey="d" tick={{fontSize:12,fill:C.muted}}/><YAxis tick={{fontSize:12,fill:C.muted}}/><Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13}}/><Legend wrapperStyle={{fontSize:12}} formatter={function(v){return v==="l"?"Yago":"HubSpot"}}/><Area type="monotone" dataKey="l" name="l" stroke={C.accent} fill="url(#ag)" strokeWidth={2}/><Area type="monotone" dataKey="hs" name="hs" stroke={C.orange} fill="url(#agHs)" strokeWidth={2}/></AreaChart></ResponsiveContainer></Cd>
@@ -1746,6 +1850,41 @@ export default function Dashboard(){
               );
             })()}
           </div>
+          {/* Daily chart: Ofertadas vs Confirmadas — Inbound */}
+          {(function(){
+            var inbMlLeads=meetings.filter(function(l){return l.ml&&(mode===0||!l.au);});
+            var ofertaByDay={};
+            for(var odi=0;odi<inbMlLeads.length;odi++){
+              var lead=inbMlLeads[odi];var mlDate=null;
+              if(lead.c){
+                for(var ci2=0;ci2<lead.c.length;ci2++){var msg=lead.c[ci2];if(msg[0]===2&&msg[1]&&(msg[1].indexOf("meetings.hubspot.com/")>=0||msg[1].indexOf("yavendio.com/meetings")>=0)){if(msg[2])mlDate=parseDatetime(msg[2]);break;}}
+                if(!mlDate&&lead.c[0]&&lead.c[0][2])mlDate=parseDatetime(lead.c[0][2]);
+              }
+              if(mlDate&&!isNaN(mlDate.getTime())){var dk=String(mlDate.getDate()).padStart(2,"0")+"/"+String(mlDate.getMonth()+1).padStart(2,"0");if(!ofertaByDay[dk])ofertaByDay[dk]=0;ofertaByDay[dk]++;}
+            }
+            var confirmedByDay={};
+            if(crmMeetings.length>0&&crmContacts.length>0){
+              var gFromD=dateFrom?new Date(dateFrom+"T00:00:00"):null;var gToD=dateTo?new Date(dateTo+"T23:59:59"):null;
+              var gFiltM=crmMeetings;
+              if(gFromD||gToD){gFiltM=crmMeetings.filter(function(m){var st=m.properties&&m.properties.hs_meeting_start_time;if(!st)return false;var md=new Date(st);if(gFromD&&md<gFromD)return false;if(gToD&&md>gToD)return false;return true;});}
+              var gCP={};for(var gci=0;gci<crmContacts.length;gci++){var gcc=crmContacts[gci];var gps=[];if(gcc.properties){if(gcc.properties.phone){var gp1=gcc.properties.phone.replace(/\D/g,"");if(gp1)gps.push(gp1);}if(gcc.properties.mobilephone){var gp2=gcc.properties.mobilephone.replace(/\D/g,"");if(gp2&&gps.indexOf(gp2)<0)gps.push(gp2);}}if(gps.length>0)gCP[gcc.id]=gps;}
+              var gPTD={};for(var gmi=0;gmi<gFiltM.length;gmi++){var gm=gFiltM[gmi];var gA=gm.associations&&gm.associations.contacts&&gm.associations.contacts.results;if(!gA)continue;var gSt=gm.properties&&gm.properties.hs_meeting_start_time;if(!gSt)continue;for(var gak=0;gak<gA.length;gak++){var gCPs=gCP[gA[gak].id];if(!gCPs)continue;for(var gpi=0;gpi<gCPs.length;gpi++){var gph=gCPs[gpi];gPTD[gph]=gSt;if(gph.length>11)gPTD[gph.slice(-11)]=gSt;if(gph.length>10)gPTD[gph.slice(-10)]=gSt;if(gph.length>9)gPTD[gph.slice(-9)]=gSt;if(gph.length>8)gPTD[gph.slice(-8)]=gSt;}}}
+              for(var gli=0;gli<inbMlLeads.length;gli++){var glP=(inbMlLeads[gli].p||"").replace(/\D/g,"");if(!glP)continue;var gMSt=gPTD[glP]||(glP.length>11&&gPTD[glP.slice(-11)])||(glP.length>10&&gPTD[glP.slice(-10)])||(glP.length>9&&gPTD[glP.slice(-9)])||(glP.length>8&&gPTD[glP.slice(-8)])||null;if(gMSt){var gMD=new Date(gMSt);if(!isNaN(gMD.getTime())){var gdk=String(gMD.getDate()).padStart(2,"0")+"/"+String(gMD.getMonth()+1).padStart(2,"0");if(!confirmedByDay[gdk])confirmedByDay[gdk]=0;confirmedByDay[gdk]++;}}}
+            }
+            var allDays={};var odK=Object.keys(ofertaByDay);for(var ok=0;ok<odK.length;ok++)allDays[odK[ok]]=true;var cdK=Object.keys(confirmedByDay);for(var ck=0;ck<cdK.length;ck++)allDays[cdK[ck]]=true;
+            var chartData=Object.keys(allDays).sort(function(a,b){var pa=a.split("/"),pb=b.split("/");return(parseInt(pa[1])*100+parseInt(pa[0]))-(parseInt(pb[1])*100+parseInt(pb[0]));}).map(function(dk){return{d:dk,ofertadas:ofertaByDay[dk]||0,confirmadas:confirmedByDay[dk]||0};});
+            if(chartData.length===0)return null;
+            return (<Cd style={{marginBottom:16}}>
+              <Sec>Reuniones Ofertadas vs Confirmadas por D{"\u00ED"}a</Sec>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={chartData} margin={{left:-15,right:5,top:5,bottom:0}}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.border}/><XAxis dataKey="d" tick={{fontSize:11,fill:C.muted}}/><YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
+                  <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}}/><Legend wrapperStyle={{fontSize:12}}/>
+                  <Bar dataKey="ofertadas" name="Ofertadas" fill={C.pink} radius={[4,4,0,0]}/><Bar dataKey="confirmadas" name="Confirmadas" fill={C.green} radius={[4,4,0,0]}/>
+                </BarChart>
+              </ResponsiveContainer>
+            </Cd>);
+          })()}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:22}}>
             <Cd><Sec tipKey="funnel">Embudo de Conversi&oacute;n</Sec>
               {funnel.map(function(f,i){var base=funnel[0].v||1;var w=Math.max((f.v/base)*100,3);var prev=i>0?((f.v/(funnel[i-1].v||1))*100).toFixed(0):null;
@@ -2505,6 +2644,48 @@ export default function Dashboard(){
                 <div style={{fontSize:12,color:C.muted,marginTop:2}}>{totalMeetOutcomes.COMPLETED||0} completadas {"\u00B7"} {totalMeetOutcomes.SCHEDULED||0} agendadas {"\u00B7"} {totalMeetOutcomes.NO_SHOW||0} no show</div>
               </Cd>
             </div>
+
+            {/* Daily chart: Reuniones HS por día — outbound ofertadas + todas confirmadas HS */}
+            {(function(){
+              // Ofertadas: leads with ml:true grouped by link date (from current meetings state)
+              var hcOfertaByDay={};
+              var hcMlLeads=meetings.filter(function(l){return l.ml;});
+              for(var hci=0;hci<hcMlLeads.length;hci++){
+                var hcLead=hcMlLeads[hci];var hcDate=null;
+                if(hcLead.c){
+                  for(var hcc=0;hcc<hcLead.c.length;hcc++){var hcMsg=hcLead.c[hcc];if(hcMsg[0]===2&&hcMsg[1]&&(hcMsg[1].indexOf("meetings.hubspot.com/")>=0||hcMsg[1].indexOf("yavendio.com/meetings")>=0)){if(hcMsg[2])hcDate=parseDatetime(hcMsg[2]);break;}}
+                  if(!hcDate&&hcLead.c[0]&&hcLead.c[0][2])hcDate=parseDatetime(hcLead.c[0][2]);
+                }
+                if(hcDate&&!isNaN(hcDate.getTime())){var hdk=String(hcDate.getDate()).padStart(2,"0")+"/"+String(hcDate.getMonth()+1).padStart(2,"0");if(!hcOfertaByDay[hdk])hcOfertaByDay[hdk]=0;hcOfertaByDay[hdk]++;}
+              }
+              // Confirmadas: ALL filtered HS meetings grouped by hs_meeting_start_time
+              var hcConfByDay={};
+              for(var hmi=0;hmi<filtMeetings.length;hmi++){
+                var hSt=filtMeetings[hmi].properties&&filtMeetings[hmi].properties.hs_meeting_start_time;
+                if(!hSt)continue;
+                var hMD=new Date(hSt);
+                if(isNaN(hMD.getTime()))continue;
+                var hmdk=String(hMD.getDate()).padStart(2,"0")+"/"+String(hMD.getMonth()+1).padStart(2,"0");
+                if(!hcConfByDay[hmdk])hcConfByDay[hmdk]=0;
+                hcConfByDay[hmdk]++;
+              }
+              var hcAllDays={};
+              var hcOK=Object.keys(hcOfertaByDay);for(var hok=0;hok<hcOK.length;hok++)hcAllDays[hcOK[hok]]=true;
+              var hcCK=Object.keys(hcConfByDay);for(var hck=0;hck<hcCK.length;hck++)hcAllDays[hcCK[hck]]=true;
+              var hcData=Object.keys(hcAllDays).sort(function(a,b){var pa=a.split("/"),pb=b.split("/");return(parseInt(pa[1])*100+parseInt(pa[0]))-(parseInt(pb[1])*100+parseInt(pb[0]));}).map(function(dk){return{d:dk,ofertadas:hcOfertaByDay[dk]||0,reunionesHS:hcConfByDay[dk]||0};});
+              if(hcData.length===0)return null;
+              return (<Cd style={{marginBottom:22}}>
+                <Sec>Reuniones Ofertadas vs Reuniones HS por D{"\u00ED"}a</Sec>
+                <div style={{fontSize:13,color:C.muted,marginBottom:12}}>Ofertadas = links enviados por Yago {"\u00B7"} Reuniones HS = todas las reuniones en HubSpot</div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={hcData} margin={{left:-15,right:5,top:5,bottom:0}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border}/><XAxis dataKey="d" tick={{fontSize:11,fill:C.muted}}/><YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
+                    <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}}/><Legend wrapperStyle={{fontSize:12}}/>
+                    <Bar dataKey="ofertadas" name="Ofertadas (Yago)" fill={C.pink} radius={[4,4,0,0]}/><Bar dataKey="reunionesHS" name="Reuniones HS" fill={C.green} radius={[4,4,0,0]}/>
+                  </BarChart>
+                </ResponsiveContainer>
+              </Cd>);
+            })()}
 
             {/* Section 2: Tabla de Cruzamiento Lead-a-Lead */}
             <Cd style={{marginBottom:22}}>
