@@ -40,13 +40,11 @@ export async function fetchAllContactsWithPhone() {
   var after = undefined;
   while (true) {
     var searchBody = {
-      filterGroups: [{
-        filters: [{
-          propertyName: "phone",
-          operator: "HAS_PROPERTY"
-        }]
-      }],
-      properties: ["firstname", "lastname", "phone", "email", "createdate", "hs_lead_status", "lifecyclestage", "company"],
+      filterGroups: [
+        { filters: [{ propertyName: "phone", operator: "HAS_PROPERTY" }] },
+        { filters: [{ propertyName: "mobilephone", operator: "HAS_PROPERTY" }] },
+      ],
+      properties: ["firstname", "lastname", "phone", "mobilephone", "email", "createdate", "hs_lead_status", "lifecyclestage", "company"],
       limit: 100,
     };
     if (after) searchBody.after = after;
@@ -382,12 +380,19 @@ export async function fetchGrowthLeads(sinceIso, pipelineId) {
 
 export function extractHubSpotPhones(contacts) {
   var phones = {};
+  function addPhone(raw) {
+    if (!raw) return;
+    var clean = raw.replace(/\D/g, "");
+    if (!clean) return;
+    phones[clean] = true;
+    if (clean.length > 11) phones[clean.slice(-11)] = true;
+    if (clean.length > 10) phones[clean.slice(-10)] = true;
+  }
   for (var i = 0; i < contacts.length; i++) {
     var c = contacts[i];
-    var ph = c.properties && c.properties.phone;
-    if (ph) {
-      var clean = ph.replace(/\D/g, "");
-      if (clean) phones[clean] = true;
+    if (c.properties) {
+      addPhone(c.properties.phone);
+      addPhone(c.properties.mobilephone);
     }
   }
   return phones;

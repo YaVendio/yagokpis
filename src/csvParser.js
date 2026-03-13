@@ -593,8 +593,7 @@ export function processInboundRows(rows, regionFilter, lifecyclePhones, hubspotP
   var linkUniqueCount = Object.keys(linkPhoneMap).length;
 
   var funnelAll = [
-    { n: "Leads Inbound", v: uniqueLeadCount, c: CC.accent },
-    { n: "En HubSpot", v: hubspotMatchCount, c: CC.orange },
+    { n: "Leads Inbound", v: uniqueLeadCount, c: CC.accent, hs: hubspotMatchCount },
     { n: "Engajaron (2+)", v: engagedTotal, c: CC.purple },
     { n: "Link Crear Cuenta", v: linkUniqueCount, c: CC.cyan },
     { n: "Recibieron Step 1", v: signupUniqueCount, c: CC.green },

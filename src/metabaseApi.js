@@ -140,36 +140,20 @@ export async function fetchLifecyclePhones() {
   return phones;
 }
 
-// Combined inbound fetch: threads (filtered server-side) + lifecycle phones in a single query
-export async function fetchInboundData(since) {
+// Filtered inbound threads: excludes outbound (flow_id=1) at SQL level
+export async function fetchInboundThreadsFiltered(since) {
   var query =
-    "WITH lifecycle AS (\n" +
-    "  SELECT\n" +
-    "    le.phone_number,\n" +
-    "    MIN(le.sent_at) AS first_lifecycle_at,\n" +
-    "    MIN(CASE WHEN lfs.step_order = 1 THEN le.sent_at ELSE NULL END) AS first_step1_at\n" +
-    "  FROM lifecycle_executions le\n" +
-    "  JOIN lifecycle_flow_steps lfs ON le.step_id = lfs.id\n" +
-    "  GROUP BY le.phone_number\n" +
-    ")\n" +
     "SELECT\n" +
-    "  t.thread_id,\n" +
-    "  COALESCE(t.metadata->>'phone_number', t.metadata->>'phone',\n" +
-    "           t.metadata->>'wa_id', t.metadata->>'contact_phone') AS phone_number,\n" +
-    "  t.created_at AS thread_created_at,\n" +
-    '  t."values"::text AS values_json,\n' +
-    "  lc.first_lifecycle_at,\n" +
-    "  lc.first_step1_at\n" +
+    "    t.thread_id,\n" +
+    "    t.metadata->>'phone_number' AS phone_from_meta,\n" +
+    "    t.metadata->>'phone' AS phone2,\n" +
+    "    t.metadata->>'wa_id' AS wa_id,\n" +
+    "    t.metadata->>'contact_phone' AS contact_phone,\n" +
+    "    t.created_at AS thread_created_at,\n" +
+    '    t."values"::text AS values_json\n' +
     "FROM thread t\n" +
-    "LEFT JOIN lifecycle lc\n" +
-    "  ON lc.phone_number = COALESCE(t.metadata->>'phone_number', t.metadata->>'phone',\n" +
-    "                                 t.metadata->>'wa_id', t.metadata->>'contact_phone')\n" +
     "WHERE t.created_at >= '" + since + "'\n" +
     "  AND (t.metadata->>'flow_id' IS DISTINCT FROM '1')\n" +
-    "  AND EXISTS (\n" +
-    "    SELECT 1 FROM jsonb_array_elements(COALESCE(t.\"values\"->'messages', '[]'::jsonb)) m\n" +
-    "    WHERE m->>'type' = 'human'\n" +
-    "  )\n" +
     "ORDER BY t.thread_id";
 
   var result = await queryMetabase(query);
@@ -180,28 +164,18 @@ export async function fetchInboundData(since) {
   }
 
   var threads = [];
-  var lifecyclePhones = {};
   for (var j = 0; j < result.results.length; j++) {
     var row = result.results[j];
-    var phone = row[colIdx["phone_number"]] || "";
+    var phone = row[colIdx["phone_from_meta"]] || row[colIdx["phone2"]] || row[colIdx["wa_id"]] || row[colIdx["contact_phone"]] || "";
     threads.push({
       thread_id: row[colIdx["thread_id"]],
       phone_number: phone,
       thread_created_at: row[colIdx["thread_created_at"]],
       values_json: row[colIdx["values_json"]],
     });
-    // Build lifecyclePhones map from joined data
-    if (phone && (row[colIdx["first_lifecycle_at"]] || row[colIdx["first_step1_at"]])) {
-      if (!lifecyclePhones[phone]) {
-        lifecyclePhones[phone] = {
-          firstAt: row[colIdx["first_lifecycle_at"]] || null,
-          firstStep1At: row[colIdx["first_step1_at"]] || null,
-        };
-      }
-    }
   }
 
-  return { threads: threads, lifecyclePhones: lifecyclePhones };
+  return threads;
 }
 
 export async function fetchResponseStats(since) {
