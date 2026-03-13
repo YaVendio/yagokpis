@@ -18,32 +18,49 @@ export async function callBrevo(endpoint, params) {
   return data;
 }
 
-export async function fetchEmailCampaigns() {
-  // Fetch ALL email campaigns (no type filter) — lets us see classic + trigger + automation
-  var allCampaigns = [];
-  var offset = 0;
-  var limit = 100;
-  var hasMore = true;
-  while (hasMore) {
-    var data = await callBrevo("/v3/emailCampaigns", {
-      statistics: "globalStats",
-      limit: limit,
-      offset: offset,
-    });
-    console.log("[Brevo] count:", data.count, "page:", (data.campaigns || []).length);
-    if (data.campaigns && data.campaigns.length > 0 && offset === 0) {
-      console.log("[Brevo] Sample:", JSON.stringify(data.campaigns[0]).substring(0, 600));
+// --- Diagnostic: discover templates & transactional events available to this API key ---
+export async function fetchAutomationDiagnostic() {
+  console.log("[Brevo] === DIAGNOSTIC START ===");
+
+  // 1. Fetch all SMTP templates
+  console.log("[Brevo] Fetching SMTP templates...");
+  try {
+    var tplData = await callBrevo("/v3/smtp/templates", { limit: 50, offset: 0 });
+    var templates = tplData.templates || [];
+    console.log("[Brevo] Templates found:", tplData.count);
+    for (var i = 0; i < templates.length; i++) {
+      var t = templates[i];
+      console.log("[Brevo] Template #" + t.id + " — name: \"" + t.name + "\" — tag: \"" + (t.tag || "") + "\" — active: " + t.isActive);
     }
-    var campaigns = data.campaigns || [];
-    allCampaigns = allCampaigns.concat(campaigns);
-    if (campaigns.length < limit || allCampaigns.length >= (data.count || 0)) {
-      hasMore = false;
-    } else {
-      offset += limit;
-    }
+  } catch (e) {
+    console.error("[Brevo] Templates fetch failed:", e.message);
   }
-  console.log("[Brevo] Total fetched:", allCampaigns.length);
-  return allCampaigns;
+
+  // 2. Fetch a sample of transactional email events (last 30 days)
+  console.log("[Brevo] Fetching SMTP events (sample)...");
+  try {
+    var evtData = await callBrevo("/v3/smtp/statistics/events", { limit: 10, offset: 0 });
+    var events = evtData.events || [];
+    console.log("[Brevo] Events sample count:", events.length);
+    for (var j = 0; j < events.length; j++) {
+      var ev = events[j];
+      console.log("[Brevo] Event:", ev.event, "| templateId:", ev.templateId, "| email:", ev.email, "| date:", ev.date);
+    }
+  } catch (e) {
+    console.error("[Brevo] Events fetch failed:", e.message);
+  }
+
+  // 3. Try aggregated report
+  console.log("[Brevo] Fetching aggregated SMTP report...");
+  try {
+    var aggData = await callBrevo("/v3/smtp/statistics/aggregatedReport", {});
+    console.log("[Brevo] Aggregated report:", JSON.stringify(aggData));
+  } catch (e) {
+    console.error("[Brevo] Aggregated report failed:", e.message);
+  }
+
+  console.log("[Brevo] === DIAGNOSTIC END ===");
+  return { templates: templates || [], events: events || [], aggregated: aggData || null };
 }
 
 export function aggregateWorkflowStats(campaigns) {

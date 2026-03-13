@@ -7,8 +7,8 @@ import { supabase } from "./supabase";
 import InfoTip from "./components/InfoTip";
 import TIPS from "./tooltips";
 import { fetchCampaigns, fetchCampaignGroups, fetchCampaignLeads, formatDateForApi, formatEndDateForApi } from "./gruposApi";
-import { fetchAllContacts, fetchAllContactsWithPhone, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones, fetchMeetingsSince, fetchContactsByIds, fetchDealsSince, fetchLeadsSince, fetchGrowthLeads } from "./hubspotApi";
-import { fetchEmailCampaigns, aggregateWorkflowStats, calculateMetrics } from "./brevoApi.js";
+import { fetchAllContacts, fetchAllContactsWithPhone, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones, fetchMeetingsSince, fetchContactsByIds, fetchDealsSince, fetchLeadsSince, fetchGrowthLeads, fetchOwnersByIds } from "./hubspotApi";
+import { fetchAutomationDiagnostic, aggregateWorkflowStats, calculateMetrics } from "./brevoApi.js";
 
 function getFirstOfMonth(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";}
 
@@ -500,6 +500,7 @@ export default function Dashboard(){
   const [crmInited,setCrmInited]=useState(false);
   const [crmMeetingPhones,setCrmMeetingPhones]=useState(null);
   const [crmLeads,setCrmLeads]=useState([]);
+  const [crmOwnerMap,setCrmOwnerMap]=useState({});
 
   // Email (Brevo) tab state
   const [emailLoading,setEmailLoading]=useState(false);
@@ -922,6 +923,19 @@ export default function Dashboard(){
         contactsRes=await fetchContactsByIds(contactIds);
         console.log("[CRM] Contacts (from meetings):",contactsRes.length);
       }
+      // Fetch owner names from meeting owner IDs
+      var ownerIdSet={};
+      for(var oi=0;oi<meetingsRes.length;oi++){
+        var ownId=meetingsRes[oi].properties&&meetingsRes[oi].properties.hubspot_owner_id;
+        if(ownId)ownerIdSet[ownId]=true;
+      }
+      var ownerIds=Object.keys(ownerIdSet);
+      var ownerMap={};
+      if(ownerIds.length>0){
+        try{ownerMap=await fetchOwnersByIds(ownerIds);console.log("[CRM] Owners resolved:",Object.keys(ownerMap).length);}
+        catch(e){console.warn("[CRM] Owner fetch failed:",e.message);}
+      }
+      setCrmOwnerMap(ownerMap);
       setCrmContacts(contactsRes);setCrmMeetings(meetingsRes);setCrmDeals(dealsRes);setCrmLeads(leadsRes);setCrmPipelines(pipelines);setCrmInited(true);
       console.log("[CRM] Done. Meetings:",meetingsRes.length,"Contacts:",contactsRes.length,"Deals:",dealsRes.length,"Leads:",leadsRes.length);
     }catch(e){console.error("[CRM] Error:",e);setCrmError(e.message);}
@@ -1008,46 +1022,22 @@ export default function Dashboard(){
   async function initEmail(){
     setEmailLoading(true);setEmailError(null);
     try{
-      console.log("[Email] Fetching Brevo trigger campaigns...");
-      var campaigns=await fetchEmailCampaigns();
-      console.log("[Email] Total trigger campaigns:",campaigns.length);
-      if(campaigns.length>0)console.log("[Email] Sample campaign keys:",Object.keys(campaigns[0]));
-      // Group campaigns by automation/workflow ID
-      var wf4=[],wf5=[],other=[];
-      for(var i=0;i<campaigns.length;i++){
-        var c=campaigns[i];
-        var wfId=c.automationId||c.workflowId||null;
-        if(wfId===4)wf4.push(c);
-        else if(wfId===5)wf5.push(c);
-        else other.push(c);
+      console.log("[Email] Running Brevo diagnostic to discover automation data...");
+      var diag=await fetchAutomationDiagnostic();
+      console.log("[Email] Diagnostic done. Templates:",diag.templates.length,"Events:",diag.events.length);
+      // For now, set placeholder data so the UI renders the diagnostic results
+      var emptyStats={sent:0,delivered:0,uniqueOpens:0,uniqueClicks:0,hardBounces:0,softBounces:0,unsubscriptions:0,complaints:0};
+      var emptyMetrics=calculateMetrics(emptyStats);
+      // If aggregated report is available, use it as total
+      if(diag.aggregated){
+        var agg=diag.aggregated;
+        var totalStats={sent:agg.requests||0,delivered:agg.delivered||0,uniqueOpens:agg.uniqueOpens||0,uniqueClicks:agg.uniqueClicks||0,hardBounces:agg.hardBounces||0,softBounces:agg.softBounces||0,unsubscriptions:agg.unsubscribed||0,complaints:agg.spamReports||0};
+        var totalMetrics=calculateMetrics(totalStats);
+        setEmailData({wf4:{campaigns:[],stats:emptyStats,metrics:emptyMetrics},wf5:{campaigns:[],stats:emptyStats,metrics:emptyMetrics},total:{campaigns:[],stats:totalStats,metrics:totalMetrics}});
+      }else{
+        setEmailData({wf4:{campaigns:[],stats:emptyStats,metrics:emptyMetrics},wf5:{campaigns:[],stats:emptyStats,metrics:emptyMetrics},total:{campaigns:[],stats:emptyStats,metrics:emptyMetrics}});
       }
-      console.log("[Email] WF#4:",wf4.length,"campaigns | WF#5:",wf5.length,"campaigns | Other:",other.length);
-      // If no campaigns matched by automationId, try matching by name/tag
-      if(wf4.length===0&&wf5.length===0&&campaigns.length>0){
-        console.log("[Email] No automationId match. Trying name-based matching...");
-        for(var j=0;j<campaigns.length;j++){
-          var nm=(campaigns[j].name||"").toLowerCase();
-          var tg=(campaigns[j].tag||"").toLowerCase();
-          if(nm.indexOf("workflow 4")>=0||nm.indexOf("wf4")>=0||nm.indexOf("wf 4")>=0||tg.indexOf("workflow-4")>=0)wf4.push(campaigns[j]);
-          else if(nm.indexOf("workflow 5")>=0||nm.indexOf("wf5")>=0||nm.indexOf("wf 5")>=0||tg.indexOf("workflow-5")>=0)wf5.push(campaigns[j]);
-        }
-        console.log("[Email] After name match — WF#4:",wf4.length,"| WF#5:",wf5.length);
-        // If still no match, treat ALL campaigns as total (no per-workflow split)
-        if(wf4.length===0&&wf5.length===0){
-          console.log("[Email] Could not identify workflows. Using all",campaigns.length,"campaigns as total.");
-        }
-      }
-      var statsWf4=aggregateWorkflowStats(wf4);
-      var statsWf5=aggregateWorkflowStats(wf5);
-      var allWfCampaigns=wf4.concat(wf5);
-      // If no per-workflow match, use all campaigns for total
-      var statsTotal=aggregateWorkflowStats(allWfCampaigns.length>0?allWfCampaigns:campaigns);
-      var metricsWf4=calculateMetrics(statsWf4);
-      var metricsWf5=calculateMetrics(statsWf5);
-      var metricsTotal=calculateMetrics(statsTotal);
-      setEmailData({wf4:{campaigns:wf4,stats:statsWf4,metrics:metricsWf4},wf5:{campaigns:wf5,stats:statsWf5,metrics:metricsWf5},total:{campaigns:allWfCampaigns.length>0?allWfCampaigns:campaigns,stats:statsTotal,metrics:metricsTotal}});
       setEmailInited(true);
-      console.log("[Email] Done. Total sent:",metricsTotal.sent,"Open rate:",metricsTotal.openRate+"%");
     }catch(e){console.error("[Email] Error:",e);setEmailError(e.message);}
     finally{setEmailLoading(false);}
   }
@@ -1478,6 +1468,8 @@ export default function Dashboard(){
                 phoneIdx[pd]=true;
                 if(pd.length>11)phoneIdx[pd.slice(-11)]=true;
                 if(pd.length>10)phoneIdx[pd.slice(-10)]=true;
+                if(pd.length>9)phoneIdx[pd.slice(-9)]=true;
+                if(pd.length>8)phoneIdx[pd.slice(-8)]=true;
               }
               var ofertaLeadsArr=meetings.filter(function(l){return l.ml;});
               for(var ami=0;ami<ofertaLeadsArr.length;ami++){
@@ -1488,6 +1480,8 @@ export default function Dashboard(){
                 if(phoneIdx[olPhone])matched=true;
                 else if(olPhone.length>11&&phoneIdx[olPhone.slice(-11)])matched=true;
                 else if(olPhone.length>10&&phoneIdx[olPhone.slice(-10)])matched=true;
+                else if(olPhone.length>9&&phoneIdx[olPhone.slice(-9)])matched=true;
+                else if(olPhone.length>8&&phoneIdx[olPhone.slice(-8)])matched=true;
                 if(matched){actualMeetCount++;confirmedArr.push(ofertaLeadsArr[ami]);}
               }
             }
@@ -1574,7 +1568,7 @@ export default function Dashboard(){
             var qActualMeet=0;var qConfirmedArr=[];
             if(qPeriodPhones){
               var qPhIdx={};var qMpK=Object.keys(qPeriodPhones);
-              for(var qpi=0;qpi<qMpK.length;qpi++){var qpd=qMpK[qpi];qPhIdx[qpd]=true;if(qpd.length>11)qPhIdx[qpd.slice(-11)]=true;if(qpd.length>10)qPhIdx[qpd.slice(-10)]=true;}
+              for(var qpi=0;qpi<qMpK.length;qpi++){var qpd=qMpK[qpi];qPhIdx[qpd]=true;if(qpd.length>11)qPhIdx[qpd.slice(-11)]=true;if(qpd.length>10)qPhIdx[qpd.slice(-10)]=true;if(qpd.length>9)qPhIdx[qpd.slice(-9)]=true;if(qpd.length>8)qPhIdx[qpd.slice(-8)]=true;}
               var qOfertaLeads=qMeetings.filter(function(l){return l.ml;});
               for(var qai=0;qai<qOfertaLeads.length;qai++){
                 var qOlP=(qOfertaLeads[qai].p||"").replace(/\D/g,"");if(!qOlP)continue;
@@ -1582,6 +1576,8 @@ export default function Dashboard(){
                 if(qPhIdx[qOlP])qMatched=true;
                 else if(qOlP.length>11&&qPhIdx[qOlP.slice(-11)])qMatched=true;
                 else if(qOlP.length>10&&qPhIdx[qOlP.slice(-10)])qMatched=true;
+                else if(qOlP.length>9&&qPhIdx[qOlP.slice(-9)])qMatched=true;
+                else if(qOlP.length>8&&qPhIdx[qOlP.slice(-8)])qMatched=true;
                 if(qMatched){qActualMeet++;qConfirmedArr.push(qOfertaLeads[qai]);}
               }
             }
@@ -1651,8 +1647,10 @@ export default function Dashboard(){
                   var filtM2=crmMeetings;
                   if(fromD3||toD3){filtM2=crmMeetings.filter(function(m){var st=m.properties&&m.properties.hs_meeting_start_time;if(!st)return false;var md=new Date(st);if(fromD3&&md<fromD3)return false;if(toD3&&md>toD3)return false;return true;});}
                   var fMeetPhones=getMeetingContactPhones(filtM2,crmContacts);
+                  var fPhIdx={};var fMpK=Object.keys(fMeetPhones);
+                  for(var fpi=0;fpi<fMpK.length;fpi++){var fpd=fMpK[fpi];fPhIdx[fpd]=true;if(fpd.length>11)fPhIdx[fpd.slice(-11)]=true;if(fpd.length>10)fPhIdx[fpd.slice(-10)]=true;if(fpd.length>9)fPhIdx[fpd.slice(-9)]=true;if(fpd.length>8)fPhIdx[fpd.slice(-8)]=true;}
                   var fOferta=meetings.filter(function(l){return l.ml;});
-                  for(var mi2=0;mi2<fOferta.length;mi2++){var fp=(fOferta[mi2].p||"").replace(/\D/g,"");if(fp&&fMeetPhones[fp])actualMC++;}
+                  for(var mi2=0;mi2<fOferta.length;mi2++){var fp=(fOferta[mi2].p||"").replace(/\D/g,"");if(!fp)continue;if(fPhIdx[fp]||(fp.length>11&&fPhIdx[fp.slice(-11)])||(fp.length>10&&fPhIdx[fp.slice(-10)])||(fp.length>9&&fPhIdx[fp.slice(-9)])||(fp.length>8&&fPhIdx[fp.slice(-8)]))actualMC++;}
                 }
                 var funnelRespCount=mode===1?(regionFilter==="all"&&responseStats&&responseStats.outboundRespondedReal!=null?responseStats.outboundRespondedReal:d.resp):(regionFilter==="all"&&responseStats&&responseStats.outboundResponded!=null?responseStats.outboundResponded:d.resp);
                 var correctedFunnel=funnel.map(function(f,i){if(i===0&&tc>0)return{n:f.n,v:tc,c:f.c};if(i===1)return{n:f.n,v:funnelRespCount,c:f.c};return f;});
@@ -1701,6 +1699,52 @@ export default function Dashboard(){
               <div style={{fontSize:13,color:C.muted,marginTop:4}}>recibieron link crear cuenta</div>
               <div style={{fontSize:12,color:C.green,fontWeight:600,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{ix.signupCount} recibieron Step 1 ({inbTc>0?((ix.signupCount/inbTc)*100).toFixed(1):"0"}%)</div>
             </Cd>
+            {(function(){
+              // Reunión Confirmada card for inbound
+              var inbPeriodPhones=null;var inbActualMeet=0;var inbConfirmedArr=[];
+              if(crmMeetings.length>0&&crmContacts.length>0){
+                var inbFromD=dateFrom?new Date(dateFrom+"T00:00:00"):null;
+                var inbToD=dateTo?new Date(dateTo+"T23:59:59"):null;
+                var inbFiltM=crmMeetings;
+                if(inbFromD||inbToD){inbFiltM=crmMeetings.filter(function(m){var st=m.properties&&m.properties.hs_meeting_start_time;if(!st)return false;var md=new Date(st);if(inbFromD&&md<inbFromD)return false;if(inbToD&&md>inbToD)return false;return true;});}
+                inbPeriodPhones=getMeetingContactPhones(inbFiltM,crmContacts);
+              }
+              if(inbPeriodPhones){
+                var inbPhIdx={};var inbMpK=Object.keys(inbPeriodPhones);
+                for(var ipi=0;ipi<inbMpK.length;ipi++){var ipd=inbMpK[ipi];inbPhIdx[ipd]=true;if(ipd.length>11)inbPhIdx[ipd.slice(-11)]=true;if(ipd.length>10)inbPhIdx[ipd.slice(-10)]=true;if(ipd.length>9)inbPhIdx[ipd.slice(-9)]=true;if(ipd.length>8)inbPhIdx[ipd.slice(-8)]=true;}
+                var inbMlLeads=meetings.filter(function(l){return l.ml;});
+                for(var iai=0;iai<inbMlLeads.length;iai++){
+                  var iaP=(inbMlLeads[iai].p||"").replace(/\D/g,"");if(!iaP)continue;
+                  var iaMatched=false;
+                  if(inbPhIdx[iaP])iaMatched=true;
+                  else if(iaP.length>11&&inbPhIdx[iaP.slice(-11)])iaMatched=true;
+                  else if(iaP.length>10&&inbPhIdx[iaP.slice(-10)])iaMatched=true;
+                  else if(iaP.length>9&&inbPhIdx[iaP.slice(-9)])iaMatched=true;
+                  else if(iaP.length>8&&inbPhIdx[iaP.slice(-8)])iaMatched=true;
+                  if(iaMatched){inbActualMeet++;inbConfirmedArr.push(inbMlLeads[iai]);}
+                }
+              }
+              var inbOfertaCount=meetings.filter(function(l){return l.ml;}).length;
+              var inbActualVsOferta=inbOfertaCount>0?((inbActualMeet/inbOfertaCount)*100).toFixed(1):"0";
+              var inbActualVsTotal=inbTc>0?((inbActualMeet/inbTc)*100).toFixed(1):"0";
+              return (
+                <Cd onClick={function(){if(inbConfirmedArr.length>0){setConfirmedLeads(inbConfirmedArr);setShowConfirmed(true);}}} style={{position:"relative",cursor:inbPeriodPhones&&inbActualMeet>0?"pointer":"default",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
+                  <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u2705"}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                    <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div>
+                    <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Reuni{"\u00F3"}n Confirmada</span>
+                  </div>
+                  {inbPeriodPhones?(<>
+                    <div style={{fontSize:36,fontWeight:900,fontFamily:mono,lineHeight:1,color:C.green}}>{inbActualMeet}</div>
+                    <div style={{fontSize:13,color:C.muted,marginTop:4}}>{inbActualVsOferta}% de ofertas {"\u00B7"} {inbActualVsTotal}% del total</div>
+                    <div style={{fontSize:11,color:C.green,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{inbActualMeet>0?"\u2705 Ver reuniones \u2192":"Cruce con HubSpot Meetings"}</div>
+                  </>):(<>
+                    <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                    <div style={{fontSize:12,color:C.muted,marginTop:4}}>{crmLoading?"Cargando HubSpot...":"Esperando datos HubSpot"}</div>
+                  </>)}
+                </Cd>
+              );
+            })()}
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:22}}>
             <Cd><Sec tipKey="funnel">Embudo de Conversi&oacute;n</Sec>
@@ -2051,6 +2095,7 @@ export default function Dashboard(){
                   <div style={{background:C.rowAlt,borderRadius:6,height:8,overflow:"hidden"}}>
                     <div style={{height:"100%",borderRadius:6,background:isW?C.green:C.accent,width:(mx>0?(rate/mx*100):0)+"%",transition:"width 0.3s ease"}}></div>
                   </div>
+                  {(function(){var _abs=_tplMeetStats[pair[idx]];if(!_abs||(!_abs.link&&!_abs.booked))return null;return (<div style={{display:"flex",gap:12,marginTop:10,paddingTop:8,borderTop:"1px solid "+C.purple+"15"}}><div><div style={{fontSize:10,color:C.muted,fontWeight:600}}>{"\u{1F517}"} Link agend.</div><div style={{fontSize:15,fontWeight:800,color:C.pink,fontFamily:mono}}>{_abs.link}</div></div><div><div style={{fontSize:10,color:C.muted,fontWeight:600}}>{"\u{1F4C5}"} Agendaron</div><div style={{fontSize:15,fontWeight:800,color:C.green,fontFamily:mono}}>{_abs.booked}</div></div></div>);})()}
                 </div>);
               })}
             </div>
@@ -2319,36 +2364,67 @@ export default function Dashboard(){
         }
         var pipelineData=Object.keys(dealsByStage).map(function(k){return{stage:dealsByStage[k].label,count:dealsByStage[k].count,value:dealsByStage[k].value};});
 
-        var outcomeColor={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:C.yellow,RESCHEDULED:C.orange,UNKNOWN:C.muted};
+        var outcomeColor={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:C.yellow,RESCHEDULED:C.orange,"NO CALIFICADA":C.pink,UNKNOWN:C.muted};
 
-        // Build phone → meetings reverse lookup
+        // Filter meetings by selected date period (Bug 3 fix)
+        var filtMeetings=crmMeetings;
+        if(dateFrom||dateTo){
+          var hFromD=dateFrom?new Date(dateFrom+"T00:00:00"):null;
+          var hToD=dateTo?new Date(dateTo+"T23:59:59"):null;
+          filtMeetings=crmMeetings.filter(function(m){
+            var st=m.properties&&m.properties.hs_meeting_start_time;
+            if(!st)return false;var md=new Date(st);
+            if(hFromD&&md<hFromD)return false;
+            if(hToD&&md>hToD)return false;
+            return true;
+          });
+        }
+
+        // Build phone → meetings reverse lookup (Bug 1+2 fix: both phone + mobilephone, variant matching)
         var phoneMeetings={};
-        var contactPhoneMap={};
+        var contactPhonesMap={};
         for(var ci=0;ci<crmContacts.length;ci++){
           var cc=crmContacts[ci];
-          var cph=cc.properties&&cc.properties.phone;
-          if(cph){var cclean=cph.replace(/\D/g,"");if(cclean)contactPhoneMap[cc.id]=cclean;}
+          var cPhones=[];
+          if(cc.properties){
+            if(cc.properties.phone){var cp1=cc.properties.phone.replace(/\D/g,"");if(cp1)cPhones.push(cp1);}
+            if(cc.properties.mobilephone){var cp2=cc.properties.mobilephone.replace(/\D/g,"");if(cp2&&cPhones.indexOf(cp2)<0)cPhones.push(cp2);}
+          }
+          if(cPhones.length>0)contactPhonesMap[cc.id]=cPhones;
         }
-        for(var mj=0;mj<crmMeetings.length;mj++){
-          var mm=crmMeetings[mj];
+        // Build expanded phone index for variant matching
+        var hsPhoneIdx={};
+        for(var mj=0;mj<filtMeetings.length;mj++){
+          var mm=filtMeetings[mj];
           var assoc=mm.associations&&mm.associations.contacts&&mm.associations.contacts.results;
           if(!assoc)continue;
           for(var ak=0;ak<assoc.length;ak++){
-            var aphone=contactPhoneMap[assoc[ak].id];
-            if(aphone){
+            var aPhones=contactPhonesMap[assoc[ak].id];
+            if(!aPhones)continue;
+            for(var api=0;api<aPhones.length;api++){
+              var aphone=aPhones[api];
               if(!phoneMeetings[aphone])phoneMeetings[aphone]=[];
               phoneMeetings[aphone].push(mm);
+              // Expand into variant index
+              hsPhoneIdx[aphone]=aphone;
+              if(aphone.length>11)hsPhoneIdx[aphone.slice(-11)]=aphone;
+              if(aphone.length>10)hsPhoneIdx[aphone.slice(-10)]=aphone;
+              if(aphone.length>9)hsPhoneIdx[aphone.slice(-9)]=aphone;
+              if(aphone.length>8)hsPhoneIdx[aphone.slice(-8)]=aphone;
             }
           }
         }
 
-        // Cross outbound leads with HS meetings
+        // Cross outbound leads with HS meetings using variant matching
         var ofertaLeads=meetings.filter(function(l){return l.ml;});
         var matchedLeads=[];
         var unmatchedLeads=[];
         for(var oi=0;oi<ofertaLeads.length;oi++){
           var oPhone=(ofertaLeads[oi].p||"").replace(/\D/g,"");
-          var hsMeets=phoneMeetings[oPhone];
+          if(!oPhone){unmatchedLeads.push(ofertaLeads[oi]);continue;}
+          // Try full, last-11, last-10, last-9, last-8 against expanded index
+          var resolvedPhone=hsPhoneIdx[oPhone]||(oPhone.length>11&&hsPhoneIdx[oPhone.slice(-11)])||(oPhone.length>10&&hsPhoneIdx[oPhone.slice(-10)])||(oPhone.length>9&&hsPhoneIdx[oPhone.slice(-9)])||(oPhone.length>8&&hsPhoneIdx[oPhone.slice(-8)])||null;
+          var hsMeets=resolvedPhone?phoneMeetings[resolvedPhone]:null;
           if(hsMeets&&hsMeets.length>0){
             matchedLeads.push({lead:ofertaLeads[oi],meetings:hsMeets});
           }else{
@@ -2361,13 +2437,33 @@ export default function Dashboard(){
         var respCount=d.resp||0;
         var ofertaPctResp=respCount>0?(ofertaCount/respCount*100).toFixed(1):"0";
 
-        // Meeting outcome stats — total HS
+        // Meeting outcome stats — filtered by period
         var totalMeetOutcomes={};
-        for(var tmi=0;tmi<crmMeetings.length;tmi++){
-          var tmo=crmMeetings[tmi].properties&&crmMeetings[tmi].properties.hs_meeting_outcome||"UNKNOWN";
+        for(var tmi=0;tmi<filtMeetings.length;tmi++){
+          var tmo=filtMeetings[tmi].properties&&filtMeetings[tmi].properties.hs_meeting_outcome||"UNKNOWN";
           if(!totalMeetOutcomes[tmo])totalMeetOutcomes[tmo]=0;
           totalMeetOutcomes[tmo]++;
         }
+
+        // Stats by owner (SDR)
+        var meetByOwner={};
+        for(var soi=0;soi<filtMeetings.length;soi++){
+          var sowId=filtMeetings[soi].properties&&filtMeetings[soi].properties.hubspot_owner_id||"unassigned";
+          var sowOut=filtMeetings[soi].properties&&filtMeetings[soi].properties.hs_meeting_outcome||"UNKNOWN";
+          if(!meetByOwner[sowId])meetByOwner[sowId]={total:0,outcomes:{}};
+          meetByOwner[sowId].total++;
+          if(!meetByOwner[sowId].outcomes[sowOut])meetByOwner[sowId].outcomes[sowOut]=0;
+          meetByOwner[sowId].outcomes[sowOut]++;
+        }
+
+        // Stats by source
+        var meetBySource={};
+        for(var ssi=0;ssi<filtMeetings.length;ssi++){
+          var src=filtMeetings[ssi].properties&&filtMeetings[ssi].properties.hs_meeting_source||"UNKNOWN";
+          if(!meetBySource[src])meetBySource[src]=0;
+          meetBySource[src]++;
+        }
+        var sourceLabels={MEETINGS_PUBLIC:"Agendamiento P\u00FAblico",BIDIRECTIONAL_SYNC:"Sync Calendario",CRM_UI:"Creado Manualmente"};
 
         // Outbound-only meeting outcomes
         var outboundOutcomes={};
@@ -2405,7 +2501,7 @@ export default function Dashboard(){
               </Cd>
               <Cd style={{border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)"}}>
                 <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Reuniones Totales HS</div>
-                <div style={{fontSize:32,fontWeight:900,color:C.purple,fontFamily:mono,marginTop:6}}>{crmMeetings.length}</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.purple,fontFamily:mono,marginTop:6}}>{filtMeetings.length}</div>
                 <div style={{fontSize:12,color:C.muted,marginTop:2}}>{totalMeetOutcomes.COMPLETED||0} completadas {"\u00B7"} {totalMeetOutcomes.SCHEDULED||0} agendadas {"\u00B7"} {totalMeetOutcomes.NO_SHOW||0} no show</div>
               </Cd>
             </div>
@@ -2485,7 +2581,84 @@ export default function Dashboard(){
               </Cd>
             )}
 
-            {/* Section 4: Pipeline de Deals (kept) */}
+            {/* Section 4: Breakdown por Outcome — ALL filtered HS meetings */}
+            {filtMeetings.length>0 && (
+              <Cd style={{marginBottom:22}}>
+                <Sec>Breakdown por Outcome (Todas las Reuniones HS)</Sec>
+                <div style={{fontSize:13,color:C.muted,marginBottom:12}}>Todas las {filtMeetings.length} reuniones HubSpot en el per{"\u00ED"}odo</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:12}}>
+                  {Object.keys(totalMeetOutcomes).sort(function(a,b){return totalMeetOutcomes[b]-totalMeetOutcomes[a];}).map(function(o){
+                    var cnt=totalMeetOutcomes[o];
+                    var pct=filtMeetings.length>0?(cnt/filtMeetings.length*100).toFixed(1):"0";
+                    var oc=outcomeColor[o]||C.muted;
+                    return (<div key={o} style={{background:oc+"08",borderRadius:10,padding:"14px 16px",border:"1px solid "+oc+"20",textAlign:"center"}}>
+                      <div style={{fontSize:11,fontWeight:700,color:oc,textTransform:"uppercase",letterSpacing:0.5}}>{o}</div>
+                      <div style={{fontSize:26,fontWeight:900,fontFamily:mono,color:oc,marginTop:4}}>{cnt}</div>
+                      <div style={{fontSize:12,color:C.muted,marginTop:2}}>{pct}%</div>
+                    </div>);
+                  })}
+                </div>
+              </Cd>
+            )}
+
+            {/* Section 5: Tabla por SDR/Owner */}
+            {Object.keys(meetByOwner).length>0 && (
+              <Cd style={{marginBottom:22}}>
+                <Sec>Reuniones por SDR / Owner</Sec>
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                    <thead>
+                      <tr style={{borderBottom:"2px solid "+C.border}}>
+                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>SDR</th>
+                        <th style={{textAlign:"center",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Total</th>
+                        <th style={{textAlign:"center",padding:"8px 12px",color:C.green,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Completed</th>
+                        <th style={{textAlign:"center",padding:"8px 12px",color:C.red,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>No Show</th>
+                        <th style={{textAlign:"center",padding:"8px 12px",color:C.pink,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>No Calificada</th>
+                        <th style={{textAlign:"center",padding:"8px 12px",color:C.accent,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Scheduled</th>
+                        <th style={{textAlign:"center",padding:"8px 12px",color:C.purple,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>% Completed</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.keys(meetByOwner).sort(function(a,b){return meetByOwner[b].total-meetByOwner[a].total;}).map(function(oid,idx){
+                        var row=meetByOwner[oid];
+                        var ownerName=crmOwnerMap[oid]||oid;
+                        var compPct=row.total>0?((row.outcomes.COMPLETED||0)/row.total*100).toFixed(1):"0";
+                        return (<tr key={oid} style={{borderBottom:"1px solid "+C.border+"66",background:idx%2===0?C.rowBg:"transparent"}}>
+                          <td style={{padding:"10px 12px",fontWeight:700}}>{ownerName}</td>
+                          <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,fontWeight:800}}>{row.total}</td>
+                          <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,color:C.green,fontWeight:700}}>{row.outcomes.COMPLETED||0}</td>
+                          <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,color:C.red,fontWeight:700}}>{row.outcomes.NO_SHOW||0}</td>
+                          <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,color:C.pink,fontWeight:700}}>{row.outcomes["NO CALIFICADA"]||0}</td>
+                          <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,color:C.accent,fontWeight:700}}>{row.outcomes.SCHEDULED||0}</td>
+                          <td style={{padding:"10px 12px",textAlign:"center"}}><span style={{background:parseFloat(compPct)>=50?C.green+"18":parseFloat(compPct)>=30?C.yellow+"18":C.red+"18",color:parseFloat(compPct)>=50?C.green:parseFloat(compPct)>=30?C.yellow:C.red,padding:"4px 10px",borderRadius:8,fontWeight:800,fontFamily:mono,fontSize:13}}>{compPct}%</span></td>
+                        </tr>);
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Cd>
+            )}
+
+            {/* Section 6: Breakdown por Fonte/Source */}
+            {Object.keys(meetBySource).length>0 && (
+              <Cd style={{marginBottom:22}}>
+                <Sec>Reuniones por Fuente</Sec>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:12}}>
+                  {Object.keys(meetBySource).sort(function(a,b){return meetBySource[b]-meetBySource[a];}).map(function(src){
+                    var cnt=meetBySource[src];
+                    var pct=filtMeetings.length>0?(cnt/filtMeetings.length*100).toFixed(1):"0";
+                    var srcColor=src==="MEETINGS_PUBLIC"?C.accent:src==="BIDIRECTIONAL_SYNC"?C.purple:src==="CRM_UI"?C.orange:C.cyan;
+                    return (<div key={src} style={{background:srcColor+"08",borderRadius:10,padding:"14px 16px",border:"1px solid "+srcColor+"20",textAlign:"center"}}>
+                      <div style={{fontSize:11,fontWeight:700,color:srcColor,textTransform:"uppercase",letterSpacing:0.5}}>{sourceLabels[src]||src}</div>
+                      <div style={{fontSize:26,fontWeight:900,fontFamily:mono,color:srcColor,marginTop:4}}>{cnt}</div>
+                      <div style={{fontSize:12,color:C.muted,marginTop:2}}>{pct}%</div>
+                    </div>);
+                  })}
+                </div>
+              </Cd>
+            )}
+
+            {/* Section 7: Pipeline de Deals (kept) */}
             {pipelineData.length>0 && (
               <Cd style={{marginBottom:22}}>
                 <Sec>Pipeline de Deals</Sec>

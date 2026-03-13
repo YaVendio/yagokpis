@@ -74,7 +74,7 @@ export async function fetchMeetingsSince(sinceIso) {
           value: String(sinceMs)
         }]
       }],
-      properties: ["hs_meeting_title", "hs_meeting_start_time", "hs_meeting_end_time", "hs_meeting_outcome"],
+      properties: ["hs_meeting_title", "hs_meeting_start_time", "hs_meeting_end_time", "hs_meeting_outcome", "hubspot_owner_id", "hs_meeting_source"],
       limit: 100,
     };
     if (after) searchBody.after = after;
@@ -146,7 +146,7 @@ export async function fetchContactsByIds(contactIds) {
       var inputs = batch.map(function(id) { return { id: id }; });
       return callHubSpot("/crm/v3/objects/contacts/batch/read", null, {
         inputs: inputs,
-        properties: ["firstname", "lastname", "phone", "email", "createdate", "hs_lead_status", "lifecyclestage", "company"]
+        properties: ["firstname", "lastname", "phone", "mobilephone", "email", "createdate", "hs_lead_status", "lifecyclestage", "company"]
       });
     });
     var results = await Promise.all(promises);
@@ -257,14 +257,16 @@ export async function fetchAllMeetings() {
 }
 
 export function getMeetingContactPhones(meetings, contacts) {
-  var contactPhoneMap = {};
+  // Map contactId → array of ALL clean phone numbers (phone + mobilephone)
+  var contactPhonesMap = {};
   for (var i = 0; i < contacts.length; i++) {
     var c = contacts[i];
-    var ph = c.properties && c.properties.phone;
-    if (ph) {
-      var clean = ph.replace(/\D/g, "");
-      if (clean) contactPhoneMap[c.id] = clean;
+    var phones = [];
+    if (c.properties) {
+      if (c.properties.phone) { var p1 = c.properties.phone.replace(/\D/g, ""); if (p1) phones.push(p1); }
+      if (c.properties.mobilephone) { var p2 = c.properties.mobilephone.replace(/\D/g, ""); if (p2 && phones.indexOf(p2) < 0) phones.push(p2); }
     }
+    if (phones.length > 0) contactPhonesMap[c.id] = phones;
   }
   var meetingPhones = {};
   for (var j = 0; j < meetings.length; j++) {
@@ -273,8 +275,8 @@ export function getMeetingContactPhones(meetings, contacts) {
     if (!assoc) continue;
     for (var k = 0; k < assoc.length; k++) {
       var contactId = assoc[k].id;
-      var phone = contactPhoneMap[contactId];
-      if (phone) meetingPhones[phone] = true;
+      var cPhones = contactPhonesMap[contactId];
+      if (cPhones) { for (var pi = 0; pi < cPhones.length; pi++) meetingPhones[cPhones[pi]] = true; }
     }
   }
   return meetingPhones;
@@ -378,6 +380,26 @@ export async function fetchGrowthLeads(sinceIso, pipelineId) {
   return filtered;
 }
 
+// Fetch owner names by IDs (parallel, max 5 at a time)
+export async function fetchOwnersByIds(ownerIds) {
+  var map = {};
+  if (!ownerIds || ownerIds.length === 0) return map;
+  var CONCURRENCY = 5;
+  for (var i = 0; i < ownerIds.length; i += CONCURRENCY) {
+    var batch = ownerIds.slice(i, i + CONCURRENCY);
+    var promises = batch.map(function(oid) {
+      return callHubSpot("/crm/v3/owners/" + oid).then(function(data) {
+        var name = ((data.firstName || "") + " " + (data.lastName || "")).trim();
+        map[oid] = name || data.email || ("Owner " + oid);
+      }).catch(function() {
+        map[oid] = "Owner " + oid;
+      });
+    });
+    await Promise.all(promises);
+  }
+  return map;
+}
+
 export function extractHubSpotPhones(contacts) {
   var phones = {};
   function addPhone(raw) {
@@ -387,6 +409,8 @@ export function extractHubSpotPhones(contacts) {
     phones[clean] = true;
     if (clean.length > 11) phones[clean.slice(-11)] = true;
     if (clean.length > 10) phones[clean.slice(-10)] = true;
+    if (clean.length > 9) phones[clean.slice(-9)] = true;
+    if (clean.length > 8) phones[clean.slice(-8)] = true;
   }
   for (var i = 0; i < contacts.length; i++) {
     var c = contacts[i];
