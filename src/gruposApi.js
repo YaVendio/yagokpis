@@ -38,3 +38,12 @@ export function formatDateForApi(date) {
   var yyyy = d.getFullYear();
   return dd + "/" + mm + "/" + yyyy;
 }
+
+export function formatEndDateForApi(date) {
+  var d = new Date(date);
+  d.setDate(d.getDate() + 1);
+  var dd = String(d.getDate()).padStart(2, "0");
+  var mm = String(d.getMonth() + 1).padStart(2, "0");
+  var yyyy = d.getFullYear();
+  return dd + "/" + mm + "/" + yyyy;
+}

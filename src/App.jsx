@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Legend } from "recharts";
 import { processCSVRows, processInboundRows, parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
-import { fetchThreads, expandThreadMessages, fetchInboundThreads, expandInboundThreadMessages, fetchLifecyclePhones, queryMetabase, fetchResponseStats } from "./metabaseApi";
+import { fetchThreads, expandThreadMessages, fetchInboundThreads, expandInboundThreadMessages, fetchLifecyclePhones, fetchInboundData, queryMetabase, fetchResponseStats } from "./metabaseApi";
 import { DEFAULT_MEETINGS as _RAW_MEETINGS } from "./defaultData";
 import { supabase } from "./supabase";
 import InfoTip from "./components/InfoTip";
 import TIPS from "./tooltips";
-import { fetchCampaigns, fetchCampaignGroups, fetchCampaignLeads, formatDateForApi } from "./gruposApi";
-import { fetchAllContacts, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones, fetchMeetingsSince, fetchContactsByIds, fetchDealsSince, fetchLeadsSince, debugLeadProperties, fetchGrowthLeads } from "./hubspotApi";
+import { fetchCampaigns, fetchCampaignGroups, fetchCampaignLeads, formatDateForApi, formatEndDateForApi } from "./gruposApi";
+import { fetchAllContacts, fetchAllContactsWithPhone, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones, fetchMeetingsSince, fetchContactsByIds, fetchDealsSince, fetchLeadsSince, fetchGrowthLeads } from "./hubspotApi";
 import { fetchEmailCampaigns, aggregateWorkflowStats, calculateMetrics } from "./brevoApi.js";
 
 function getFirstOfMonth(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";}
@@ -20,7 +20,7 @@ var C=_CLight;
 var _isDark=false;
 
 // Filter default meetings to only those that received MSG1, and compute ml/igL/igA flags
-var DEFAULT_MEETINGS=_RAW_MEETINGS.filter(function(m){return m.tr.indexOf("MSG1")>=0;}).map(function(m){var hasMl=false,hasIgL=false,hasIgA=false;for(var i=0;i<m.c.length;i++){if(m.c[i][0]===2&&m.c[i][1]&&m.c[i][1].indexOf("meetings.hubspot.com/")>=0)hasMl=true;if(m.c[i][0]===1&&m.c[i][1]){if(/instagram\.com/i.test(m.c[i][1]))hasIgL=true;if(/@\w+|ig\s*:/i.test(m.c[i][1]))hasIgA=true;}}return Object.assign({},m,{ml:hasMl,igL:hasIgL,igA:hasIgA});});
+var DEFAULT_MEETINGS=_RAW_MEETINGS.filter(function(m){return m.tr.indexOf("MSG1")>=0;}).map(function(m){var hasMl=false,hasIgL=false,hasIgA=false;for(var i=0;i<m.c.length;i++){if(m.c[i][0]===2&&m.c[i][1]&&m.c[i][1].indexOf("meetings.hubspot.com/")>=0||m.c[i][1].indexOf("yavendio.com/meetings")>=0)hasMl=true;if(m.c[i][0]===1&&m.c[i][1]){if(/instagram\.com/i.test(m.c[i][1]))hasIgL=true;if(/@\w+|ig\s*:/i.test(m.c[i][1]))hasIgA=true;}}return Object.assign({},m,{ml:hasMl,igL:hasIgL,igA:hasIgA});});
 var _dIgL=DEFAULT_MEETINGS.filter(function(m){return m.igL;}).length;
 var _dIgA=DEFAULT_MEETINGS.filter(function(m){return m.igA&&!m.igL;}).length;
 
@@ -66,24 +66,34 @@ function Bd({children,color}){return <span style={{background:color+"15",color:c
 function Sec({children,tipKey}){return <div style={{fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700,marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+C.border+"66",display:"flex",alignItems:"center"}}>{children}{tipKey && <InfoTip dark={_isDark} data={TIPS[tipKey]}/>}</div>;}
 function Cd({children,style,onClick,draggable,onDragStart,onDragOver,onDragLeave,onDrop,onDragEnd}){var _h=useState(false),hov=_h[0],sH=_h[1];return <div onClick={onClick} draggable={draggable} onDragStart={onDragStart} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} onDragEnd={onDragEnd} onMouseEnter={function(){sH(true);}} onMouseLeave={function(){sH(false);}} style={{background:C.card,border:"1px solid "+(hov?C.accent+"44":C.border),borderRadius:16,padding:20,boxShadow:hov?"0 8px 25px #0000000f":"0 1px 3px #0000000a",transform:hov?"translateY(-1px)":"none",transition:"box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease",...style}}>{children}</div>;}
 
+function SideBtn({children,label,onClick,active,style}){var _h=useState(false),hov=_h[0],sH=_h[1];return <button onClick={onClick} onMouseEnter={function(){sH(true);}} onMouseLeave={function(){sH(false);}} style={{width:40,height:40,borderRadius:10,border:"none",background:active?(C.accent+"18"):hov?(C.border+"55"):"transparent",color:active?C.accent:C.muted,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",transition:"all 0.15s ease",...style}}>{children}{hov&&<div style={{position:"absolute",left:"100%",top:"50%",transform:"translateY(-50%)",marginLeft:8,background:C.card,border:"1px solid "+C.border,borderRadius:6,padding:"4px 10px",fontSize:12,fontWeight:700,color:C.text,whiteSpace:"nowrap",boxShadow:"0 4px 12px #00000015",pointerEvents:"none",zIndex:20}}>{label}</div>}</button>;}
+
 function qualLabel(q){if(!q)return{t:"Sin calificaci\u00F3n",c:C.muted};var lo=q.toLowerCase();if(lo==="alta")return{t:"Alta",c:C.green};if(lo==="media"||lo==="m\u00E9dia")return{t:"Media",c:C.accent};if(lo==="baja"||lo==="baixa")return{t:"Baja",c:C.yellow};return{t:q,c:C.muted};}
 
-function ConvView({lead,onBack}){
-  var eC={alto:C.green,medio:C.accent,bajo:C.yellow,minimo:C.red,profunda:C.green,media:C.accent,corta:C.yellow,rebote:C.red};
+function ConvView({lead,onBack,crmContacts}){
   var ql=qualLabel(lead.q);
+  var phoneMap=buildPhoneContactMap(crmContacts);
+  var ct=findContact(phoneMap,lead.p);
+  var props=ct&&ct.properties||{};
+  var name=(props.firstname||"")+(props.lastname?(" "+props.lastname):"");
+  var company=props.company||"";
+  var email=props.email||"";
+  var hsId=ct?ct.id:"";
   return (<div style={{maxHeight:"78vh",overflowY:"auto"}}>
     <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:0,position:"sticky",top:0,background:C.card,padding:"12px 0",zIndex:2,borderBottom:"1px solid "+C.border}}>
       <button onClick={onBack} style={{background:C.rowAlt,border:"none",borderRadius:8,padding:"8px 14px",fontSize:13,cursor:"pointer",fontWeight:700,color:C.muted}}>{"\u2190 Volver"}</button>
       <div style={{flex:1}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           <span style={{fontSize:18}}>{lead.co}</span>
-          <span style={{fontSize:17,fontWeight:800,fontFamily:mono}}>{lead.p}</span>
-          <Bd color={eC[lead.e]||C.muted}>{lead.e}</Bd>
+          <span style={{fontSize:17,fontWeight:800}}>{name||lead.p}</span>
+          {company && <span style={{fontSize:14,color:C.muted,fontWeight:600}}>{"\u00B7 "+company}</span>}
           <Bd color={ql.c}>{ql.t}</Bd>
           {lead.au && <Bd color={C.red}>AUTO-REPLY</Bd>}
         </div>
         <div style={{fontSize:12,color:C.muted,marginTop:2}}>
-          {lead.ms} msgs humanas {"\u00B7"} {lead.w.toLocaleString()} palabras {"\u00B7"} Templates: {lead.tr.join(", ")} {"\u00B7"} 1a resp: <strong>{lead.fr||"N/A"}</strong>
+          {email && <span>{email} {"\u00B7"} </span>}
+          {hsId && <span style={{color:C.accent,fontWeight:600}}>HS #{hsId} {"\u00B7"} </span>}
+          <span style={{fontFamily:mono}}>{lead.p}</span> {"\u00B7"} {lead.ms} msgs humanas {"\u00B7"} {lead.w.toLocaleString()} palabras {"\u00B7"} Templates: {lead.tr.join(", ")} {"\u00B7"} 1a resp: <strong>{lead.fr||"N/A"}</strong>
         </div>
       </div>
     </div>
@@ -93,10 +103,12 @@ function ConvView({lead,onBack}){
         if(m[0]===0){
           var tc=tplCol[m[1]]||(m[1]&&m[1].startsWith("pt_")?C.green:m[1]&&m[1].startsWith("es_")?C.accent:C.accent);
           var tn=tplNm[m[1]]||m[1];
+          var tplBody=m[3]||"";
           return (<div key={i} style={{alignSelf:"center",background:tc+"0C",border:"2px dashed "+tc+"55",borderRadius:12,padding:"10px 20px",margin:"10px 0",maxWidth:"88%",textAlign:"center"}}>
             <div style={{fontSize:11,fontWeight:800,color:tc,textTransform:"uppercase",letterSpacing:1}}>{"\u{1F4CB} TEMPLATE ENVIADO"}</div>
             <div style={{fontSize:15,fontWeight:700,color:tc,marginTop:3}}>{tn}</div>
             {dt && <div style={{fontSize:11,color:C.muted,marginTop:3}}>{dt}</div>}
+            {tplBody && <div style={{fontSize:13,color:C.sub,marginTop:8,textAlign:"left",lineHeight:1.5,whiteSpace:"pre-wrap",background:C.card,borderRadius:8,padding:"10px 14px",border:"1px solid "+tc+"20"}}>{tplBody}</div>}
           </div>);
         }
         if(m[0]===1) return (<div key={i} style={{alignSelf:"flex-end",background:C.bubbleOut,borderRadius:"16px 16px 4px 16px",padding:"10px 14px",fontSize:14,color:C.text,maxWidth:"72%",lineHeight:1.6,whiteSpace:"pre-wrap"}}>
@@ -117,37 +129,102 @@ function ConvView({lead,onBack}){
   </div>);
 }
 
-function MeetModal({leads,onClose,mode,title}){
+function buildPhoneContactMap(crmContacts){
+  var map={};
+  if(!crmContacts)return map;
+  for(var i=0;i<crmContacts.length;i++){
+    var ct=crmContacts[i];
+    var ph=ct.properties&&ct.properties.phone;
+    if(!ph)continue;
+    var d=ph.replace(/\D/g,"");
+    if(!d)continue;
+    map[d]=ct;
+    if(d.length>11)map[d.slice(-11)]=ct;
+    if(d.length>10)map[d.slice(-10)]=ct;
+  }
+  return map;
+}
+
+function findContact(phoneMap,leadPhone){
+  if(!leadPhone)return null;
+  var d=leadPhone.replace(/\D/g,"");
+  if(!d)return null;
+  if(phoneMap[d])return phoneMap[d];
+  if(d.length>11&&phoneMap[d.slice(-11)])return phoneMap[d.slice(-11)];
+  if(d.length>10&&phoneMap[d.slice(-10)])return phoneMap[d.slice(-10)];
+  return null;
+}
+
+function timeAgo(ts){
+  if(!ts)return "";
+  var d=typeof ts==="number"?new Date(ts):new Date(ts);
+  if(isNaN(d.getTime()))return "";
+  var diff=Date.now()-d.getTime();
+  if(diff<0)diff=0;
+  var mins=Math.floor(diff/60000);
+  if(mins<1)return "Ahora";
+  if(mins<60)return "Hace "+mins+"m";
+  var hrs=Math.floor(mins/60);
+  if(hrs<24)return "Hace "+hrs+"h";
+  var days=Math.floor(hrs/24);
+  return "Hace "+days+"d";
+}
+
+function getLastMsgTs(lead){
+  if(!lead.c||lead.c.length===0)return 0;
+  var last=lead.c[lead.c.length-1];
+  var ts=last[2];
+  if(!ts)return 0;
+  var d=new Date(ts);
+  return isNaN(d.getTime())?0:d.getTime();
+}
+
+function MeetModal({leads,onClose,mode,title,crmContacts}){
   const [sel,setSel]=useState(null);
-  var eC={alto:C.green,medio:C.accent,bajo:C.yellow,minimo:C.red,profunda:C.green,media:C.accent,corta:C.yellow,rebote:C.red};
+  var phoneMap=buildPhoneContactMap(crmContacts);
   var filtered=mode===1?leads.filter(function(l){return !l.au;}):leads;
+
+  // Sort by last message timestamp descending
+  filtered=filtered.slice().sort(function(a,b){return getLastMsgTs(b)-getLastMsgTs(a);});
 
   return (<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#00000044",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:20,animation:"fadeInModal 0.2s ease-out"}} onClick={onClose}>
     <div style={{background:C.card,borderRadius:20,padding:28,maxWidth:880,width:"100%",maxHeight:"92vh",boxShadow:"0 25px 60px #00000025",animation:"scaleInModal 0.2s ease-out"}} onClick={function(e){e.stopPropagation();}}>
       {sel!==null ? (
-        <ConvView lead={filtered[sel]} onBack={function(){setSel(null);}} />
+        <ConvView lead={filtered[sel]} onBack={function(){setSel(null);}} crmContacts={crmContacts} />
       ) : (<div style={{maxHeight:"82vh",overflowY:"auto"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
           <div>
             <div style={{fontSize:19,fontWeight:900}}>{title||"\u{1F4C5} Leads con Oferta de Reuni\u00F3n"}</div>
-            <div style={{fontSize:14,color:C.muted,marginTop:2}}>{filtered.length} leads {"\u00B7"} Click en un contacto para ver la conversación</div>
+            <div style={{fontSize:14,color:C.muted,marginTop:2}}>{filtered.length} leads {"\u00B7"} Click en un contacto para ver la conversaci\u00F3n</div>
           </div>
           <button onClick={onClose} style={{background:C.rowAlt,border:"none",borderRadius:8,width:36,height:36,fontSize:18,cursor:"pointer",color:C.muted,fontWeight:700}}>{"\u2715"}</button>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {filtered.map(function(l,i){
             var ql=qualLabel(l.q);
-            return (<div key={i} onClick={function(){setSel(i);}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:C.rowBg,borderRadius:12,cursor:"pointer",border:"2px solid transparent"}}>
+            var ct=findContact(phoneMap,l.p);
+            var props=ct&&ct.properties||{};
+            var name=(props.firstname||"")+(props.lastname?(" "+props.lastname):"");
+            var company=props.company||"";
+            var email=props.email||"";
+            var hsId=ct?ct.id:"";
+            var lastTs=getLastMsgTs(l);
+            return (<div key={i} onClick={function(){setSel(i);}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:C.rowBg,borderRadius:12,cursor:"pointer",border:"2px solid transparent",transition:"border-color 0.15s ease"}} onMouseEnter={function(e){e.currentTarget.style.borderColor=C.accent+"44";}} onMouseLeave={function(e){e.currentTarget.style.borderColor="transparent";}}>
               <span style={{fontSize:20}}>{l.co}</span>
-              <div style={{flex:1}}>
+              <div style={{flex:1,minWidth:0}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                  <span style={{fontFamily:mono,fontWeight:700,fontSize:16}}>{l.p}</span>
-                  <Bd color={eC[l.e]||C.muted}>{l.e}</Bd>
+                  <span style={{fontWeight:800,fontSize:15,color:C.text}}>{name||l.p}</span>
+                  {company && <span style={{fontSize:13,color:C.muted,fontWeight:600}}>{"\u00B7 "+company}</span>}
                   <Bd color={ql.c}>{ql.t}</Bd>
                   {l.au && <Bd color={C.red}>AUTO</Bd>}
                 </div>
-                <div style={{fontSize:12,color:C.muted,marginTop:3}}>
-                  {l.ms} msgs {"\u00B7"} {l.w.toLocaleString()} pal. {"\u00B7"} Tpls: <strong>{l.tr.join(", ")}</strong> {"\u00B7"} 1a resp: <strong style={{color:C.text}}>{l.fr||"N/A"}</strong>
+                <div style={{fontSize:12,color:C.muted,marginTop:3,display:"flex",flexWrap:"wrap",gap:4}}>
+                  {email && <span>{email} {"\u00B7"} </span>}
+                  {hsId && <span style={{color:C.accent,fontWeight:600}}>HS #{hsId} {"\u00B7"} </span>}
+                  {!name && !email && <span style={{fontFamily:mono,fontSize:12}}>{l.p} {"\u00B7"} </span>}
+                  {name && <span style={{fontFamily:mono,fontSize:12}}>{l.p} {"\u00B7"} </span>}
+                  <span>{l.ms} msgs {"\u00B7"} {l.w.toLocaleString()} pal.</span>
+                  {lastTs>0 && <span> {"\u00B7"} {timeAgo(lastTs)}</span>}
                 </div>
               </div>
               <div style={{color:C.accent,fontSize:18,fontWeight:700}}>{"\u2192"}</div>
@@ -342,7 +419,9 @@ export default function Dashboard(){
   const [loginError,setLoginError]=useState("");
   const [loginLoading,setLoginLoading]=useState(false);
 
-  const SECTIONS={outbound:{label:"Outbound",icon:"\uD83C\uDFAF",subTabs:["resumen","engagement","templates"]},inbound:{label:"Inbound",icon:"\uD83D\uDCE5",subTabs:["resumen","engagement"]},canales:{label:"Canales",icon:"\uD83D\uDCE1",subTabs:["grupos","email","crm"]},growth:{label:"Growth",icon:"\uD83D\uDCC8",subTabs:[]}};
+  var _brevoIcon=<svg width="18" height="18" viewBox="0 0 24 24" fill="#0B996E"><path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zM7.2 4.8h5.747c2.34 0 3.895 1.406 3.895 3.516 0 1.022-.348 1.862-1.09 2.588C17.189 11.812 18 13.22 18 14.785c0 2.86-2.64 5.016-6.164 5.016H7.199v-15zm2.085 1.952v5.537h.07c.233-.432.858-.796 2.249-1.226 2.039-.659 3.037-1.52 3.037-2.655 0-.998-.766-1.656-1.924-1.656H9.285zm4.87 5.266c-.766.385-1.67.748-2.76 1.11-1.229.387-2.11 1.386-2.11 2.407v2.315h2.365c2.387 0 4.149-1.34 4.149-3.155 0-1.067-.625-2.087-1.645-2.677z"/></svg>;
+  var _hubspotIcon=<svg width="18" height="18" viewBox="0 0 24 24" fill="#FF7A59"><path d="M18.164 7.93V5.084a2.198 2.198 0 001.267-1.978v-.067A2.2 2.2 0 0017.238.845h-.067a2.2 2.2 0 00-2.193 2.193v.067a2.196 2.196 0 001.252 1.973l.013.006v2.852a6.22 6.22 0 00-2.969 1.31l.012-.01-7.828-6.095A2.497 2.497 0 104.3 4.656l-.012.006 7.697 5.991a6.176 6.176 0 00-1.038 3.446c0 1.343.425 2.588 1.147 3.607l-.013-.02-2.342 2.343a1.968 1.968 0 00-.58-.095h-.002a2.033 2.033 0 102.033 2.033 1.978 1.978 0 00-.1-.595l.005.014 2.317-2.317a6.247 6.247 0 104.782-11.134l-.036-.005zm-.964 9.378a3.206 3.206 0 113.215-3.207v.002a3.206 3.206 0 01-3.207 3.207z"/></svg>;
+  const SECTIONS={outbound:{label:"Outbound",icon:"\uD83C\uDFAF",subTabs:["resumen","engagement","templates"]},inbound:{label:"Inbound",icon:"\uD83D\uDCE5",subTabs:["resumen","engagement"]},canales:{label:"Canales",icon:"\uD83D\uDCE1",subTabs:["grupos"]},hubspot:{label:"HubSpot",icon:_hubspotIcon,subTabs:[]},brevo:{label:"Brevo",icon:_brevoIcon,subTabs:[]},growth:{label:"Marketing",icon:"\uD83D\uDCC8",subTabs:[]}};
   const [section,setSection]=useState("outbound");
   const [subTab,setSubTab]=useState("resumen");
   const [searchOpen,setSearchOpen]=useState(false);
@@ -350,15 +429,17 @@ export default function Dashboard(){
   const [showM,setShowM]=useState(false);
   const [showA,setShowA]=useState(false);
   const [showConfirmed,setShowConfirmed]=useState(false);
+  const [qualModalLeads,setQualModalLeads]=useState(null);
+  const [qualModalTitle,setQualModalTitle]=useState("");
   const [confirmedLeads,setConfirmedLeads]=useState([]);
   const [dbLoading,setDbLoading]=useState(true);
   const [loadError,setLoadError]=useState(null);
-  const [stepFilter,setStepFilter]=useState(null);
   const [inboundLoading,setInboundLoading]=useState(false);
   const [inboundRawRows,setInboundRawRows]=useState(null);
   const [lifecyclePhonesData,setLifecyclePhonesData]=useState(null);
 
   const [meetings,setMeetings]=useState([]);
+  const [totalContactadosByQual,setTotalContactadosByQual]=useState({});
   const [topicsAll,setTopicsAll]=useState([]);
   const [dataD,setDataD]=useState(EMPTY_D);
   const [funnelAll,setFunnelAll]=useState([]);
@@ -378,12 +459,14 @@ export default function Dashboard(){
   const [searchSel,setSearchSel]=useState(null);
   const [searchThreadData,setSearchThreadData]=useState(null);
   const [rawRows,setRawRows]=useState(null);
-  const [dateFrom,setDateFrom]=useState("");
-  const [dateTo,setDateTo]=useState("");
+  const [dateFrom,setDateFrom]=useState(getFirstOfMonth());
+  const [dateTo,setDateTo]=useState(new Date().toISOString().slice(0,10));
   const [templateConfig,setTemplateConfig]=useState({});
   const [configLoaded,setConfigLoaded]=useState(false);
   const [allTemplateNames,setAllTemplateNames]=useState([]);
+  const [templateLastSent,setTemplateLastSent]=useState({});
   const [inboundExtra,setInboundExtra]=useState(null);
+  const [inboundHsPhones,setInboundHsPhones]=useState(null);
   const [topicModal,setTopicModal]=useState(null);
   const [regionFilter,setRegionFilter]=useState("all");
   const [abSelectMode,setAbSelectMode]=useState(false);
@@ -446,10 +529,10 @@ export default function Dashboard(){
     if(section==="canales"&&subTab==="grupos"&&gruposCampaigns.length===0&&!gruposLoading&&!gruposError){initGrupos();}
   },[section,subTab]);
 
-  // Auto-init Email when selected for the first time
+  // Auto-init Brevo (Email) when selected for the first time
   useEffect(function(){
-    if(section==="canales"&&subTab==="email"&&!emailInited&&!emailLoading&&!emailError){initEmail();}
-  },[section,subTab]);
+    if(section==="brevo"&&!emailInited&&!emailLoading&&!emailError){initEmail();}
+  },[section]);
 
   // Auto-init Growth when selected for the first time
   useEffect(function(){
@@ -509,9 +592,11 @@ export default function Dashboard(){
     var hi={totalContactados:result.totalContactados,leadsPerDay:result.leadsPerDay,dateRange:result.dateRange,autoReplyCount:result.autoReplyCount,realesCount:result.realesCount,esRate:result.esRate,esResp:result.esResp,esRespReal:result.esRespReal,esTotal:result.esTotal,ptRate:result.ptRate,ptResp:result.ptResp,ptRespReal:result.ptRespReal,ptTotal:result.ptTotal,esRateReal:result.esRateReal,ptRateReal:result.ptRateReal};
     setMeetings(result.MEETINGS);setTopicsAll(result.topicsAll);setDataD(result.D);setFunnelAll(result.funnelAll);setFunnelReal(result.funnelReal);setChBench(result.chBench);setDaily(result.daily);setBTable(result.bTable);setMeetByTplAll(result.meetByTplAll);setMeetByTplReal(result.meetByTplReal);setHeaderInfo(hi);
     if(result.allContactedPhones) setAllContactedPhones(result.allContactedPhones);
+    if(result.totalContactadosByQual) setTotalContactadosByQual(result.totalContactadosByQual);
     if(result.allTemplateNames) setAllTemplateNames(result.allTemplateNames);
+    if(result.templateLastSent) setTemplateLastSent(result.templateLastSent);
     if(result.depthCounts){
-      setInboundExtra({depthCounts:result.depthCounts,multiDayCount:result.multiDayCount,outcomeCount:result.outcomeCount,topicOutcomes:result.topicOutcomes,topicDepth:result.topicDepth,avgDepth:result.avgDepth,engagedTotal:result.engagedTotal,uniqueLeadCount:result.uniqueLeadCount,signupCount:result.signupCount,signupLinkCount:result.signupLinkCount});
+      setInboundExtra({depthCounts:result.depthCounts,multiDayCount:result.multiDayCount,outcomeCount:result.outcomeCount,topicOutcomes:result.topicOutcomes,topicDepth:result.topicDepth,avgDepth:result.avgDepth,engagedTotal:result.engagedTotal,uniqueLeadCount:result.uniqueLeadCount,signupCount:result.signupCount,signupLinkCount:result.signupLinkCount,hubspotMatchCount:result.hubspotMatchCount});
     }else{
       setInboundExtra(null);
     }
@@ -540,11 +625,12 @@ export default function Dashboard(){
       setLoadError(null);
       try{
         var since=getFirstOfMonth();
-        var [threads,stats]=await Promise.all([fetchThreads(stepFilter,since),fetchResponseStats(since)]);
+        var [threads,stats]=await Promise.all([fetchThreads(null,since),fetchResponseStats(since)]);
         setResponseStats(stats);
         var csvRows=expandThreadMessages(threads);
         setRawRows(csvRows);
-        var result=processCSVRows(csvRows,templateConfig,regionFilter);
+        var filtered=filterRowsByDate(csvRows,since,new Date().toISOString().slice(0,10));
+        var result=processCSVRows(filtered,templateConfig,regionFilter);
         applyResult(result);
         // Auto-init templateConfig on first load if empty
         if(Object.keys(templateConfig).length===0&&result.tplStepInfo&&result.allTemplateNames){
@@ -572,7 +658,7 @@ export default function Dashboard(){
       setDbLoading(false);
     }
     loadThreads();
-  },[stepFilter,configLoaded]);
+  },[configLoaded]);
 
   // Reprocess when templateConfig changes (only if rawRows already loaded)
   const templateConfigRef=useRef(templateConfig);
@@ -732,7 +818,7 @@ export default function Dashboard(){
     setGruposLoading(true);setGruposError(null);setGruposCrossRef(null);
     try{
       var fromApi=from?formatDateForApi(from):undefined;
-      var toApi=to?formatDateForApi(to):undefined;
+      var toApi=to?formatEndDateForApi(to):undefined;
       // Single call — each lead already has entry_date, departure_date, status
       var leadsData=await fetchCampaignLeads(campaignId,fromApi,toApi,"entry");
       var allLeads=(leadsData.data&&leadsData.data.leads)||leadsData.leads||[];
@@ -772,7 +858,7 @@ export default function Dashboard(){
     try{
       // 1. Get phones from MeuGrupoVip entry leads
       var fromApi=from?formatDateForApi(from):undefined;
-      var toApi=to?formatDateForApi(to):undefined;
+      var toApi=to?formatEndDateForApi(to):undefined;
       var entryData=await fetchCampaignLeads(campaignId,fromApi,toApi,"entry");
       var entryLeads=(entryData.data&&entryData.data.leads)||entryData.leads||[];
       if(!Array.isArray(entryLeads))entryLeads=[];
@@ -816,20 +902,14 @@ export default function Dashboard(){
     setCrmLoading(true);setCrmError(null);
     try{
       console.log("[CRM] Fetching HubSpot since",CRM_SINCE,"...");
-      // Sequential calls to avoid HubSpot rate limits
-      var meetingsRes=await fetchMeetingsSince(CRM_SINCE);
-      console.log("[CRM] Meetings:",meetingsRes.length);
-      var dealsRes=await fetchDealsSince(CRM_SINCE);
-      console.log("[CRM] Deals:",dealsRes.length);
-      var leadProps=await debugLeadProperties();
-      console.log("[CRM] Lead properties:",leadProps);
-      var leadsRes=[];
-      try{
-        leadsRes=await fetchLeadsSince(CRM_SINCE,"808581652");
-        console.log("[CRM] Leads (pipeline 808581652):",leadsRes.length);
-      }catch(e){console.warn("[CRM] Leads fetch failed:",e.message);}
-      var pipelines=await fetchDealPipelines();
-      console.log("[CRM] Pipelines loaded");
+      // Parallel fetch of independent resources
+      var [meetingsRes,dealsRes,leadsRes,pipelines]=await Promise.all([
+        fetchMeetingsSince(CRM_SINCE),
+        fetchDealsSince(CRM_SINCE),
+        fetchLeadsSince(CRM_SINCE,"808581652").catch(function(e){console.warn("[CRM] Leads fetch failed:",e.message);return [];}),
+        fetchDealPipelines()
+      ]);
+      console.log("[CRM] Parallel fetch done. Meetings:",meetingsRes.length,"Deals:",dealsRes.length,"Leads:",leadsRes.length);
       // Collect unique contact IDs from meeting associations and batch-fetch only those
       var contactIdSet={};
       for(var i=0;i<meetingsRes.length;i++){
@@ -851,8 +931,8 @@ export default function Dashboard(){
   async function loadCrmCrossReference(){
     setCrmCrossLoading(true);setCrmError(null);
     try{
-      // 1. HubSpot phones — fetch ALL contacts for full cross-reference
-      var allCrmContacts=await fetchAllContacts();
+      // 1. HubSpot phones — fetch only contacts with phone for cross-reference
+      var allCrmContacts=await fetchAllContactsWithPhone();
       var hsPhones=extractHubSpotPhones(allCrmContacts);
 
       // 2. MeuGrupoVip phones — reuse gruposEntryLeads if available
@@ -988,8 +1068,14 @@ export default function Dashboard(){
       var currentDay=now.getFullYear()===year&&now.getMonth()===mo?now.getDate():lastDay.getDate();
       var totalDays=lastDay.getDate();
 
-      // Fetch goals from Supabase
-      var goalsResult=await supabase.from("growth_goals").select("*").eq("month",selMonth);
+      // Fetch goals + leads in parallel (independent calls)
+      console.log("[Growth] Fetching goals + leads since",firstDay.toISOString());
+      var parallelResults=await Promise.all([
+        supabase.from("growth_goals").select("*").eq("month",selMonth),
+        fetchGrowthLeads(firstDay.toISOString(),"808581652")
+      ]);
+      var goalsResult=parallelResults[0];
+      var leads=parallelResults[1];
       var goalsRows=goalsResult.data||[];
       var goals={latam:{signups:0,pqls:0},brasil:{signups:0,pqls:0}};
       for(var gi=0;gi<goalsRows.length;gi++){
@@ -998,10 +1084,6 @@ export default function Dashboard(){
         if(gr.region==="brasil"){goals.brasil.signups=Number(gr.signups_goal);goals.brasil.pqls=Number(gr.pqls_goal);}
       }
       setGrowthGoals(goals);
-
-      // Fetch leads from HubSpot (0-136 object, pipeline 56997428)
-      console.log("[Growth] Fetching leads since",firstDay.toISOString());
-      var leads=await fetchGrowthLeads(firstDay.toISOString(),"808581652");
 
       // Filter to selected month only (leads already filtered by date, but double-check month boundary)
       var monthEnd=new Date(year,mo+1,0,23,59,59,999);
@@ -1105,18 +1187,20 @@ export default function Dashboard(){
     setMode(0);
     if(inboundRawRows){
       var filtered=filterRowsByDate(inboundRawRows,dateFrom,dateTo);
-      var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData);
+      var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData,inboundHsPhones);
       applyResult(result);
     }else{
       setInboundLoading(true);
-      var spPromise=fetchLifecyclePhones().catch(function(e){console.warn("Lifecycle phones query failed:",e);return {};});
-      Promise.all([fetchInboundThreads(getFirstOfMonth()),spPromise]).then(function(res){
-        var threads=res[0];var sp=res[1];
+      var hsPromise=fetchAllContactsWithPhone().then(function(c){return extractHubSpotPhones(c);}).catch(function(e){console.warn("HubSpot phones fetch failed:",e);return null;});
+      Promise.all([fetchInboundData(getFirstOfMonth()),hsPromise]).then(function(all){
+        var res=all[0];var hsPhones=all[1];
+        var threads=res.threads;var sp=res.lifecyclePhones;
         var csvRows=expandInboundThreadMessages(threads);
         setInboundRawRows(csvRows);
         setLifecyclePhonesData(sp);
+        if(hsPhones)setInboundHsPhones(hsPhones);
         var filtered=filterRowsByDate(csvRows,dateFrom,dateTo);
-        var result=processInboundRows(filtered,regionFilter,sp);
+        var result=processInboundRows(filtered,regionFilter,sp,hsPhones);
         applyResult(result);
         setInboundLoading(false);
       }).catch(function(e){
@@ -1143,7 +1227,7 @@ export default function Dashboard(){
     if(section==="inbound"){
       if(!inboundRawRows) return;
       var filtered=filterRowsByDate(inboundRawRows,from,to);
-      var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData);
+      var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData,inboundHsPhones);
       applyResult(result);
     }else{
       if(!rawRows) return;
@@ -1156,12 +1240,13 @@ export default function Dashboard(){
   function onDateFromChange(e){var v=e.target.value;setDateFrom(v);applyDateFilter(v,dateTo);}
   function onDateToChange(e){var v=e.target.value;setDateTo(v);applyDateFilter(dateFrom,v);}
   function clearDateFilter(){setDateFrom("");setDateTo("");applyDateFilter("","");}
-  function onRegionChange(e){var v=e.target.value;setRegionFilter(v);if(section==="inbound"&&inboundRawRows){var filtered=filterRowsByDate(inboundRawRows,dateFrom,dateTo);var result=processInboundRows(filtered,v,lifecyclePhonesData);applyResult(result);}else if(section==="outbound"&&rawRows){var filtered2=filterRowsByDate(rawRows,dateFrom,dateTo);var result2=processCSVRows(filtered2,templateConfig,v);applyResult(result2);}}
+  function onRegionChange(e){var v=e.target.value;setRegionFilter(v);if(section==="inbound"&&inboundRawRows){var filtered=filterRowsByDate(inboundRawRows,dateFrom,dateTo);var result=processInboundRows(filtered,v,lifecyclePhonesData,inboundHsPhones);applyResult(result);}else if(section==="outbound"&&rawRows){var filtered2=filterRowsByDate(rawRows,dateFrom,dateTo);var result2=processCSVRows(filtered2,templateConfig,v);applyResult(result2);}}
 
   var mk=mode===0?"all":"real";var d=dataD[mk];var funnel=mode===0?funnelAll:funnelReal;var mbt=mode===0?meetByTplAll:meetByTplReal;
-  var tc=(section==="outbound"&&responseStats&&responseStats.outboundTotal)?responseStats.outboundTotal:headerInfo.totalContactados;
+  var _jsFiltTc=headerInfo.esTotal+headerInfo.ptTotal;
+  var tc=(section==="outbound"&&regionFilter==="all"&&responseStats&&responseStats.outboundTotal)?responseStats.outboundTotal:_jsFiltTc;
   var lpd=headerInfo.leadsPerDay;
-  var _jsTc=headerInfo.totalContactados;var _tplScale=(tc>0&&_jsTc>0&&tc>_jsTc)?tc/_jsTc:1;
+  var _jsTc=_jsFiltTc;var _tplScale=(tc>0&&_jsTc>0&&tc>_jsTc)?tc/_jsTc:1;
   function _cS(s){return _tplScale!==1?Math.round(s*_tplScale):s;}
   function _cR(r,s){var cs=_cS(s);return cs>0?((r/cs)*100).toFixed(1)+"%":"0%";}
 
@@ -1180,7 +1265,7 @@ export default function Dashboard(){
       <div style={{width:48,height:48,borderRadius:"50%",background:C.lRed,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}><span style={{fontSize:24,color:C.red}}>!</span></div>
       <div style={{fontSize:18,fontWeight:700,color:C.text,marginBottom:6}}>Error al cargar datos</div>
       <div style={{fontSize:14,color:C.muted,lineHeight:1.6,marginBottom:16}}>{loadError}</div>
-      <button onClick={function(){setLoadError(null);setDbLoading(true);fetchThreads(stepFilter,getFirstOfMonth()).then(function(threads){var csvRows=expandThreadMessages(threads);setRawRows(csvRows);var result=processCSVRows(csvRows,templateConfig,regionFilter);applyResult(result);setDbLoading(false);}).catch(function(e){setLoadError(e.message||"Error");setDbLoading(false);});}} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font}}>Reintentar</button>
+      <button onClick={function(){setLoadError(null);setDbLoading(true);fetchThreads(null,getFirstOfMonth()).then(function(threads){var csvRows=expandThreadMessages(threads);setRawRows(csvRows);var filtered=filterRowsByDate(csvRows,dateFrom,dateTo);var result=processCSVRows(filtered,templateConfig,regionFilter);applyResult(result);setDbLoading(false);}).catch(function(e){setLoadError(e.message||"Error");setDbLoading(false);});}} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font}}>Reintentar</button>
     </div>
   </div>);
 
@@ -1191,18 +1276,12 @@ export default function Dashboard(){
         {[{l:"Todas",c:C.accent},{l:"Reales",c:C.green}].map(function(o,i){var a=mode===i;return <button key={i} onClick={function(){setMode(i);}} style={{background:a?o.c:"transparent",color:a?"#fff":C.muted,border:"none",borderRadius:8,padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>{o.l}</button>;})}
       </div>
       <div style={{width:1,height:24,background:C.border}}/>
-      <select value={stepFilter||""} onChange={function(ev){var v=ev.target.value;setStepFilter(v||null);setDateFrom("");setDateTo("");}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
-        <option value="">Todos los steps</option>
-        <option value="1">Step 1 (D+0)</option>
-        <option value="2">Step 2 (D+1)</option>
-        <option value="3">Step 3 (D+3)</option>
-        <option value="4">Step 4 (D+5)</option>
-      </select>
       <select value={regionFilter} onChange={onRegionChange} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
         <option value="all">LATAM + BR</option>
         <option value="es">LATAM (ES)</option>
         <option value="pt">Brasil (PT)</option>
       </select>
+      <div style={{width:1,height:24,background:C.border}}/>
       <div style={{display:"flex",alignItems:"center",gap:6}}>
         <span style={{fontSize:12,color:C.muted}}>De</span>
         <input type="date" value={dateFrom} onChange={onDateFromChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
@@ -1211,8 +1290,7 @@ export default function Dashboard(){
         <span style={{fontSize:12,color:C.muted}}>Hasta</span>
         <input type="date" value={dateTo} onChange={onDateToChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
       </div>
-      {(dateFrom||dateTo) && <button onClick={clearDateFilter} style={{background:C.lRed,color:C.red,border:"1px solid "+C.redBorder,borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Limpiar</button>}
-      {(dateFrom||dateTo) && <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6}}>{tc} leads en per\u00EDodo</span>}
+      <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6}}>{tc} leads</span>
     </div>);
     if(section==="inbound") return (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
       <select value={regionFilter} onChange={onRegionChange} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
@@ -1220,6 +1298,7 @@ export default function Dashboard(){
         <option value="es">LATAM (ES)</option>
         <option value="pt">Brasil (PT)</option>
       </select>
+      <div style={{width:1,height:24,background:C.border}}/>
       <div style={{display:"flex",alignItems:"center",gap:6}}>
         <span style={{fontSize:12,color:C.muted}}>De</span>
         <input type="date" value={dateFrom} onChange={onDateFromChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
@@ -1228,21 +1307,21 @@ export default function Dashboard(){
         <span style={{fontSize:12,color:C.muted}}>Hasta</span>
         <input type="date" value={dateTo} onChange={onDateToChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
       </div>
-      {(dateFrom||dateTo) && <button onClick={clearDateFilter} style={{background:C.lRed,color:C.red,border:"1px solid "+C.redBorder,borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Limpiar</button>}
-      {(dateFrom||dateTo) && <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6}}>{tc} leads en per\u00EDodo</span>}
+      <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6}}>{tc} leads</span>
     </div>);
     return null;
   }
 
   var _curSec=SECTIONS[section]||{};
   var _subTabs=_curSec.subTabs||[];
-  var _subTabLabels={resumen:"Resumen",engagement:"Engagement",templates:"Templates",grupos:"Grupos",email:"Email",crm:"CRM"};
+  var _subTabLabels={resumen:"Resumen",engagement:"Engagement",templates:"Templates",grupos:"Grupos"};
 
   return (<div style={{display:"flex",background:C.bg,minHeight:"100vh",color:C.text,fontFamily:font,fontSize:15}}>
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
-    {showM && <MeetModal leads={meetings.filter(function(l){return l.ml;})} mode={mode} onClose={function(){setShowM(false);}} title={"\u{1F4C5} Leads con Oferta de Reuni\u00F3n"}/>}
-    {showA && <MeetModal leads={meetings} mode={mode} onClose={function(){setShowA(false);}} title={"\u{1F4AC} Todas las Conversaciones"}/>}
-    {showConfirmed && <MeetModal leads={confirmedLeads} mode={mode} onClose={function(){setShowConfirmed(false);}} title={"\u2705 Reuniones Confirmadas (Cruce HubSpot)"}/>}
+    {showM && <MeetModal leads={meetings.filter(function(l){return l.ml;})} mode={mode} onClose={function(){setShowM(false);}} title={"\u{1F4C5} Leads con Oferta de Reuni\u00F3n"} crmContacts={crmContacts}/>}
+    {showA && <MeetModal leads={meetings} mode={mode} onClose={function(){setShowA(false);}} title={"\u{1F4AC} Todas las Conversaciones"} crmContacts={crmContacts}/>}
+    {showConfirmed && <MeetModal leads={confirmedLeads} mode={mode} onClose={function(){setShowConfirmed(false);}} title={"\u2705 Reuniones Confirmadas (Cruce HubSpot)"} crmContacts={crmContacts}/>}
+    {qualModalLeads && <MeetModal leads={qualModalLeads} mode={mode} onClose={function(){setQualModalLeads(null);}} title={qualModalTitle} crmContacts={crmContacts}/>}
     {selTpl && <TplModal tpl={selTpl} leads={meetings} mode={mode} onClose={function(){setSelTpl(null);}}/>}
     {topicModal && (function(){
       var tkw=TOPIC_KEYWORDS[topicModal];
@@ -1254,7 +1333,7 @@ export default function Dashboard(){
         for(var ki=0;ki<tkw.kw.length;ki++){if(lower.includes(tkw.kw[ki]))return true;}
         return false;
       });
-      return <MeetModal leads={filtered} mode={mode} onClose={function(){setTopicModal(null);}} title={(tkw?tkw.e+" ":"")+"T\u00F3pico: "+topicModal+" ("+filtered.length+" leads)"}/>;
+      return <MeetModal leads={filtered} mode={mode} onClose={function(){setTopicModal(null);}} title={(tkw?tkw.e+" ":"")+"T\u00F3pico: "+topicModal+" ("+filtered.length+" leads)"} crmContacts={crmContacts}/>;
     })()}
 
     {/* Search Modal */}
@@ -1314,10 +1393,12 @@ export default function Dashboard(){
     {/* Sidebar */}
     <nav style={{width:56,minHeight:"100vh",background:C.card,borderRight:"1px solid "+C.border,display:"flex",flexDirection:"column",alignItems:"center",position:"sticky",top:0,height:"100vh",flexShrink:0,paddingTop:12,gap:4,zIndex:10}}>
       <div style={{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg, #2563EB, #7C3AED)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:900,fontSize:16,marginBottom:12,flexShrink:0}}>Y</div>
-      {_secKeys.map(function(sk){var s=SECTIONS[sk];var a=section===sk;return <button key={sk} onClick={function(){navigateTo(sk);}} title={s.label} style={{width:40,height:40,borderRadius:10,border:"none",background:a?(C.accent+"18"):"transparent",color:a?C.accent:C.muted,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",transition:"all 0.15s ease"}}>{a&&<div style={{position:"absolute",left:0,top:8,bottom:8,width:3,borderRadius:"0 3px 3px 0",background:C.accent}}/>}{s.icon}</button>;})}
+      {["outbound","inbound","canales","growth"].map(function(sk){var s=SECTIONS[sk];var a=section===sk;return <SideBtn key={sk} label={s.label} onClick={function(){navigateTo(sk);}} active={a}>{a&&<div style={{position:"absolute",left:0,top:8,bottom:8,width:3,borderRadius:"0 3px 3px 0",background:C.accent}}/>}{s.icon}</SideBtn>;})}
+      <div style={{width:28,height:1,background:C.border,margin:"6px 0",flexShrink:0}}/>
+      {["hubspot","brevo"].map(function(sk){var s=SECTIONS[sk];var a=section===sk;return <SideBtn key={sk} label={s.label} onClick={function(){navigateTo(sk);}} active={a}>{a&&<div style={{position:"absolute",left:0,top:8,bottom:8,width:3,borderRadius:"0 3px 3px 0",background:C.accent}}/>}{s.icon}</SideBtn>;})}
       <div style={{flex:1}}/>
-      <button onClick={function(){setSearchOpen(true);}} title="Buscar" style={{width:40,height:40,borderRadius:10,border:"none",background:"transparent",color:C.muted,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>{"\uD83D\uDD0D"}</button>
-      <button onClick={function(){var next=!darkMode;setDarkMode(next);try{localStorage.setItem("yago_dark",next?"1":"0");}catch(e){}}} title={darkMode?"Modo claro":"Modo oscuro"} style={{width:40,height:40,borderRadius:10,border:"none",background:"transparent",color:C.muted,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:8}}>{darkMode?"\u2600\uFE0F":"\uD83C\uDF19"}</button>
+      <SideBtn label="Buscar" onClick={function(){setSearchOpen(true);}}>{"\uD83D\uDD0D"}</SideBtn>
+      <SideBtn label={darkMode?"Modo claro":"Modo oscuro"} onClick={function(){var next=!darkMode;setDarkMode(next);try{localStorage.setItem("yago_dark",next?"1":"0");}catch(e){}}} style={{marginBottom:8}}>{darkMode?"\u2600\uFE0F":"\uD83C\uDF19"}</SideBtn>
     </nav>
 
     {/* Content Area */}
@@ -1344,11 +1425,13 @@ export default function Dashboard(){
 
       {section==="outbound"&&subTab==="resumen" && (function(){var cd=null; return (<>
           {/* Outbound: 4 KPI funnel cards */}
+          <div style={{fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700,marginBottom:10,paddingBottom:8,borderBottom:"2px solid "+C.border+"66",display:"flex",alignItems:"center",gap:8}}>{"\u{1F4CA}"} GENERAL</div>
           {(function(){
-            var sqlTotal=responseStats?responseStats.outboundTotal:null;
-            var sqlResp=responseStats?responseStats.outboundResponded:null;
+            var sqlTotal=(regionFilter==="all"&&responseStats)?responseStats.outboundTotal:null;
+            var sqlResp=(regionFilter==="all"&&responseStats)?responseStats.outboundResponded:null;
+            var sqlRespReal=(regionFilter==="all"&&responseStats)?responseStats.outboundRespondedReal:null;
             var contactados=sqlTotal||tc;
-            var respCount=mode===1?d.resp:(sqlResp!=null?sqlResp:d.resp);
+            var respCount=mode===1?(sqlRespReal!=null?sqlRespReal:d.resp):(sqlResp!=null?sqlResp:d.resp);
             var respRate=contactados>0?((respCount/contactados)*100).toFixed(1):"0";
             var twoMsgCount=meetings.filter(function(m){return m.ms>=2&&(mode===0||!m.au);}).length;
             var twoMsgPct=respCount>0?((twoMsgCount/respCount)*100).toFixed(1):"0";
@@ -1457,6 +1540,95 @@ export default function Dashboard(){
           </div>
             );
           })()}
+          {/* Qualified KPI Cards: Alta + Media */}
+          {(function(){
+            function isQual(q){if(!q)return false;var lo=q.toLowerCase();return lo==="alta"||lo==="media"||lo==="m\u00E9dia";}
+            var qContactados=0;var qk=Object.keys(totalContactadosByQual);for(var qi=0;qi<qk.length;qi++){if(isQual(qk[qi]))qContactados+=totalContactadosByQual[qk[qi]];}
+            var qMeetings=meetings.filter(function(m){return isQual(m.q)&&(mode===0||!m.au);});
+            var qResp=qMeetings.length;
+            var qRespRate=qContactados>0?((qResp/qContactados)*100).toFixed(1):"0";
+            var qTwoMsg=qMeetings.filter(function(m){return m.ms>=2;}).length;
+            var qTwoMsgPct=qResp>0?((qTwoMsg/qResp)*100).toFixed(1):"0";
+            var qOferta=qMeetings.filter(function(m){return m.ml;}).length;
+            var qOfertaVsResp=qResp>0?((qOferta/qResp)*100).toFixed(1):"0";
+            var qOfertaVsTotal=qContactados>0?((qOferta/qContactados)*100).toFixed(1):"0";
+            var qPeriodPhones=null;
+            if(crmMeetings.length>0&&crmContacts.length>0){
+              var qFromD=dateFrom?new Date(dateFrom+"T00:00:00"):null;
+              var qToD=dateTo?new Date(dateTo+"T23:59:59"):null;
+              var qFiltM=crmMeetings;
+              if(qFromD||qToD){qFiltM=crmMeetings.filter(function(m){var st=m.properties&&m.properties.hs_meeting_start_time;if(!st)return false;var md=new Date(st);if(qFromD&&md<qFromD)return false;if(qToD&&md>qToD)return false;return true;});}
+              qPeriodPhones=getMeetingContactPhones(qFiltM,crmContacts);
+            }
+            var qActualMeet=0;var qConfirmedArr=[];
+            if(qPeriodPhones){
+              var qPhIdx={};var qMpK=Object.keys(qPeriodPhones);
+              for(var qpi=0;qpi<qMpK.length;qpi++){var qpd=qMpK[qpi];qPhIdx[qpd]=true;if(qpd.length>11)qPhIdx[qpd.slice(-11)]=true;if(qpd.length>10)qPhIdx[qpd.slice(-10)]=true;}
+              var qOfertaLeads=qMeetings.filter(function(l){return l.ml;});
+              for(var qai=0;qai<qOfertaLeads.length;qai++){
+                var qOlP=(qOfertaLeads[qai].p||"").replace(/\D/g,"");if(!qOlP)continue;
+                var qMatched=false;
+                if(qPhIdx[qOlP])qMatched=true;
+                else if(qOlP.length>11&&qPhIdx[qOlP.slice(-11)])qMatched=true;
+                else if(qOlP.length>10&&qPhIdx[qOlP.slice(-10)])qMatched=true;
+                if(qMatched){qActualMeet++;qConfirmedArr.push(qOfertaLeads[qai]);}
+              }
+            }
+            var qActualVsOferta=qOferta>0?((qActualMeet/qOferta)*100).toFixed(1):"0";
+            var qActualVsTotal=qContactados>0?((qActualMeet/qContactados)*100).toFixed(1):"0";
+            var qLpd=lpd>0&&tc>0?Math.round(qContactados/(tc/lpd)):0;
+            return (<>
+          <div style={{fontSize:13,color:C.green,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700,marginBottom:10,marginTop:6,paddingBottom:8,borderBottom:"2px solid "+C.green+"33",display:"flex",alignItems:"center",gap:8}}>{"\u2B50"} CALIFICADOS: ALTA + MEDIA</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:12,marginBottom:22}}>
+            <Cd onClick={function(){setQualModalLeads(qMeetings);setQualModalTitle("\u{1F4AC} Conversaciones Calificados (Alta + Media)");}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4E9}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4E9}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Contactados</span>
+              </div>
+              <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1}}>{qContactados}</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:4}}>{qLpd}/d{"\u00ED"}a</div>
+              <div style={{fontSize:11,color:C.accent,fontWeight:700,marginTop:6}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
+            </Cd>
+            <Cd onClick={function(){setQualModalLeads(qMeetings);setQualModalTitle("\u{1F4AC} Respuestas Calificados (Alta + Media)");}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4CA}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4CA}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Respuestas</span>
+              </div>
+              <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1}}>{qResp}</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:4}}>{qRespRate}% de los contactados</div>
+              <div style={{marginTop:6,fontSize:12,color:C.purple,fontWeight:600,borderTop:"1px solid "+C.border,paddingTop:6}}>{qTwoMsg} con 2+ msgs ({qTwoMsgPct}%)</div>
+              <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:4}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
+            </Cd>
+            <Cd onClick={function(){var ol=qMeetings.filter(function(l){return l.ml;});setQualModalLeads(ol);setQualModalTitle("\u{1F4C5} Oferta Reuni\u00F3n Calificados (Alta + Media)");}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4C5}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.pink+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4C5}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Oferta Reuni{"\u00F3"}n</span>
+              </div>
+              <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1}}>{qOferta}</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:4}}>{qOfertaVsResp}% de respuestas {"\u00B7"} {qOfertaVsTotal}% del total</div>
+              <div style={{fontSize:11,color:C.pink,fontWeight:700,marginTop:6}}>{"\u{1F4C5} Ver contactos \u2192"}</div>
+            </Cd>
+            <Cd onClick={function(){if(qConfirmedArr.length>0){setConfirmedLeads(qConfirmedArr);setShowConfirmed(true);}}} style={{position:"relative",cursor:qPeriodPhones&&qActualMeet>0?"pointer":"default",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u2705"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Reuni{"\u00F3"}n Confirmada</span>
+              </div>
+              {qPeriodPhones?(<>
+                <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.green}}>{qActualMeet}</div>
+                <div style={{fontSize:13,color:C.muted,marginTop:4}}>{qActualVsOferta}% de ofertas {"\u00B7"} {qActualVsTotal}% del total</div>
+                <div style={{fontSize:11,color:C.green,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{qActualMeet>0?"\u2705 Ver reuniones \u2192":"Cruce con HubSpot Meetings"}</div>
+              </>):(<>
+                <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:4}}>{crmLoading?"Cargando HubSpot...":"Esperando datos HubSpot"}</div>
+              </>)}
+            </Cd>
+          </div>
+            </>);
+          })()}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:22}}>
             <Cd><Sec tipKey="funnel">Embudo de Conversi&oacute;n</Sec>
               {(function(){
@@ -1471,7 +1643,7 @@ export default function Dashboard(){
                   var fOferta=meetings.filter(function(l){return l.ml;});
                   for(var mi2=0;mi2<fOferta.length;mi2++){var fp=(fOferta[mi2].p||"").replace(/\D/g,"");if(fp&&fMeetPhones[fp])actualMC++;}
                 }
-                var funnelRespCount=mode===1?d.resp:(responseStats&&responseStats.outboundResponded!=null?responseStats.outboundResponded:d.resp);
+                var funnelRespCount=mode===1?(regionFilter==="all"&&responseStats&&responseStats.outboundRespondedReal!=null?responseStats.outboundRespondedReal:d.resp):(regionFilter==="all"&&responseStats&&responseStats.outboundResponded!=null?responseStats.outboundResponded:d.resp);
                 var correctedFunnel=funnel.map(function(f,i){if(i===0&&tc>0)return{n:f.n,v:tc,c:f.c};if(i===1)return{n:f.n,v:funnelRespCount,c:f.c};return f;});
                 var funnelFull=correctedFunnel.concat([{n:"Reuni\u00F3n Confirmada",v:actualMC,c:C.green}]);
                 return funnelFull.map(function(f,i){var w=Math.max((f.v/(tc||1))*100,4);var prev=i>0?((f.v/(funnelFull[i-1].v||1))*100).toFixed(0):null;
@@ -1479,7 +1651,7 @@ export default function Dashboard(){
               })()}
             </Cd>
             <Cd><Sec tipKey="yagoVsMercado">Yago vs Mercado</Sec>
-              {chBench.map(function(b,i){return (<div key={i} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:b.y?C.text:C.muted,fontWeight:b.y?700:400}}>{b.ch}</span><span style={{fontSize:15,fontWeight:800,color:b.y?C.accent:C.muted,fontFamily:mono}}>{b.r}%</span></div><div style={{height:8,background:C.rowAlt,borderRadius:4}}><div style={{height:"100%",width:(b.r/45)*100+"%",background:b.y?C.accent:C.muted,borderRadius:4,opacity:b.y?0.8:0.3}}/></div></div>);})}
+              {(function(){var _cResp=(regionFilter==="all"&&responseStats&&responseStats.outboundResponded!=null)?responseStats.outboundResponded:d.resp;var _cRespReal=(regionFilter==="all"&&responseStats&&responseStats.outboundRespondedReal!=null)?responseStats.outboundRespondedReal:d.resp;var _cRateTodas=tc>0?parseFloat(((_cResp/tc)*100).toFixed(1)):0;var _cRateReales=tc>0?parseFloat(((_cRespReal/tc)*100).toFixed(1)):0;var _corrBench=chBench.map(function(b){if(b.ch==="Yago (todas)")return{ch:b.ch,r:_cRateTodas,y:b.y};if(b.ch==="Yago (reales)")return{ch:b.ch,r:_cRateReales,y:b.y};return b;});return _corrBench.map(function(b,i){return (<div key={i} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:b.y?C.text:C.muted,fontWeight:b.y?700:400}}>{b.ch}</span><span style={{fontSize:15,fontWeight:800,color:b.y?C.accent:C.muted,fontFamily:mono}}>{b.r}%</span></div><div style={{height:8,background:C.rowAlt,borderRadius:4}}><div style={{height:"100%",width:(b.r/45)*100+"%",background:b.y?C.accent:C.muted,borderRadius:4,opacity:b.y?0.8:0.3}}/></div></div>);});})()}
             </Cd>
           </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
@@ -1493,7 +1665,7 @@ export default function Dashboard(){
         </Cd>
       </>);})()}
 
-      {section==="inbound"&&subTab==="resumen" && (function(){var ix=inboundExtra;var inbTc=(responseStats&&responseStats.inbound)?responseStats.inbound:(ix?ix.uniqueLeadCount:0); return (<>
+      {section==="inbound"&&subTab==="resumen" && (function(){var ix=inboundExtra;var inbTc=(regionFilter==="all"&&responseStats&&responseStats.inbound)?responseStats.inbound:(ix?ix.uniqueLeadCount:0); return (<>
         {ix ? (<>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))",gap:14,marginBottom:22}}>
             <Cd onClick={function(){setShowA(true);}} style={{cursor:"pointer",border:"2px solid "+C.purple+"44",position:"relative",overflow:"hidden"}}>
@@ -1501,6 +1673,7 @@ export default function Dashboard(){
               <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4AC}"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Leads Inbound</span><InfoTip dark={_isDark} data={TIPS.contactados}/></div>
               <div style={{fontSize:36,fontWeight:900,fontFamily:mono,marginTop:6,lineHeight:1}}>{inbTc}</div>
               <div style={{fontSize:13,color:C.muted,marginTop:4}}>{lpd}/d{"\u00ED"}a {"\u00B7"} {tc} conversaciones</div>
+              {ix.hubspotMatchCount!=null && <div style={{fontSize:12,fontWeight:600,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6,color:C.orange}}>{ix.hubspotMatchCount} en HubSpot ({inbTc>0?((ix.hubspotMatchCount/inbTc)*100).toFixed(1):"0"}%)</div>}
               <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:6}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
             </Cd>
             <Cd style={{position:"relative",overflow:"hidden"}}>
@@ -1561,12 +1734,14 @@ export default function Dashboard(){
           ];
           var depthLabels={profunda:"Profunda (10+)",media:"Media (5-9)",corta:"Corta (2-4)",rebote:"Rebote (1 msg)"};
           /* Conversion step helpers */
-          var stLeads=(responseStats&&responseStats.inbound)?responseStats.inbound:ix.uniqueLeadCount;
+          var stLeads=(regionFilter==="all"&&responseStats&&responseStats.inbound)?responseStats.inbound:ix.uniqueLeadCount;
           var stEngaged=ix.engagedTotal;
           var stLink=ix.signupLinkCount;
           var stStep1=ix.signupCount;
+          var stHubspot=ix.hubspotMatchCount||0;
           var convSteps=[
             {n:"Leads Inbound",v:stLeads,c:C.accent,ic:"\u{1F4F2}"},
+            {n:"En HubSpot",v:stHubspot,c:C.orange,ic:"\u{1F50D}"},
             {n:"Engajaron (2+ msgs)",v:stEngaged,c:C.purple,ic:"\u{1F4AC}"},
             {n:"Recibieron Link Cuenta",v:stLink,c:C.cyan,ic:"\u{1F517}"},
             {n:"Recibieron Step 1",v:stStep1,c:C.green,ic:"\u{1F4E9}"}
@@ -1708,9 +1883,10 @@ export default function Dashboard(){
       })()}
 
       {section==="outbound"&&subTab==="engagement" && (function(){
-        var _sqlR=responseStats?responseStats.outboundResponded:null;
+        var _sqlR=(regionFilter==="all"&&responseStats)?responseStats.outboundResponded:null;
+        var _sqlRReal=(regionFilter==="all"&&responseStats)?responseStats.outboundRespondedReal:null;
         var totalResp=(_sqlR!=null)?_sqlR:(headerInfo.realesCount+headerInfo.autoReplyCount);
-        var corrRespCount=mode===1?d.resp:totalResp;
+        var corrRespCount=mode===1?(_sqlRReal!=null?_sqlRReal:d.resp):totalResp;
         var corrRate=tc>0?((corrRespCount/tc)*100).toFixed(1)+"%":"0%";
         var autoP=totalResp>0?((headerInfo.autoReplyCount/totalResp)*100).toFixed(1):"0";
         var realP=totalResp>0?((headerInfo.realesCount/totalResp)*100).toFixed(1):"0";
@@ -2100,7 +2276,7 @@ export default function Dashboard(){
         </>)}
       </>)}
 
-      {section==="canales"&&subTab==="crm" && (function(){
+      {section==="hubspot" && (function(){
         // Build pipeline stage map
         var stageMap={};
         if(crmPipelines&&crmPipelines.results){
@@ -2376,7 +2552,7 @@ export default function Dashboard(){
         </>);
       })()}
 
-      {section==="canales"&&subTab==="email" && (function(){
+      {section==="brevo" && (function(){
         var ed=emailData||{};
         var mt=ed.total&&ed.total.metrics||{};
         var m4=ed.wf4&&ed.wf4.metrics||{};
@@ -2817,7 +2993,7 @@ export default function Dashboard(){
             {allTemplateNames.length===0 && <div style={{textAlign:"center",padding:30,color:C.muted,fontSize:14}}>No hay templates cargados a&uacute;n. Carga datos primero.</div>}
             {allTemplateNames.length>0 && (<>
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                {allTemplateNames.slice().sort(function(a,b){var sa=(templateConfig[a]&&templateConfig[a].sort_order)||0;var sb=(templateConfig[b]&&templateConfig[b].sort_order)||0;if(sa!==sb)return sa-sb;return a.localeCompare(b);}).map(function(tplName){
+                {allTemplateNames.slice().sort(function(a,b){var da=templateLastSent[a]||"";var db=templateLastSent[b]||"";if(da!==db)return db.localeCompare(da);return a.localeCompare(b);}).map(function(tplName){
                   var currentEntry=templateConfig[tplName]||{};
                   var currentCat=typeof currentEntry==="string"?currentEntry:(currentEntry.category||"sin_categoria");
                   var currentRegion=typeof currentEntry==="string"?"":(currentEntry.region||"");

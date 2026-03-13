@@ -27,6 +27,35 @@ var AUTO_REPLY_PATTERNS = [
   "mensagem automática",
   "respuesta automática",
   "resposta automática",
+  "horario de atención",
+  "horário de atendimento",
+  "nuestro horario",
+  "nosso horário",
+  "le responderemos",
+  "responderemos en breve",
+  "te responderemos",
+  "entraremos en contacto",
+  "entraremos em contato",
+  "gracias por escribirnos",
+  "obrigado por nos escrever",
+  "gracias por tu mensaje",
+  "obrigado pela sua mensagem",
+  "hemos recibido tu mensaje",
+  "recebemos sua mensagem",
+  "en breve un asesor",
+  "em breve um atendente",
+  "nos pondremos en contacto",
+  "automatic reply",
+  "auto-reply",
+  "out of office",
+  "fuera de oficina",
+  "fora do escritório",
+  "no estamos disponibles",
+  "não estamos disponíveis",
+  "bienvenido a",
+  "bem-vindo a",
+  "gracias por su mensaje",
+  "obrigado por sua mensagem",
 ];
 
 var COUNTRY_MAP = {
@@ -264,7 +293,7 @@ function detectLangFromContent(msgs) {
   return ptScore > esScore ? "pt" : "es";
 }
 
-export function processInboundRows(rows, regionFilter, lifecyclePhones) {
+export function processInboundRows(rows, regionFilter, lifecyclePhones, hubspotPhones) {
   // Group by thread_id
   var threads = {};
   for (var i = 0; i < rows.length; i++) {
@@ -297,6 +326,18 @@ export function processInboundRows(rows, regionFilter, lifecyclePhones) {
   }
   var inboundPhoneKeys = Object.keys(inboundPhones);
   var totalConversaciones = threadIds.length;
+
+  // Count how many inbound phones exist in HubSpot
+  var hubspotMatchCount = 0;
+  if (hubspotPhones) {
+    for (var hi2 = 0; hi2 < inboundPhoneKeys.length; hi2++) {
+      var hp = inboundPhoneKeys[hi2].replace(/\D/g, "");
+      if (!hp) continue;
+      if (hubspotPhones[hp] || (hp.length > 11 && hubspotPhones[hp.slice(-11)]) || (hp.length > 10 && hubspotPhones[hp.slice(-10)])) {
+        hubspotMatchCount++;
+      }
+    }
+  }
 
   var meetings = [];
   var dailyMap = {};
@@ -336,7 +377,10 @@ export function processInboundRows(rows, regionFilter, lifecyclePhones) {
       if (msgs[mi].phone_number) phone = msgs[mi].phone_number;
     }
 
-    var lang = detectLangFromContent(msgs);
+    // Detect region by phone prefix (+55 = BR), fallback to content-based detection
+    var _ipd = (phone || tid2 || "").replace(/\D/g, "");
+    var _isBR = _ipd.startsWith("55") && _ipd.length >= 12;
+    var lang = _isBR ? "pt" : (_ipd.length >= 10 ? "es" : detectLangFromContent(msgs));
     if (regionFilter && regionFilter !== "all") {
       if (regionFilter === "es" && lang !== "es") continue;
       if (regionFilter === "pt" && lang !== "pt") continue;
@@ -356,7 +400,7 @@ export function processInboundRows(rows, regionFilter, lifecyclePhones) {
       var type = msg.message_type;
       var dt = formatDatetime(msg.message_datetime);
 
-      if (content.includes("meetings.hubspot.com/")) hasMeetingLink = true;
+      if (content.includes("meetings.hubspot.com/") || content.includes("yavendio.com/meetings")) hasMeetingLink = true;
 
       if (type === "ai") {
         if (/yavendio\.com|yavendió\.com|crear\s+(?:tu\s+)?cuenta|criar\s+(?:sua\s+)?conta|crea\s+una\s+cuenta|registr(?:ar|ate|o)/i.test(content)) hasSignupLink = true;
@@ -550,6 +594,7 @@ export function processInboundRows(rows, regionFilter, lifecyclePhones) {
 
   var funnelAll = [
     { n: "Leads Inbound", v: uniqueLeadCount, c: CC.accent },
+    { n: "En HubSpot", v: hubspotMatchCount, c: CC.orange },
     { n: "Engajaron (2+)", v: engagedTotal, c: CC.purple },
     { n: "Link Crear Cuenta", v: linkUniqueCount, c: CC.cyan },
     { n: "Recibieron Step 1", v: signupUniqueCount, c: CC.green },
@@ -571,6 +616,7 @@ export function processInboundRows(rows, regionFilter, lifecyclePhones) {
     MEETINGS: meetings,
     topicsAll: topicsArr,
     allTemplateNames: [],
+    templateLastSent: {},
     tplStepInfo: {},
     D: {
       all: {
@@ -626,6 +672,7 @@ export function processInboundRows(rows, regionFilter, lifecyclePhones) {
     uniqueLeadCount: uniqueLeadCount,
     signupCount: signupUniqueCount,
     signupLinkCount: linkUniqueCount,
+    hubspotMatchCount: hubspotMatchCount,
   };
 }
 
@@ -710,6 +757,7 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
   var allTemplatesSent = {}; // MSG1: count, MSG2a: count, etc
   var allTemplatesResp = {}; // templates where thread responded (non-excluded)
   var allTemplatesRespExcluded = {}; // responses to excluded templates (for display only)
+  var allTemplateLastSent = {}; // most recent template_sent_at per template
   var dailyMap = {};
   var hourlyAll = new Array(24).fill(0);
   var topicCounts = {};
@@ -731,6 +779,7 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
   var igCountReal = 0, igLinkCountReal = 0, igAtOnlyCountReal = 0;
   var toolCountReal = 0, mcCountReal = 0;
 
+  var totalContactadosByQual = {};
   var templateContents = {};
 
   for (var t = 0; t < threadIds.length; t++) {
@@ -756,13 +805,22 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
       if (msgs[mi].lead_qualification) qual = msgs[mi].lead_qualification;
     }
 
-    var lang = detectLangFromMessages(msgs);
+    // Detect region by phone prefix (+55 = BR), fallback to template-based detection
+    var phoneDigits = (phone || tid || "").replace(/\D/g, "");
+    var isBR = phoneDigits.startsWith("55") && phoneDigits.length >= 12;
+    var lang = isBR ? "pt" : (phoneDigits.length >= 10 ? "es" : detectLangFromMessages(msgs));
     if (regionFilter && regionFilter !== "all") {
       if (regionFilter === "es" && lang !== "es") continue;
       if (regionFilter === "pt" && lang !== "pt") continue;
     }
     var isES = lang === "es";
     if (isES) esTotal++; else ptTotal++;
+
+    // Count contactados by qualification (ALL threads, not just responders)
+    if (qual) {
+      if (!totalContactadosByQual[qual]) totalContactadosByQual[qual] = 0;
+      totalContactadosByQual[qual]++;
+    }
 
     // Sort messages by datetime if available
     msgs.sort(function (a, b) {
@@ -779,7 +837,7 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
       var dt = formatDatetime(msg.message_datetime);
 
       // Check for HubSpot meeting link in any message type
-      if (content.includes("meetings.hubspot.com/")) hasMeetingLink = true;
+      if (content.includes("meetings.hubspot.com/") || content.includes("yavendio.com/meetings")) hasMeetingLink = true;
 
       if (type === "ai") {
         if (isTemplate(content) || msg.template_name) {
@@ -787,7 +845,7 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
           var tplName = msg.template_name || classifyTemplate(content);
           if (tplName) {
             templatesSent.push(tplName);
-            conversation.push([0, tplName, dt]);
+            conversation.push([0, tplName, dt, content]);
             if (!templateContents[tplName]) templateContents[tplName] = content;
           }
         } else {
@@ -841,6 +899,16 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
     for (var tplKey in tplSentUnique) {
       if (!allTemplatesSent[tplKey]) allTemplatesSent[tplKey] = 0;
       allTemplatesSent[tplKey]++;
+    }
+
+    // Track most recent sent date per template
+    var threadSentAt = msgs[0] && (msgs[0].template_sent_at || msgs[0].message_datetime) || "";
+    if (threadSentAt) {
+      for (var tplKey2 in tplSentUnique) {
+        if (!allTemplateLastSent[tplKey2] || threadSentAt > allTemplateLastSent[tplKey2]) {
+          allTemplateLastSent[tplKey2] = threadSentAt;
+        }
+      }
     }
 
     // Determine trigger template: last template before the first human message
@@ -943,6 +1011,9 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
       });
     }
   }
+
+  // Recalculate totalContactados after region filter (esTotal + ptTotal only counts threads that passed the filter)
+  totalContactados = esTotal + ptTotal;
 
   // Build metrics
   var respondieron = meetings.length;
@@ -1285,6 +1356,7 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
     MEETINGS: meetings,
     topicsAll: topicsArr,
     allTemplateNames: Object.keys(allTemplatesSent),
+    templateLastSent: allTemplateLastSent,
     tplStepInfo: tplStepInfo,
     D: {
       all: {
@@ -1319,6 +1391,7 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
     meetByTplAll: meetByTplAll,
     meetByTplReal: meetByTplReal,
     totalContactados: totalContactados,
+    totalContactadosByQual: totalContactadosByQual,
     leadsPerDay: leadsPerDay,
     dateRange: dateRange,
     autoReplyCount: autoReplyThreads,

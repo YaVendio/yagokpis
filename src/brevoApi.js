@@ -8,25 +8,32 @@ export async function callBrevo(endpoint, params) {
   if (error) {
     var status = error.context && error.context.status;
     if (status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
-    var msg = data && data.error || error.message || "Brevo API error";
+    var msg = (data && data.error) || error.message || "Brevo API error";
     throw new Error(msg);
+  }
+  // Handle proxied Brevo API errors (returned as 200 with ok:false)
+  if (data && data.ok === false) {
+    throw new Error(data.error || "Unknown Brevo API error");
   }
   return data;
 }
 
 export async function fetchEmailCampaigns() {
-  // Fetch all trigger (automation) campaigns — paginate if needed
+  // Fetch ALL email campaigns (no type filter) — lets us see classic + trigger + automation
   var allCampaigns = [];
   var offset = 0;
-  var limit = 500;
+  var limit = 100;
   var hasMore = true;
   while (hasMore) {
     var data = await callBrevo("/v3/emailCampaigns", {
-      type: "trigger",
       statistics: "globalStats",
       limit: limit,
       offset: offset,
     });
+    console.log("[Brevo] count:", data.count, "page:", (data.campaigns || []).length);
+    if (data.campaigns && data.campaigns.length > 0 && offset === 0) {
+      console.log("[Brevo] Sample:", JSON.stringify(data.campaigns[0]).substring(0, 600));
+    }
     var campaigns = data.campaigns || [];
     allCampaigns = allCampaigns.concat(campaigns);
     if (campaigns.length < limit || allCampaigns.length >= (data.count || 0)) {
@@ -35,6 +42,7 @@ export async function fetchEmailCampaigns() {
       offset += limit;
     }
   }
+  console.log("[Brevo] Total fetched:", allCampaigns.length);
   return allCampaigns;
 }
 

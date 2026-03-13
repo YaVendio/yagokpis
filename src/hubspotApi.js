@@ -23,7 +23,7 @@ export async function fetchAllContacts() {
   while (true) {
     var params = {
       limit: "100",
-      properties: "firstname,lastname,phone,email,createdate,hs_lead_status,lifecyclestage",
+      properties: "firstname,lastname,phone,email,createdate,hs_lead_status,lifecyclestage,company",
     };
     if (after) params.after = after;
     var data = await callHubSpot("/crm/v3/objects/contacts", params);
@@ -31,6 +31,31 @@ export async function fetchAllContacts() {
     if (!data.paging || !data.paging.next || !data.paging.next.after) break;
     after = data.paging.next.after;
   }
+  return all;
+}
+
+// Fetch only contacts that have a phone number (search API)
+export async function fetchAllContactsWithPhone() {
+  var all = [];
+  var after = undefined;
+  while (true) {
+    var searchBody = {
+      filterGroups: [{
+        filters: [{
+          propertyName: "phone",
+          operator: "HAS_PROPERTY"
+        }]
+      }],
+      properties: ["firstname", "lastname", "phone", "email", "createdate", "hs_lead_status", "lifecyclestage", "company"],
+      limit: 100,
+    };
+    if (after) searchBody.after = after;
+    var data = await callHubSpot("/crm/v3/objects/contacts/search", null, searchBody);
+    if (data.results) all = all.concat(data.results);
+    if (!data.paging || !data.paging.next || !data.paging.next.after) break;
+    after = data.paging.next.after;
+  }
+  console.log("[HS] Contacts with phone:", all.length);
   return all;
 }
 
@@ -64,15 +89,27 @@ export async function fetchMeetingsSince(sinceIso) {
 
   if (all.length === 0) return all;
 
-  // Step 2: Fetch contact associations using v4 batch API (100 per request)
+  // Step 2: Fetch contact associations using v4 batch API (100 per request, up to 3 in parallel)
   console.log("[HS] Fetching associations for", all.length, "meetings via batch API...");
   var assocMap = {};
   var BATCH = 100;
+  var CONCURRENCY = 3;
+  var chunks = [];
   for (var i = 0; i < all.length; i += BATCH) {
-    var chunk = all.slice(i, i + BATCH);
-    var inputs = chunk.map(function(meeting) { return { id: meeting.id }; });
-    try {
-      var batchData = await callHubSpot("/crm/v4/associations/meetings/contacts/batch/read", null, { inputs: inputs });
+    chunks.push(all.slice(i, i + BATCH));
+  }
+  for (var ci = 0; ci < chunks.length; ci += CONCURRENCY) {
+    var group = chunks.slice(ci, ci + CONCURRENCY);
+    var promises = group.map(function(chunk) {
+      var inputs = chunk.map(function(meeting) { return { id: meeting.id }; });
+      return callHubSpot("/crm/v4/associations/meetings/contacts/batch/read", null, { inputs: inputs }).catch(function(e) {
+        console.warn("[HS] Batch association error:", e.message);
+        return { results: [] };
+      });
+    });
+    var results = await Promise.all(promises);
+    for (var ri = 0; ri < results.length; ri++) {
+      var batchData = results[ri];
       if (batchData.results) {
         for (var r = 0; r < batchData.results.length; r++) {
           var item = batchData.results[r];
@@ -82,8 +119,6 @@ export async function fetchMeetingsSince(sinceIso) {
           }
         }
       }
-    } catch (e) {
-      console.warn("[HS] Batch association error for chunk", i, e.message);
     }
   }
   console.log("[HS] Associations done, mapped", Object.keys(assocMap).length, "meetings");
@@ -98,70 +133,84 @@ export async function fetchMeetingsSince(sinceIso) {
   return all;
 }
 
-// Batch-read contacts by IDs
+// Batch-read contacts by IDs (up to 3 batches in parallel)
 export async function fetchContactsByIds(contactIds) {
   var all = [];
-  for (var i = 0; i < contactIds.length; i += 100) {
-    var batch = contactIds.slice(i, i + 100);
-    var inputs = batch.map(function(id) { return { id: id }; });
-    var data = await callHubSpot("/crm/v3/objects/contacts/batch/read", null, {
-      inputs: inputs,
-      properties: ["firstname", "lastname", "phone", "email", "createdate", "hs_lead_status", "lifecyclestage"]
+  var BATCH = 100;
+  var CONCURRENCY = 3;
+  var chunks = [];
+  for (var i = 0; i < contactIds.length; i += BATCH) {
+    chunks.push(contactIds.slice(i, i + BATCH));
+  }
+  for (var ci = 0; ci < chunks.length; ci += CONCURRENCY) {
+    var group = chunks.slice(ci, ci + CONCURRENCY);
+    var promises = group.map(function(batch) {
+      var inputs = batch.map(function(id) { return { id: id }; });
+      return callHubSpot("/crm/v3/objects/contacts/batch/read", null, {
+        inputs: inputs,
+        properties: ["firstname", "lastname", "phone", "email", "createdate", "hs_lead_status", "lifecyclestage", "company"]
+      });
     });
-    if (data.results) all = all.concat(data.results);
+    var results = await Promise.all(promises);
+    for (var ri = 0; ri < results.length; ri++) {
+      if (results[ri].results) all = all.concat(results[ri].results);
+    }
   }
   return all;
 }
 
 // Search leads (object) from a date onwards, filtered by pipeline
-// Debug: list properties available on the leads object (0-136)
-export async function debugLeadProperties() {
-  var data = await callHubSpot("/crm/v3/properties/0-136");
-  if (data && data.results) {
-    var names = data.results.map(function(p) { return p.name; });
-    console.log("[HS] Lead property names:", names.join(", "));
-    var relevant = data.results.filter(function(p) {
-      return /pipe|create|date|stage/i.test(p.name);
-    });
-    console.log("[HS] Lead relevant properties:", relevant.map(function(p) { return p.name + " (" + p.label + ", " + p.type + ")"; }));
-  }
-  return data;
-}
-
+// Tries Search API first, falls back to list+filter if search fails
 export async function fetchLeadsSince(sinceIso, pipelineId) {
-  // First, fetch a sample to discover property names
-  try {
-    var sample = await callHubSpot("/crm/v3/objects/0-136", { limit: "1" });
-    if (sample && sample.results && sample.results[0]) {
-      console.log("[HS] Lead sample properties:", Object.keys(sample.results[0].properties || {}).join(", "));
-    }
-  } catch (e) { console.warn("[HS] Lead sample fetch failed:", e.message); }
+  var sinceMs = String(new Date(sinceIso).getTime());
+  var properties = ["hs_pipeline", "hs_pipeline_stage", "hs_lead_name", "createdate", "hs_createdate"];
 
-  // Fetch all leads via list endpoint (GET with pagination) — avoids search filter issues
+  // Try search API first (server-side filtering = fewer pages)
+  try {
+    var filters = [{ propertyName: "hs_createdate", operator: "GTE", value: sinceMs }];
+    if (pipelineId) filters.push({ propertyName: "hs_pipeline", operator: "EQ", value: pipelineId });
+    var all = [];
+    var after = undefined;
+    while (true) {
+      var searchBody = {
+        filterGroups: [{ filters: filters }],
+        properties: properties,
+        limit: 100,
+      };
+      if (after) searchBody.after = after;
+      var data = await callHubSpot("/crm/v3/objects/0-136/search", null, searchBody);
+      if (data.results) all = all.concat(data.results);
+      if (!data.paging || !data.paging.next || !data.paging.next.after) break;
+      after = data.paging.next.after;
+    }
+    console.log("[HS] Leads via search API:", all.length);
+    return all;
+  } catch (e) {
+    console.warn("[HS] Leads search API failed, falling back to list+filter:", e.message);
+  }
+
+  // Fallback: list all + filter client-side
   var all = [];
   var after = undefined;
   while (true) {
-    var params = { limit: "100", properties: "hs_pipeline,hs_pipeline_stage,hs_lead_name,createdate,hs_createdate" };
+    var params = { limit: "100", properties: properties.join(",") };
     if (after) params.after = after;
     var data = await callHubSpot("/crm/v3/objects/0-136", params);
     if (data.results) all = all.concat(data.results);
     if (!data.paging || !data.paging.next || !data.paging.next.after) break;
     after = data.paging.next.after;
   }
-  console.log("[HS] Total leads fetched:", all.length);
+  console.log("[HS] Total leads fetched (fallback):", all.length);
 
-  // Filter client-side by pipeline and date
   var sinceDate = new Date(sinceIso);
   var filtered = all.filter(function(lead) {
     var props = lead.properties || {};
-    // Filter by pipeline if specified
     if (pipelineId && props.hs_pipeline !== pipelineId) return false;
-    // Filter by date
     var cd = props.createdate || props.hs_createdate || lead.createdAt;
     if (!cd) return false;
     return new Date(cd) >= sinceDate;
   });
-  console.log("[HS] Leads after filter (pipeline=" + pipelineId + ", since=" + sinceIso + "):", filtered.length);
+  console.log("[HS] Leads after filter (fallback, pipeline=" + pipelineId + ", since=" + sinceIso + "):", filtered.length);
   return filtered;
 }
 
@@ -256,36 +305,62 @@ export async function fetchDealPipelines() {
 }
 
 // Fetch leads (0-136) for Growth tab — uses denormalized properties on the lead itself
+// Tries Search API first, falls back to list+filter if search fails
 export async function fetchGrowthLeads(sinceIso, pipelineId) {
-  var all = [];
-  var after = undefined;
-  var props = [
+  var properties = [
     "hs_pipeline", "hs_pipeline_stage", "hs_lead_name", "createdate", "hs_createdate",
     "hubspot_owner_id", "prioridad_plg", "prioridad_plg_mqlpql",
     "hs_contact_analytics_source", "hs_contact_analytics_source_data_1",
     "email", "numero_de_telefono", "industria", "lead_sales_channels",
     "fuente_original_de_trafico", "fuente_yavendio", "hs_lead_label"
-  ].join(",");
-  while (true) {
-    var params = { limit: "100", properties: props };
-    if (after) params.after = after;
-    var data = await callHubSpot("/crm/v3/objects/0-136", params);
-    if (data.results) all = all.concat(data.results);
-    if (!data.paging || !data.paging.next || !data.paging.next.after) break;
-    after = data.paging.next.after;
-  }
-  console.log("[HS Growth] Total leads fetched:", all.length);
+  ];
+  var sinceMs = String(new Date(sinceIso).getTime());
+  var filtered;
 
-  // Filter by pipeline and date client-side
-  var sinceDate = new Date(sinceIso);
-  var filtered = all.filter(function(lead) {
-    var p = lead.properties || {};
-    if (pipelineId && p.hs_pipeline !== pipelineId) return false;
-    var cd = p.createdate || p.hs_createdate || lead.createdAt;
-    if (!cd) return false;
-    return new Date(cd) >= sinceDate;
-  });
-  console.log("[HS Growth] Leads after filter (pipeline=" + pipelineId + ", since=" + sinceIso + "):", filtered.length);
+  // Try search API first
+  try {
+    var filters = [{ propertyName: "hs_createdate", operator: "GTE", value: sinceMs }];
+    if (pipelineId) filters.push({ propertyName: "hs_pipeline", operator: "EQ", value: pipelineId });
+    var all = [];
+    var after = undefined;
+    while (true) {
+      var searchBody = {
+        filterGroups: [{ filters: filters }],
+        properties: properties,
+        limit: 100,
+      };
+      if (after) searchBody.after = after;
+      var data = await callHubSpot("/crm/v3/objects/0-136/search", null, searchBody);
+      if (data.results) all = all.concat(data.results);
+      if (!data.paging || !data.paging.next || !data.paging.next.after) break;
+      after = data.paging.next.after;
+    }
+    console.log("[HS Growth] Leads via search API:", all.length);
+    filtered = all;
+  } catch (e) {
+    console.warn("[HS Growth] Search API failed, falling back to list+filter:", e.message);
+    // Fallback: list all + filter client-side
+    var all = [];
+    var after = undefined;
+    while (true) {
+      var params = { limit: "100", properties: properties.join(",") };
+      if (after) params.after = after;
+      var data = await callHubSpot("/crm/v3/objects/0-136", params);
+      if (data.results) all = all.concat(data.results);
+      if (!data.paging || !data.paging.next || !data.paging.next.after) break;
+      after = data.paging.next.after;
+    }
+    console.log("[HS Growth] Total leads fetched (fallback):", all.length);
+    var sinceDate = new Date(sinceIso);
+    filtered = all.filter(function(lead) {
+      var p = lead.properties || {};
+      if (pipelineId && p.hs_pipeline !== pipelineId) return false;
+      var cd = p.createdate || p.hs_createdate || lead.createdAt;
+      if (!cd) return false;
+      return new Date(cd) >= sinceDate;
+    });
+    console.log("[HS Growth] Leads after filter (fallback):", filtered.length);
+  }
 
   // Map lead properties into _contactProps for compatibility with UI code
   for (var i = 0; i < filtered.length; i++) {

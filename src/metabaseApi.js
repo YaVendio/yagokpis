@@ -140,6 +140,70 @@ export async function fetchLifecyclePhones() {
   return phones;
 }
 
+// Combined inbound fetch: threads (filtered server-side) + lifecycle phones in a single query
+export async function fetchInboundData(since) {
+  var query =
+    "WITH lifecycle AS (\n" +
+    "  SELECT\n" +
+    "    le.phone_number,\n" +
+    "    MIN(le.sent_at) AS first_lifecycle_at,\n" +
+    "    MIN(CASE WHEN lfs.step_order = 1 THEN le.sent_at ELSE NULL END) AS first_step1_at\n" +
+    "  FROM lifecycle_executions le\n" +
+    "  JOIN lifecycle_flow_steps lfs ON le.step_id = lfs.id\n" +
+    "  GROUP BY le.phone_number\n" +
+    ")\n" +
+    "SELECT\n" +
+    "  t.thread_id,\n" +
+    "  COALESCE(t.metadata->>'phone_number', t.metadata->>'phone',\n" +
+    "           t.metadata->>'wa_id', t.metadata->>'contact_phone') AS phone_number,\n" +
+    "  t.created_at AS thread_created_at,\n" +
+    '  t."values"::text AS values_json,\n' +
+    "  lc.first_lifecycle_at,\n" +
+    "  lc.first_step1_at\n" +
+    "FROM thread t\n" +
+    "LEFT JOIN lifecycle lc\n" +
+    "  ON lc.phone_number = COALESCE(t.metadata->>'phone_number', t.metadata->>'phone',\n" +
+    "                                 t.metadata->>'wa_id', t.metadata->>'contact_phone')\n" +
+    "WHERE t.created_at >= '" + since + "'\n" +
+    "  AND (t.metadata->>'flow_id' IS DISTINCT FROM '1')\n" +
+    "  AND EXISTS (\n" +
+    "    SELECT 1 FROM jsonb_array_elements(COALESCE(t.\"values\"->'messages', '[]'::jsonb)) m\n" +
+    "    WHERE m->>'type' = 'human'\n" +
+    "  )\n" +
+    "ORDER BY t.thread_id";
+
+  var result = await queryMetabase(query);
+
+  var colIdx = {};
+  for (var i = 0; i < result.columns.length; i++) {
+    colIdx[result.columns[i]] = i;
+  }
+
+  var threads = [];
+  var lifecyclePhones = {};
+  for (var j = 0; j < result.results.length; j++) {
+    var row = result.results[j];
+    var phone = row[colIdx["phone_number"]] || "";
+    threads.push({
+      thread_id: row[colIdx["thread_id"]],
+      phone_number: phone,
+      thread_created_at: row[colIdx["thread_created_at"]],
+      values_json: row[colIdx["values_json"]],
+    });
+    // Build lifecyclePhones map from joined data
+    if (phone && (row[colIdx["first_lifecycle_at"]] || row[colIdx["first_step1_at"]])) {
+      if (!lifecyclePhones[phone]) {
+        lifecyclePhones[phone] = {
+          firstAt: row[colIdx["first_lifecycle_at"]] || null,
+          firstStep1At: row[colIdx["first_step1_at"]] || null,
+        };
+      }
+    }
+  }
+
+  return { threads: threads, lifecyclePhones: lifecyclePhones };
+}
+
 export async function fetchResponseStats(since) {
   var query =
     "WITH outbound AS (\n" +
@@ -149,26 +213,101 @@ export async function fetchResponseStats(since) {
     "      AND status = 'sent'\n" +
     "      AND sent_at >= '" + since + "'\n" +
     "),\n" +
+    "responded_base AS (\n" +
+    "    SELECT\n" +
+    "        metadata->>'phone_number' AS phone_number,\n" +
+    "        \"values\"->'messages' AS messages,\n" +
+    "        ROW_NUMBER() OVER (\n" +
+    "            PARTITION BY metadata->>'phone_number'\n" +
+    "            ORDER BY created_at DESC\n" +
+    "        ) AS rn\n" +
+    "    FROM thread\n" +
+    "    WHERE created_at >= '" + since + "'\n" +
+    "      AND COALESCE(metadata->>'channel', '') != 'cgr'\n" +
+    "      AND metadata->>'flow_id' = '1'\n" +
+    "      AND metadata->>'phone_number' IS NOT NULL\n" +
+    "      AND jsonb_array_length(COALESCE(\"values\"->'messages', '[]'::jsonb)) > 0\n" +
+    "      AND EXISTS (\n" +
+    "          SELECT 1 FROM jsonb_array_elements(\"values\"->'messages') m\n" +
+    "          WHERE m->>'type' = 'human'\n" +
+    "      )\n" +
+    "),\n" +
     "outbound_responded AS (\n" +
     "    SELECT COUNT(*) AS outbound_responded\n" +
-    "    FROM (\n" +
+    "    FROM responded_base WHERE rn = 1\n" +
+    "),\n" +
+    "outbound_responded_real AS (\n" +
+    "    SELECT COUNT(*) AS outbound_responded_real\n" +
+    "    FROM responded_base t\n" +
+    "    CROSS JOIN LATERAL (\n" +
     "        SELECT\n" +
-    "            metadata->>'phone_number' AS phone_number,\n" +
-    "            ROW_NUMBER() OVER (\n" +
-    "                PARTITION BY metadata->>'phone_number'\n" +
-    "                ORDER BY created_at DESC\n" +
-    "            ) AS rn\n" +
-    "        FROM thread\n" +
-    "        WHERE created_at >= '" + since + "'\n" +
-    "          AND COALESCE(metadata->>'channel', '') != 'cgr'\n" +
-    "          AND metadata->>'flow_id' = '1'\n" +
-    "          AND metadata->>'phone_number' IS NOT NULL\n" +
-    "          AND jsonb_array_length(COALESCE(values->'messages', '[]'::jsonb)) > 0\n" +
-    "          AND EXISTS (\n" +
-    "              SELECT 1 FROM jsonb_array_elements(values->'messages') m\n" +
-    "              WHERE m->>'type' = 'human'\n" +
+    "            (SELECT count(*) FROM jsonb_array_elements(t.messages) m2 WHERE m2->>'type' = 'human') AS human_count,\n" +
+    "            (SELECT COALESCE(m3.val->>'content', '')\n" +
+    "             FROM jsonb_array_elements(t.messages) WITH ORDINALITY AS m3(val, idx)\n" +
+    "             WHERE m3.val->>'type' = 'human' ORDER BY m3.idx LIMIT 1\n" +
+    "            ) AS first_human_content,\n" +
+    "            (SELECT (m4.val #>> '{additional_kwargs,metadata,timestamp}')::numeric\n" +
+    "             FROM jsonb_array_elements(t.messages) WITH ORDINALITY AS m4(val, idx)\n" +
+    "             WHERE m4.val->>'type' = 'human' ORDER BY m4.idx LIMIT 1\n" +
+    "            ) AS first_human_ts,\n" +
+    "            (SELECT max((m5.val #>> '{additional_kwargs,metadata,timestamp}')::numeric)\n" +
+    "             FROM jsonb_array_elements(t.messages) WITH ORDINALITY AS m5(val, idx)\n" +
+    "             WHERE m5.val->>'type' = 'ai'\n" +
+    "               AND m5.idx < (SELECT min(h2.idx) FROM jsonb_array_elements(t.messages) WITH ORDINALITY AS h2(val, idx) WHERE h2.val->>'type' = 'human')\n" +
+    "            ) AS preceding_ai_ts\n" +
+    "    ) h\n" +
+    "    WHERE t.rn = 1\n" +
+    "      AND NOT (\n" +
+    "          h.human_count = 1\n" +
+    "          AND (\n" +
+    "              (h.first_human_ts IS NOT NULL AND h.preceding_ai_ts IS NOT NULL AND (h.first_human_ts - h.preceding_ai_ts) < 10)\n" +
+    "              OR lower(h.first_human_content) LIKE '%gracias por comunicarte%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%obrigado por entrar em contato%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%en este momento no estamos disponibles%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%no momento não estamos disponíveis%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%responderemos lo antes posible%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%responderemos o mais breve%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%gracias por contactarnos%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%obrigado por nos contatar%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%thank you for contacting%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%we are currently unavailable%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%fuera del horario%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%fora do horário%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%mensaje automático%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%mensagem automática%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%respuesta automática%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%resposta automática%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%horario de atención%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%horário de atendimento%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%nuestro horario%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%nosso horário%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%le responderemos%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%responderemos en breve%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%te responderemos%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%entraremos en contacto%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%entraremos em contato%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%gracias por escribirnos%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%obrigado por nos escrever%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%gracias por tu mensaje%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%obrigado pela sua mensagem%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%hemos recibido tu mensaje%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%recebemos sua mensagem%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%en breve un asesor%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%em breve um atendente%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%nos pondremos en contacto%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%automatic reply%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%auto-reply%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%out of office%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%fuera de oficina%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%fora do escritório%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%no estamos disponibles%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%não estamos disponíveis%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%bienvenido a%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%bem-vindo a%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%gracias por su mensaje%'\n" +
+    "              OR lower(h.first_human_content) LIKE '%obrigado por sua mensagem%'\n" +
     "          )\n" +
-    "    ) t WHERE rn = 1\n" +
+    "      )\n" +
     "),\n" +
     "all_conversational AS (\n" +
     "    SELECT COUNT(*) AS inbound\n" +
@@ -197,18 +336,20 @@ export async function fetchResponseStats(since) {
     "SELECT\n" +
     "    o.outbound_total,\n" +
     "    r.outbound_responded,\n" +
+    "    rr.outbound_responded_real,\n" +
     "    i.inbound\n" +
-    "FROM outbound o, outbound_responded r, all_conversational i";
+    "FROM outbound o, outbound_responded r, outbound_responded_real rr, all_conversational i";
 
   var result = await queryMetabase(query);
   if (!result || !result.results || result.results.length === 0) {
-    return { outboundTotal: 0, outboundResponded: 0, inbound: 0 };
+    return { outboundTotal: 0, outboundResponded: 0, outboundRespondedReal: 0, inbound: 0 };
   }
   var row = result.results[0];
   return {
     outboundTotal: row[0] || 0,
     outboundResponded: row[1] || 0,
-    inbound: row[2] || 0,
+    outboundRespondedReal: row[2] || 0,
+    inbound: row[3] || 0,
   };
 }
 
