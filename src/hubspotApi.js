@@ -81,12 +81,12 @@ export async function fetchMeetingsSince(sinceIso) {
     var searchBody = {
       filterGroups: [{
         filters: [{
-          propertyName: "hs_meeting_start_time",
+          propertyName: "hs_createdate",
           operator: "GTE",
           value: String(sinceMs)
         }]
       }],
-      properties: ["hs_meeting_title", "hs_meeting_start_time", "hs_meeting_end_time", "hs_meeting_outcome", "hubspot_owner_id", "hs_meeting_source"],
+      properties: ["hs_meeting_title", "hs_meeting_start_time", "hs_meeting_end_time", "hs_meeting_outcome", "hubspot_owner_id", "hs_meeting_source", "hs_createdate"],
       limit: 100,
     };
     if (after) searchBody.after = after;
