@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Legend } from "recharts";
 import { processCSVRows, processInboundRows, parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
-import { fetchThreads, expandThreadMessages, fetchInboundThreads, expandInboundThreadMessages, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats } from "./metabaseApi";
+import { fetchThreads, expandThreadMessages, fetchInboundThreads, expandInboundThreadMessages, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats, fetchAdsThreads } from "./metabaseApi";
 import { DEFAULT_MEETINGS as _RAW_MEETINGS } from "./defaultData";
 import { supabase } from "./supabase";
 import InfoTip from "./components/InfoTip";
@@ -216,6 +216,7 @@ function MeetModal({leads,onClose,mode,title,crmContacts}){
                   <span style={{fontWeight:800,fontSize:15,color:C.text}}>{name||l.p}</span>
                   {company && <span style={{fontSize:13,color:C.muted,fontWeight:600}}>{"\u00B7 "+company}</span>}
                   <Bd color={ql.c}>{ql.t}</Bd>
+                  {l._confirmed!==undefined && <Bd color={l._confirmed?C.green:C.red}>{l._confirmed?"\u2705 Confirmada":"\u274C No confirmada"}</Bd>}
                   {l.au && <Bd color={C.red}>AUTO</Bd>}
                 </div>
                 <div style={{fontSize:12,color:C.muted,marginTop:3,display:"flex",flexWrap:"wrap",gap:4}}>
@@ -421,7 +422,7 @@ export default function Dashboard(){
 
   var _brevoIcon=<svg width="18" height="18" viewBox="0 0 24 24" fill="#0B996E"><path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zM7.2 4.8h5.747c2.34 0 3.895 1.406 3.895 3.516 0 1.022-.348 1.862-1.09 2.588C17.189 11.812 18 13.22 18 14.785c0 2.86-2.64 5.016-6.164 5.016H7.199v-15zm2.085 1.952v5.537h.07c.233-.432.858-.796 2.249-1.226 2.039-.659 3.037-1.52 3.037-2.655 0-.998-.766-1.656-1.924-1.656H9.285zm4.87 5.266c-.766.385-1.67.748-2.76 1.11-1.229.387-2.11 1.386-2.11 2.407v2.315h2.365c2.387 0 4.149-1.34 4.149-3.155 0-1.067-.625-2.087-1.645-2.677z"/></svg>;
   var _hubspotIcon=<svg width="18" height="18" viewBox="0 0 24 24" fill="#FF7A59"><path d="M18.164 7.93V5.084a2.198 2.198 0 001.267-1.978v-.067A2.2 2.2 0 0017.238.845h-.067a2.2 2.2 0 00-2.193 2.193v.067a2.196 2.196 0 001.252 1.973l.013.006v2.852a6.22 6.22 0 00-2.969 1.31l.012-.01-7.828-6.095A2.497 2.497 0 104.3 4.656l-.012.006 7.697 5.991a6.176 6.176 0 00-1.038 3.446c0 1.343.425 2.588 1.147 3.607l-.013-.02-2.342 2.343a1.968 1.968 0 00-.58-.095h-.002a2.033 2.033 0 102.033 2.033 1.978 1.978 0 00-.1-.595l.005.014 2.317-2.317a6.247 6.247 0 104.782-11.134l-.036-.005zm-.964 9.378a3.206 3.206 0 113.215-3.207v.002a3.206 3.206 0 01-3.207 3.207z"/></svg>;
-  const SECTIONS={outbound:{label:"Outbound",icon:"\uD83C\uDFAF",subTabs:["resumen","engagement","templates"]},inbound:{label:"Inbound",icon:"\uD83D\uDCE5",subTabs:["resumen","engagement"]},canales:{label:"Canales",icon:"\uD83D\uDCE1",subTabs:["grupos"]},hubspot:{label:"HubSpot",icon:_hubspotIcon,subTabs:[]},brevo:{label:"Brevo",icon:_brevoIcon,subTabs:[]},growth:{label:"Marketing",icon:"\uD83D\uDCC8",subTabs:[]}};
+  const SECTIONS={outbound:{label:"Outbound",icon:"\uD83C\uDFAF",subTabs:["resumen","engagement","templates"]},inbound:{label:"Inbound",icon:"\uD83D\uDCE5",subTabs:["resumen","engagement"]},canales:{label:"Canales",icon:"\uD83D\uDCE1",subTabs:["grupos"]},hubspot:{label:"HubSpot",icon:_hubspotIcon,subTabs:[]},brevo:{label:"Brevo",icon:_brevoIcon,subTabs:[]},growth:{label:"Marketing",icon:"\uD83D\uDCC8",subTabs:["resumen","ads"]}};
   const [section,setSection]=useState("outbound");
   const [subTab,setSubTab]=useState("resumen");
   const [searchOpen,setSearchOpen]=useState(false);
@@ -432,6 +433,8 @@ export default function Dashboard(){
   const [qualModalLeads,setQualModalLeads]=useState(null);
   const [qualModalTitle,setQualModalTitle]=useState("");
   const [confirmedLeads,setConfirmedLeads]=useState([]);
+  const [chartDayModalData,setChartDayModalData]=useState(null);
+  const [chartHiddenBars,setChartHiddenBars]=useState({});
   const [dbLoading,setDbLoading]=useState(true);
   const [loadError,setLoadError]=useState(null);
   const [inboundLoading,setInboundLoading]=useState(false);
@@ -501,6 +504,7 @@ export default function Dashboard(){
   const [crmMeetingPhones,setCrmMeetingPhones]=useState(null);
   const [crmLeads,setCrmLeads]=useState([]);
   const [crmOwnerMap,setCrmOwnerMap]=useState({});
+  const [hsDetailDay,setHsDetailDay]=useState(null);
 
   // Email (Brevo) tab state
   const [emailLoading,setEmailLoading]=useState(false);
@@ -518,6 +522,13 @@ export default function Dashboard(){
   const [growthMonth,setGrowthMonth]=useState(function(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");});
   const [showGoalsEditor,setShowGoalsEditor]=useState(false);
   const [growthModal,setGrowthModal]=useState(null);
+
+  // Ads tab state
+  const [adsLoading,setAdsLoading]=useState(false);
+  const [adsError,setAdsError]=useState(null);
+  const [adsData,setAdsData]=useState(null);
+  const [adsInited,setAdsInited]=useState(false);
+  const [adsModal,setAdsModal]=useState(null);
 
   useEffect(function(){
     function onAuthRequired(){sessionStorage.removeItem("dashboard_password");setIsAuthenticated(false);setLoginError("Sesión expirada. Ingrese de nuevo.");}
@@ -537,8 +548,9 @@ export default function Dashboard(){
 
   // Auto-init Growth when selected for the first time
   useEffect(function(){
-    if(section==="growth"&&!growthInited&&!growthLoading&&!growthError){initGrowth();}
-  },[section]);
+    if(section==="growth"&&subTab==="resumen"&&!growthInited&&!growthLoading&&!growthError){initGrowth();}
+    if(section==="growth"&&subTab==="ads"&&!adsInited&&!adsLoading&&!adsError){initAds();}
+  },[section,subTab]);
 
   // Auto-load inbound data when navigating to inbound section
   useEffect(function(){
@@ -1173,6 +1185,152 @@ export default function Dashboard(){
     }catch(e){console.error("[Growth] Save goals error:",e);}
   }
 
+  var ADS_FAQ_OPTIONS=[
+    "Quiero m\u00E1s informaci\u00F3n sobre el Vendedor IA.",
+    "Quiero registrarme para obtener mi Vendedor IA.",
+    "\u00BFC\u00F3mo obtengo mi Vendedor IA para Whatsapp?"
+  ];
+  var ADS_FAQ_SHORT=["Info Vendedor IA","Registrarme","\u00BFC\u00F3mo obtener?"];
+  var ADS_FAQ_COLORS=[C.accent,C.green,C.purple];
+
+  function classifyFaq(msg){
+    if(!msg)return -1;
+    var lo=msg.toLowerCase();
+    if(lo.indexOf("quiero m")>=0&&lo.indexOf("informaci")>=0&&lo.indexOf("vendedor ia")>=0)return 0;
+    if(lo.indexOf("quiero registrarme")>=0&&lo.indexOf("vendedor ia")>=0)return 1;
+    if(lo.indexOf("mo obtengo mi vendedor ia")>=0)return 2;
+    return -1;
+  }
+
+  function adsCountryFlag(phone){
+    if(!phone)return"\u{1F30E}";var p=phone.replace(/^\+/,"");
+    if(p.startsWith("52"))return"\u{1F1F2}\u{1F1FD}";if(p.startsWith("54"))return"\u{1F1E6}\u{1F1F7}";
+    if(p.startsWith("55"))return"\u{1F1E7}\u{1F1F7}";if(p.startsWith("56"))return"\u{1F1E8}\u{1F1F1}";
+    if(p.startsWith("57"))return"\u{1F1E8}\u{1F1F4}";if(p.startsWith("51"))return"\u{1F1F5}\u{1F1EA}";
+    if(p.startsWith("593"))return"\u{1F1EA}\u{1F1E8}";if(p.startsWith("58"))return"\u{1F1FB}\u{1F1EA}";
+    if(p.startsWith("506"))return"\u{1F1E8}\u{1F1F7}";if(p.startsWith("502"))return"\u{1F1EC}\u{1F1F9}";
+    if(p.startsWith("1"))return"\u{1F1FA}\u{1F1F8}";return"\u{1F30E}";
+  }
+
+  function parseAdsThread(t){
+    var messages=[];
+    if(t.values_json){try{var v=JSON.parse(t.values_json);if(v&&v.messages)messages=v.messages;}catch(e){}}
+    var conversation=[];var humanMsgCount=0;var wordCount=0;var hasMeetingLink=false;
+    for(var mi=0;mi<messages.length;mi++){
+      var msg=messages[mi];
+      var msgType=msg.type==="human"?1:2;
+      var content="";
+      if(typeof msg.content==="string")content=msg.content;
+      else if(Array.isArray(msg.content))content=msg.content.map(function(b){return typeof b==="string"?b:(b&&b.text||"");}).join("");
+      var msgDt="";
+      if(msg.additional_kwargs&&msg.additional_kwargs.metadata&&msg.additional_kwargs.metadata.timestamp){
+        var ts=msg.additional_kwargs.metadata.timestamp;
+        msgDt=typeof ts==="number"?new Date(ts*1000).toISOString():String(ts);
+      }
+      if(msgType===1){humanMsgCount++;wordCount+=content.split(/\s+/).filter(Boolean).length;}
+      if(msgType===2&&content&&(content.indexOf("meetings.hubspot.com/")>=0||content.indexOf("yavendio.com/meetings")>=0))hasMeetingLink=true;
+      conversation.push([msgType,content,msgDt]);
+    }
+    var phone=t.phone_number||"";
+    var depth=humanMsgCount<=1?"rebote":humanMsgCount<=4?"corta":humanMsgCount<=9?"media":"profunda";
+    return{p:phone,ms:humanMsgCount,w:wordCount,au:false,e:depth,q:"",co:adsCountryFlag(phone),tr:[],fr:null,c:conversation,ml:hasMeetingLink,_faq:classifyFaq(t.first_human_msg),_created:t.thread_created_at,_threadId:t.thread_id};
+  }
+
+  async function initAds(monthOverride){
+    var selMonth=monthOverride||growthMonth;
+    setAdsLoading(true);setAdsError(null);
+    try{
+      var parts=selMonth.split("-");
+      var year=parseInt(parts[0]);var mo=parseInt(parts[1])-1;
+      var firstDay=new Date(year,mo,1);
+      var lastDay=new Date(year,mo+1,0,23,59,59,999);
+      var sinceStr=firstDay.toISOString();
+      var untilStr=lastDay.toISOString();
+
+      console.log("[Ads] Fetching threads + lifecycle phones",sinceStr,"to",untilStr);
+      var parallel=await Promise.all([
+        fetchAdsThreads(sinceStr,untilStr),
+        lifecyclePhonesData?Promise.resolve(lifecyclePhonesData):fetchLifecyclePhones().catch(function(e){console.warn("[Ads] Lifecycle phones failed:",e);return {};})
+      ]);
+      var threads=parallel[0];
+      var lcPhones=parallel[1];
+      if(!lifecyclePhonesData&&lcPhones)setLifecyclePhonesData(lcPhones);
+      console.log("[Ads] Got",threads.length,"threads matching FAQ patterns");
+
+      // Build MeetModal-compatible lead objects
+      var leads=[];
+      for(var i=0;i<threads.length;i++){leads.push(parseAdsThread(threads[i]));}
+
+      // Classify by FAQ option
+      var byFaq=[[],[],[]];
+      for(var fi=0;fi<leads.length;fi++){
+        var fIdx=leads[fi]._faq;
+        if(fIdx>=0)byFaq[fIdx].push(leads[fi]);
+      }
+
+      // Meeting offered & confirmed
+      var meetOffered=leads.filter(function(l){return l.ml;});
+      var meetConfirmed=[];
+      if(crmMeetingPhones){
+        for(var mc=0;mc<meetOffered.length;mc++){
+          var mph=(meetOffered[mc].p||"").replace(/\D/g,"");
+          if(!mph)continue;
+          if(crmMeetingPhones[mph]||crmMeetingPhones[mph.slice(-11)]||crmMeetingPhones[mph.slice(-10)]||crmMeetingPhones[mph.slice(-9)]||crmMeetingPhones[mph.slice(-8)]){
+            meetOffered[mc]._confirmed=true;
+            meetConfirmed.push(meetOffered[mc]);
+          }
+        }
+      }
+
+      // Signups confirmed (received step 1 of lifecycle)
+      var signupConfirmed=[];
+      for(var si=0;si<leads.length;si++){
+        var sph=(leads[si].p||"").replace(/\D/g,"");
+        var lcInfo=sph&&lcPhones?lcPhones[sph]:null;
+        if(!lcInfo&&sph.length>10)lcInfo=lcPhones[sph.slice(-10)]||lcPhones[sph.slice(-11)];
+        if(lcInfo&&lcInfo.firstStep1At){leads[si].signup=true;signupConfirmed.push(leads[si]);}
+      }
+
+      // Daily trend
+      var dailyMap={};
+      for(var d=1;d<=lastDay.getDate();d++){var key=selMonth+"-"+String(d).padStart(2,"0");dailyMap[key]=0;}
+      for(var j=0;j<leads.length;j++){
+        var dt=leads[j]._created;
+        if(dt){var dayKey=dt.slice(0,10);if(dailyMap[dayKey]!==undefined)dailyMap[dayKey]++;}
+      }
+      var dailyArr=Object.keys(dailyMap).sort().map(function(k){return{date:k,count:dailyMap[k]};});
+
+      // Country breakdown from phone prefix
+      var countryMap={};
+      for(var ci=0;ci<leads.length;ci++){
+        var ph=leads[ci].p||"";var cc="Desconocido";var pp=ph.replace(/^\+/,"");
+        if(pp.startsWith("52"))cc="Mexico";else if(pp.startsWith("54"))cc="Argentina";
+        else if(pp.startsWith("55"))cc="Brasil";else if(pp.startsWith("56"))cc="Chile";
+        else if(pp.startsWith("57"))cc="Colombia";else if(pp.startsWith("51"))cc="Peru";
+        else if(pp.startsWith("593"))cc="Ecuador";else if(pp.startsWith("58"))cc="Venezuela";
+        else if(pp.startsWith("506"))cc="Costa Rica";else if(pp.startsWith("502"))cc="Guatemala";
+        else if(pp.startsWith("1"))cc="US/Canada";else if(pp.length>3)cc="Otro";
+        if(!countryMap[cc])countryMap[cc]=0;countryMap[cc]++;
+      }
+      var countries=Object.keys(countryMap).map(function(k){return{country:k,count:countryMap[k]};});
+      countries.sort(function(a,b){return b.count-a.count;});
+
+      setAdsData({
+        total:leads.length,
+        byFaq:byFaq,
+        daily:dailyArr,
+        countries:countries,
+        leads:leads,
+        meetOffered:meetOffered,
+        meetConfirmed:meetConfirmed,
+        signupConfirmed:signupConfirmed,
+      });
+      setAdsInited(true);
+      console.log("[Ads] Done. Total:",leads.length,"Meetings offered:",meetOffered.length,"Confirmed:",meetConfirmed.length,"Signups:",signupConfirmed.length);
+    }catch(e){console.error("[Ads] Error:",e);setAdsError(e.message);}
+    finally{setAdsLoading(false);}
+  }
+
   function loadInboundData(){
     setMode(0);
     if(inboundRawRows){
@@ -1237,7 +1395,7 @@ export default function Dashboard(){
 
   function onDateFromChange(e){setDateFrom(e.target.value);}
   function onDateToChange(e){setDateTo(e.target.value);}
-  function onClickFilter(){applyDateFilter(dateFrom,dateTo);}
+  function onClickFilter(){setHsDetailDay(null);applyDateFilter(dateFrom,dateTo);}
   function clearDateFilter(){setDateFrom("");setDateTo("");applyDateFilter("","");}
   function onRegionChange(e){var v=e.target.value;setRegionFilter(v);if(section==="inbound"&&inboundRawRows){var filtered=filterRowsByDate(inboundRawRows,dateFrom,dateTo);var result=processInboundRows(filtered,v,lifecyclePhonesData,inboundHsPhones);applyResult(result);}else if(section==="outbound"&&rawRows){var filtered2=filterRowsByDate(rawRows,dateFrom,dateTo);var result2=processCSVRows(filtered2,templateConfig,v);applyResult(result2);}}
 
@@ -1310,12 +1468,24 @@ export default function Dashboard(){
       <button onClick={onClickFilter} style={{background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"6px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Filtrar</button>
       <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6}}>{tc} leads</span>
     </div>);
+    if(section==="hubspot") return (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <span style={{fontSize:12,color:C.muted}}>De</span>
+        <input type="date" value={dateFrom} onChange={onDateFromChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <span style={{fontSize:12,color:C.muted}}>Hasta</span>
+        <input type="date" value={dateTo} onChange={onDateToChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+      </div>
+      <button onClick={onClickFilter} style={{background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"6px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Filtrar</button>
+      {crmMeetings.length>0 && <span style={{fontSize:12,color:C.purple,fontWeight:700,background:C.lPurple,padding:"4px 10px",borderRadius:6}}>{crmMeetings.length} reuniones</span>}
+    </div>);
     return null;
   }
 
   var _curSec=SECTIONS[section]||{};
   var _subTabs=_curSec.subTabs||[];
-  var _subTabLabels={resumen:"Resumen",engagement:"Engagement",templates:"Templates",grupos:"Grupos"};
+  var _subTabLabels={resumen:"Resumen",engagement:"Engagement",templates:"Templates",grupos:"Grupos",ads:"Ads"};
 
   return (<div style={{display:"flex",background:C.bg,minHeight:"100vh",color:C.text,fontFamily:font,fontSize:15}}>
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
@@ -1323,6 +1493,7 @@ export default function Dashboard(){
     {showA && <MeetModal leads={meetings} mode={mode} onClose={function(){setShowA(false);}} title={"\u{1F4AC} Todas las Conversaciones"} crmContacts={crmContacts}/>}
     {showConfirmed && <MeetModal leads={confirmedLeads} mode={mode} onClose={function(){setShowConfirmed(false);}} title={"\u2705 Reuniones Confirmadas (Cruce HubSpot)"} crmContacts={crmContacts}/>}
     {qualModalLeads && <MeetModal leads={qualModalLeads} mode={mode} onClose={function(){setQualModalLeads(null);}} title={qualModalTitle} crmContacts={crmContacts}/>}
+    {chartDayModalData && <MeetModal leads={chartDayModalData.leads} mode={mode} onClose={function(){setChartDayModalData(null);}} title={chartDayModalData.title} crmContacts={crmContacts}/>}
     {selTpl && <TplModal tpl={selTpl} leads={meetings} mode={mode} onClose={function(){setSelTpl(null);}}/>}
     {topicModal && (function(){
       var tkw=TOPIC_KEYWORDS[topicModal];
@@ -1485,6 +1656,10 @@ export default function Dashboard(){
                 if(matched){actualMeetCount++;confirmedArr.push(ofertaLeadsArr[ami]);}
               }
             }
+            // Leads that received meeting link but did NOT book
+            var confirmedSet={};for(var ci=0;ci<confirmedArr.length;ci++){confirmedSet[confirmedArr[ci].p||""]=true;}
+            var notBookedArr=meetings.filter(function(l){return l.ml&&(mode===0||!l.au)&&!confirmedSet[l.p||""];});
+            var notBookedCount=notBookedArr.length;
             var actualVsOferta=ofertaCount>0?((actualMeetCount/ofertaCount)*100).toFixed(1):"0";
             var actualVsTotal=contactados>0?((actualMeetCount/contactados)*100).toFixed(1):"0";
             return (
@@ -1515,7 +1690,7 @@ export default function Dashboard(){
               <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:4}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
             </Cd>
             {/* Card 3: Oferta de Reunión */}
-            <Cd onClick={function(){setShowM(true);}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
+            <Cd onClick={function(){var tagged=meetings.filter(function(l){return l.ml;}).map(function(l){var lp=(l.p||"").replace(/\D/g,"");var isConf=false;if(lp&&typeof phoneIdx!=="undefined"&&phoneIdx){if(phoneIdx[lp])isConf=true;else if(lp.length>11&&phoneIdx[lp.slice(-11)])isConf=true;else if(lp.length>10&&phoneIdx[lp.slice(-10)])isConf=true;else if(lp.length>9&&phoneIdx[lp.slice(-9)])isConf=true;else if(lp.length>8&&phoneIdx[lp.slice(-8)])isConf=true;}return Object.assign({},l,{_confirmed:isConf});});setChartDayModalData({title:"\u{1F4C5} Leads con Oferta de Reuni\u00F3n",leads:tagged});}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4C5}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.pink+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4C5}"}</div>
@@ -1525,6 +1700,7 @@ export default function Dashboard(){
               <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1}}>{ofertaCount}</div>
               <div style={{fontSize:13,color:C.muted,marginTop:4}}>{ofertaVsResp}% de respuestas {"\u00B7"} {ofertaVsTotal}% del total</div>
               <div style={{fontSize:11,color:C.pink,fontWeight:700,marginTop:6}}>{"\u{1F4C5} Ver contactos \u2192"}</div>
+              {periodMeetPhones&&notBookedCount>0&&<div onClick={function(e){e.stopPropagation();var nbTagged=notBookedArr.map(function(l){return Object.assign({},l,{_confirmed:false});});setChartDayModalData({title:"\u274C Leads que NO agendaron reuni\u00F3n ("+notBookedCount+")",leads:nbTagged});}} style={{fontSize:11,color:"#e67e22",fontWeight:700,marginTop:4,borderTop:"1px solid "+C.border,paddingTop:4,cursor:"pointer"}}>{"\u{1F50D} Ver "+notBookedCount+" que no agendaron \u2192"}</div>}
             </Cd>
             {/* Card 4: Reunión Confirmada (HubSpot cross-reference) */}
             <Cd onClick={function(){if(confirmedArr.length>0){setConfirmedLeads(confirmedArr);setShowConfirmed(true);}}} style={{position:"relative",cursor:periodMeetPhones&&actualMeetCount>0?"pointer":"default",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
@@ -1581,6 +1757,10 @@ export default function Dashboard(){
                 if(qMatched){qActualMeet++;qConfirmedArr.push(qOfertaLeads[qai]);}
               }
             }
+            // Qualified leads that received meeting link but did NOT book
+            var qConfSet={};for(var qci=0;qci<qConfirmedArr.length;qci++){qConfSet[qConfirmedArr[qci].p||""]=true;}
+            var qNotBookedArr=qMeetings.filter(function(l){return l.ml&&!qConfSet[l.p||""];});
+            var qNotBookedCount=qNotBookedArr.length;
             var qActualVsOferta=qOferta>0?((qActualMeet/qOferta)*100).toFixed(1):"0";
             var qActualVsTotal=qContactados>0?((qActualMeet/qContactados)*100).toFixed(1):"0";
             var qLpd=lpd>0&&tc>0?Math.round(qContactados/(tc/lpd)):0;
@@ -1608,7 +1788,7 @@ export default function Dashboard(){
               <div style={{marginTop:6,fontSize:12,color:C.purple,fontWeight:600,borderTop:"1px solid "+C.border,paddingTop:6}}>{qTwoMsg} con 2+ msgs ({qTwoMsgPct}%)</div>
               <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:4}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
             </Cd>
-            <Cd onClick={function(){var ol=qMeetings.filter(function(l){return l.ml;});setQualModalLeads(ol);setQualModalTitle("\u{1F4C5} Oferta Reuni\u00F3n Calificados (Alta + Media)");}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
+            <Cd onClick={function(){var tagged=qMeetings.filter(function(l){return l.ml;}).map(function(l){var lp=(l.p||"").replace(/\D/g,"");var isConf=false;if(lp&&typeof qPhIdx!=="undefined"&&qPhIdx){if(qPhIdx[lp])isConf=true;else if(lp.length>11&&qPhIdx[lp.slice(-11)])isConf=true;else if(lp.length>10&&qPhIdx[lp.slice(-10)])isConf=true;else if(lp.length>9&&qPhIdx[lp.slice(-9)])isConf=true;else if(lp.length>8&&qPhIdx[lp.slice(-8)])isConf=true;}return Object.assign({},l,{_confirmed:isConf});});setChartDayModalData({title:"\u{1F4C5} Oferta Reuni\u00F3n Calificados (Alta + Media)",leads:tagged});}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4C5}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.pink+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4C5}"}</div>
@@ -1617,6 +1797,7 @@ export default function Dashboard(){
               <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1}}>{qOferta}</div>
               <div style={{fontSize:13,color:C.muted,marginTop:4}}>{qOfertaVsResp}% de respuestas {"\u00B7"} {qOfertaVsTotal}% del total</div>
               <div style={{fontSize:11,color:C.pink,fontWeight:700,marginTop:6}}>{"\u{1F4C5} Ver contactos \u2192"}</div>
+              {qPeriodPhones&&qNotBookedCount>0&&<div onClick={function(e){e.stopPropagation();var nbTagged=qNotBookedArr.map(function(l){return Object.assign({},l,{_confirmed:false});});setChartDayModalData({title:"\u274C Calificados que NO agendaron reuni\u00F3n ("+qNotBookedCount+")",leads:nbTagged});}} style={{fontSize:11,color:"#e67e22",fontWeight:700,marginTop:4,borderTop:"1px solid "+C.border,paddingTop:4,cursor:"pointer"}}>{"\u{1F50D} Ver "+qNotBookedCount+" que no agendaron \u2192"}</div>}
             </Cd>
             <Cd onClick={function(){if(qConfirmedArr.length>0){setConfirmedLeads(qConfirmedArr);setShowConfirmed(true);}}} style={{position:"relative",cursor:qPeriodPhones&&qActualMeet>0?"pointer":"default",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u2705"}</div>
@@ -1683,12 +1864,13 @@ export default function Dashboard(){
             }
             if(mlDate&&!isNaN(mlDate.getTime())){
               var dk=String(mlDate.getDate()).padStart(2,"0")+"/"+String(mlDate.getMonth()+1).padStart(2,"0");
-              if(!ofertaByDay[dk])ofertaByDay[dk]=0;
-              ofertaByDay[dk]++;
+              if(!ofertaByDay[dk])ofertaByDay[dk]=[];
+              ofertaByDay[dk].push(lead);
             }
           }
           // Confirmadas: rebuild phone matching (self-contained, same logic as KPI cards)
           var confirmedByDay={};
+          var gPhoneToMeetDate={};
           if(crmMeetings.length>0&&crmContacts.length>0){
             var gFromD=dateFrom?new Date(dateFrom+"T00:00:00"):null;
             var gToD=dateTo?new Date(dateTo+"T23:59:59"):null;
@@ -1705,7 +1887,6 @@ export default function Dashboard(){
               if(gps.length>0)gContactPhones[gcc.id]=gps;
             }
             // Build meeting→phones→date map
-            var gPhoneToMeetDate={};
             for(var gmi=0;gmi<gFiltM.length;gmi++){
               var gm=gFiltM[gmi];
               var gAssoc=gm.associations&&gm.associations.contacts&&gm.associations.contacts.results;
@@ -1734,8 +1915,8 @@ export default function Dashboard(){
                 var gMD=new Date(gMSt);
                 if(!isNaN(gMD.getTime())){
                   var gdk=String(gMD.getDate()).padStart(2,"0")+"/"+String(gMD.getMonth()+1).padStart(2,"0");
-                  if(!confirmedByDay[gdk])confirmedByDay[gdk]=0;
-                  confirmedByDay[gdk]++;
+                  if(!confirmedByDay[gdk])confirmedByDay[gdk]=[];
+                  confirmedByDay[gdk].push(allMlLeads[gli]);
                 }
               }
             }
@@ -1748,20 +1929,41 @@ export default function Dashboard(){
             var pa=a.split("/"),pb=b.split("/");
             var da=parseInt(pa[1])*100+parseInt(pa[0]),db=parseInt(pb[1])*100+parseInt(pb[0]);
             return da-db;
-          }).map(function(dk){return{d:dk,ofertadas:ofertaByDay[dk]||0,confirmadas:confirmedByDay[dk]||0};});
+          }).map(function(dk){return{d:dk,ofertadas:(ofertaByDay[dk]||[]).length,confirmadas:(confirmedByDay[dk]||[]).length};});
           if(chartData.length===0)return null;
+          var handleBarClick=function(data,dataKey){
+            var day=(data.payload||data).d;
+            var leads;
+            if(dataKey==="ofertadas"){
+              leads=(ofertaByDay[day]||[]).map(function(l){
+                var lp=(l.p||"").replace(/\D/g,"");
+                var isConf=false;
+                if(lp){isConf=!!(gPhoneToMeetDate[lp]||(lp.length>11&&gPhoneToMeetDate[lp.slice(-11)])||(lp.length>10&&gPhoneToMeetDate[lp.slice(-10)])||(lp.length>9&&gPhoneToMeetDate[lp.slice(-9)])||(lp.length>8&&gPhoneToMeetDate[lp.slice(-8)]));}
+                return Object.assign({},l,{_confirmed:isConf});
+              });
+            }else{
+              leads=confirmedByDay[day]||[];
+            }
+            if(leads.length>0)setChartDayModalData({title:(dataKey==="ofertadas"?"\u{1F4C5} Ofertadas ":"\u2705 Confirmadas ")+day,leads:leads});
+          };
+          var handleLegendClick=function(e){
+            var dk=e.dataKey;
+            setChartHiddenBars(function(prev){var n=Object.assign({},prev);n[dk]=!n[dk];return n;});
+          };
           return (
             <Cd style={{marginBottom:16}}>
               <Sec>Reuniones Ofertadas vs Confirmadas por D{"\u00ED"}a</Sec>
+              <div style={{fontSize:11,color:C.muted,marginBottom:4,marginTop:-4}}>Click en una barra para ver las conversaciones</div>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={chartData} margin={{left:-15,right:5,top:5,bottom:0}}>
                   <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
                   <XAxis dataKey="d" tick={{fontSize:11,fill:C.muted}}/>
                   <YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
-                  <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}}/>
-                  <Legend wrapperStyle={{fontSize:12}}/>
-                  <Bar dataKey="ofertadas" name="Ofertadas" fill={C.pink} radius={[4,4,0,0]}/>
-                  <Bar dataKey="confirmadas" name="Confirmadas" fill={C.green} radius={[4,4,0,0]}/>
+                  <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}} formatter={function(value,name,props){if(chartHiddenBars[props.dataKey])return [null,null];return [value,name];}}/>
+                  <Legend wrapperStyle={{fontSize:12,cursor:"pointer"}} onClick={handleLegendClick} formatter={function(value,entry){var hidden=chartHiddenBars[entry.dataKey];return (<span style={{color:hidden?C.muted:entry.color,textDecoration:hidden?"line-through":"none",opacity:hidden?0.5:1}}>{value}</span>);}}/>
+                  <Bar dataKey="ofertadas" name="Ofertadas" fill={chartHiddenBars.ofertadas?"transparent":C.pink} radius={[4,4,0,0]} cursor={chartHiddenBars.ofertadas?"default":"pointer"} onClick={chartHiddenBars.ofertadas?undefined:function(d){handleBarClick(d,"ofertadas");}}/>
+                  <Bar dataKey="confirmadas" name="Confirmadas" fill={chartHiddenBars.confirmadas?"transparent":C.green} radius={[4,4,0,0]} cursor={chartHiddenBars.confirmadas?"default":"pointer"} onClick={chartHiddenBars.confirmadas?undefined:function(d){handleBarClick(d,"confirmadas");}}/>
+
                 </BarChart>
               </ResponsiveContainer>
             </Cd>
@@ -2604,50 +2806,64 @@ export default function Dashboard(){
         }
         var sourceLabels={MEETINGS_PUBLIC:"Agendamiento P\u00FAblico",BIDIRECTIONAL_SYNC:"Sync Calendario",CRM_UI:"Creado Manualmente"};
 
-        // Outbound-only meeting outcomes
+        // Outbound-only meeting outcomes + IDs
         var outboundOutcomes={};
+        var outboundMeetingIds={};
         for(var mi2=0;mi2<matchedLeads.length;mi2++){
           for(var mj2=0;mj2<matchedLeads[mi2].meetings.length;mj2++){
             var om=matchedLeads[mi2].meetings[mj2].properties&&matchedLeads[mi2].meetings[mj2].properties.hs_meeting_outcome||"UNKNOWN";
             if(!outboundOutcomes[om])outboundOutcomes[om]=0;
             outboundOutcomes[om]++;
+            outboundMeetingIds[matchedLeads[mi2].meetings[mj2].id]=true;
           }
         }
+        var totalOutboundMeetings=0;
+        for(var ok in outboundOutcomes)totalOutboundMeetings+=outboundOutcomes[ok];
+        var totalInboundMeetings=filtMeetings.length-totalOutboundMeetings;
+        var inboundOutcomes={};
+        for(var ibi=0;ibi<filtMeetings.length;ibi++){
+          if(outboundMeetingIds[filtMeetings[ibi].id])continue;
+          var ibo=filtMeetings[ibi].properties&&filtMeetings[ibi].properties.hs_meeting_outcome||"UNKNOWN";
+          if(!inboundOutcomes[ibo])inboundOutcomes[ibo]=0;
+          inboundOutcomes[ibo]++;
+        }
+        var totalCompletadas=(totalMeetOutcomes.COMPLETED||0);
+        var pctCompletadas=filtMeetings.length>0?(totalCompletadas/filtMeetings.length*100).toFixed(1):"0";
 
         return (<>
           {crmLoading && <div style={{textAlign:"center",padding:40,color:C.muted,fontSize:15}}><div style={{width:30,height:30,border:"3px solid "+C.border,borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto 12px"}}/>Cargando datos de HubSpot...</div>}
           {crmError && <div style={{color:C.red,fontSize:13,fontWeight:600,marginBottom:16,background:C.lRed,padding:"12px 18px",borderRadius:10,border:"1px solid "+C.redBorder}}>Error: {crmError} <button onClick={function(){setCrmError(null);setCrmInited(false);}} style={{marginLeft:12,background:C.accent,color:"#fff",border:"none",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Reintentar</button></div>}
 
           {!crmLoading && crmInited && (<>
-            {/* Section 1: KPI Cards — Funnel de Reuniones */}
+            {/* Section 1: KPI Cards — Inbound + Outbound */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:22}}>
-              <Cd style={{border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
-                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Oferta de Reuni{"\u00F3"}n</div>
-                <div style={{fontSize:32,fontWeight:900,color:C.pink,fontFamily:mono,marginTop:6}}>{ofertaCount}</div>
-                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{ofertaPctResp}% de los que respondieron</div>
+              <Cd style={{border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Inbound</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.cyan,fontFamily:mono,marginTop:6}}>{totalInboundMeetings}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{inboundOutcomes.COMPLETED||0} completadas {"\u00B7"} {inboundOutcomes.SCHEDULED||0} agendadas</div>
               </Cd>
               <Cd style={{border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
-                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Reuni{"\u00F3"}n Confirmada</div>
-                <div style={{fontSize:32,fontWeight:900,color:C.green,fontFamily:mono,marginTop:6}}>{matchedCount}</div>
-                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{convRate}% de conversi{"\u00F3"}n (oferta {"\u2192"} confirmada)</div>
-              </Cd>
-              <Cd style={{border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
-                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Tasa de Conversi{"\u00F3"}n</div>
-                <div style={{fontSize:36,fontWeight:900,color:C.accent,fontFamily:mono,marginTop:6}}>{convRate}%</div>
-                <div style={{position:"relative",background:C.rowAlt,borderRadius:10,height:10,overflow:"hidden",marginTop:8}}>
-                  <div style={{background:"linear-gradient(90deg, "+C.accent+", "+C.green+")",height:"100%",width:Math.min(parseFloat(convRate),100)+"%",borderRadius:10,transition:"width 0.5s ease"}}/>
-                </div>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Outbound</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.green,fontFamily:mono,marginTop:6}}>{totalOutboundMeetings}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{outboundOutcomes.COMPLETED||0} completadas {"\u00B7"} {outboundOutcomes.SCHEDULED||0} agendadas</div>
               </Cd>
               <Cd style={{border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)"}}>
-                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Reuniones Totales HS</div>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Total Reuniones</div>
                 <div style={{fontSize:32,fontWeight:900,color:C.purple,fontFamily:mono,marginTop:6}}>{filtMeetings.length}</div>
-                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{totalMeetOutcomes.COMPLETED||0} completadas {"\u00B7"} {totalMeetOutcomes.SCHEDULED||0} agendadas {"\u00B7"} {totalMeetOutcomes.NO_SHOW||0} no show</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{totalMeetOutcomes.COMPLETED||0} completadas {"\u00B7"} {totalMeetOutcomes.NO_SHOW||0} no show</div>
+              </Cd>
+              <Cd style={{border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>% Completadas</div>
+                <div style={{fontSize:36,fontWeight:900,color:C.accent,fontFamily:mono,marginTop:6}}>{pctCompletadas}%</div>
+                <div style={{position:"relative",background:C.rowAlt,borderRadius:10,height:10,overflow:"hidden",marginTop:8}}>
+                  <div style={{background:"linear-gradient(90deg, "+C.accent+", "+C.green+")",height:"100%",width:Math.min(parseFloat(pctCompletadas),100)+"%",borderRadius:10,transition:"width 0.5s ease"}}/>
+                </div>
               </Cd>
             </div>
 
-            {/* Daily chart: Reuniones HS por día — outbound ofertadas + todas confirmadas HS */}
+            {/* Daily chart: Reuniones por día — stacked inbound+outbound */}
             {(function(){
-              // Ofertadas: leads with ml:true grouped by link date (from current meetings state)
+              // Ofertadas: leads with ml:true grouped by link date
               var hcOfertaByDay={};
               var hcMlLeads=meetings.filter(function(l){return l.ml;});
               for(var hci=0;hci<hcMlLeads.length;hci++){
@@ -2658,32 +2874,108 @@ export default function Dashboard(){
                 }
                 if(hcDate&&!isNaN(hcDate.getTime())){var hdk=String(hcDate.getDate()).padStart(2,"0")+"/"+String(hcDate.getMonth()+1).padStart(2,"0");if(!hcOfertaByDay[hdk])hcOfertaByDay[hdk]=0;hcOfertaByDay[hdk]++;}
               }
-              // Confirmadas: ALL filtered HS meetings grouped by hs_meeting_start_time
-              var hcConfByDay={};
+              // Split HS meetings into inbound and outbound per day (with meeting lists for detail)
+              var hcInboundByDay={};
+              var hcOutboundByDay={};
+              var hcInboundMeetByDay={};
+              var hcOutboundMeetByDay={};
               for(var hmi=0;hmi<filtMeetings.length;hmi++){
                 var hSt=filtMeetings[hmi].properties&&filtMeetings[hmi].properties.hs_meeting_start_time;
                 if(!hSt)continue;
                 var hMD=new Date(hSt);
                 if(isNaN(hMD.getTime()))continue;
                 var hmdk=String(hMD.getDate()).padStart(2,"0")+"/"+String(hMD.getMonth()+1).padStart(2,"0");
-                if(!hcConfByDay[hmdk])hcConfByDay[hmdk]=0;
-                hcConfByDay[hmdk]++;
+                if(outboundMeetingIds[filtMeetings[hmi].id]){
+                  if(!hcOutboundByDay[hmdk])hcOutboundByDay[hmdk]=0;
+                  hcOutboundByDay[hmdk]++;
+                  if(!hcOutboundMeetByDay[hmdk])hcOutboundMeetByDay[hmdk]=[];
+                  hcOutboundMeetByDay[hmdk].push(filtMeetings[hmi]);
+                }else{
+                  if(!hcInboundByDay[hmdk])hcInboundByDay[hmdk]=0;
+                  hcInboundByDay[hmdk]++;
+                  if(!hcInboundMeetByDay[hmdk])hcInboundMeetByDay[hmdk]=[];
+                  hcInboundMeetByDay[hmdk].push(filtMeetings[hmi]);
+                }
               }
               var hcAllDays={};
               var hcOK=Object.keys(hcOfertaByDay);for(var hok=0;hok<hcOK.length;hok++)hcAllDays[hcOK[hok]]=true;
-              var hcCK=Object.keys(hcConfByDay);for(var hck=0;hck<hcCK.length;hck++)hcAllDays[hcCK[hck]]=true;
-              var hcData=Object.keys(hcAllDays).sort(function(a,b){var pa=a.split("/"),pb=b.split("/");return(parseInt(pa[1])*100+parseInt(pa[0]))-(parseInt(pb[1])*100+parseInt(pb[0]));}).map(function(dk){return{d:dk,ofertadas:hcOfertaByDay[dk]||0,reunionesHS:hcConfByDay[dk]||0};});
+              var hcIK=Object.keys(hcInboundByDay);for(var hik=0;hik<hcIK.length;hik++)hcAllDays[hcIK[hik]]=true;
+              var hcBK=Object.keys(hcOutboundByDay);for(var hbk=0;hbk<hcBK.length;hbk++)hcAllDays[hcBK[hbk]]=true;
+              var hcData=Object.keys(hcAllDays).sort(function(a,b){var pa=a.split("/"),pb=b.split("/");return(parseInt(pa[1])*100+parseInt(pa[0]))-(parseInt(pb[1])*100+parseInt(pb[0]));}).map(function(dk){return{d:dk,ofertadas:hcOfertaByDay[dk]||0,inbound:hcInboundByDay[dk]||0,outbound:hcOutboundByDay[dk]||0};});
               if(hcData.length===0)return null;
+              var handleHsBarClick=function(data){
+                var day=(data.payload||data).d;
+                setHsDetailDay(hsDetailDay===day?null:day);
+              };
+              // Build detail for selected day
+              var detailMeetings=null;
+              if(hsDetailDay){
+                var inbM=hcInboundMeetByDay[hsDetailDay]||[];
+                var outM=hcOutboundMeetByDay[hsDetailDay]||[];
+                detailMeetings={inbound:inbM,outbound:outM};
+              }
               return (<Cd style={{marginBottom:22}}>
-                <Sec>Reuniones Ofertadas vs Reuniones HS por D{"\u00ED"}a</Sec>
-                <div style={{fontSize:13,color:C.muted,marginBottom:12}}>Ofertadas = links enviados por Yago {"\u00B7"} Reuniones HS = todas las reuniones en HubSpot</div>
+                <Sec>Reuniones Ofertadas vs Reuniones por D{"\u00ED"}a</Sec>
+                <div style={{fontSize:11,color:C.muted,marginBottom:4,marginTop:-4}}>Click en una barra para ver detalle del d{"\u00ED"}a</div>
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={hcData} margin={{left:-15,right:5,top:5,bottom:0}}>
                     <CartesianGrid strokeDasharray="3 3" stroke={C.border}/><XAxis dataKey="d" tick={{fontSize:11,fill:C.muted}}/><YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
-                    <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}}/><Legend wrapperStyle={{fontSize:12}}/>
-                    <Bar dataKey="ofertadas" name="Ofertadas (Yago)" fill={C.pink} radius={[4,4,0,0]}/><Bar dataKey="reunionesHS" name="Reuniones HS" fill={C.green} radius={[4,4,0,0]}/>
+                    <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}}/>
+                    <Bar dataKey="ofertadas" name="Ofertadas" fill={C.pink} radius={[4,4,0,0]} stackId="a" cursor="pointer" onClick={handleHsBarClick}/>
+                    <Bar dataKey="outbound" name="Outbound" fill={C.green} stackId="b" radius={[0,0,0,0]} cursor="pointer" onClick={handleHsBarClick}/>
+                    <Bar dataKey="inbound" name="Inbound" fill={C.cyan} stackId="b" radius={[4,4,0,0]} cursor="pointer" onClick={handleHsBarClick}/>
                   </BarChart>
                 </ResponsiveContainer>
+                {detailMeetings && (<div style={{marginTop:16,borderTop:"1px solid "+C.border,paddingTop:16}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+                    <div style={{fontSize:15,fontWeight:800,color:C.text}}>Detalle {hsDetailDay} {"\u2014"} {detailMeetings.inbound.length+detailMeetings.outbound.length} reuniones</div>
+                    <button onClick={function(){setHsDetailDay(null);}} style={{background:"none",border:"1px solid "+C.border,borderRadius:6,padding:"4px 10px",fontSize:12,fontWeight:600,cursor:"pointer",color:C.muted,fontFamily:font}}>Cerrar</button>
+                  </div>
+                  {detailMeetings.outbound.length>0 && (<div style={{marginBottom:14}}>
+                    <div style={{fontSize:12,fontWeight:700,color:C.green,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Outbound ({detailMeetings.outbound.length})</div>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                      <thead><tr style={{borderBottom:"2px solid "+C.border}}>
+                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>T{"\u00ED"}tulo</th>
+                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>Hora</th>
+                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>Outcome</th>
+                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>Owner</th>
+                      </tr></thead>
+                      <tbody>{detailMeetings.outbound.map(function(m,i){
+                        var p=m.properties||{};
+                        var oc=outcomeColor[p.hs_meeting_outcome]||C.muted;
+                        var st=p.hs_meeting_start_time?new Date(p.hs_meeting_start_time):null;
+                        return (<tr key={"o"+i} style={{borderBottom:"1px solid "+C.border+"66",background:i%2===0?C.lGreen+"44":"transparent"}}>
+                          <td style={{padding:"8px 10px",fontWeight:600}}>{p.hs_meeting_title||"Sin t\u00EDtulo"}</td>
+                          <td style={{padding:"8px 10px",fontFamily:mono}}>{st?st.toLocaleTimeString("es",{hour:"2-digit",minute:"2-digit"}):"\u2014"}</td>
+                          <td style={{padding:"8px 10px"}}><span style={{background:oc+"18",color:oc,padding:"2px 8px",borderRadius:6,fontWeight:700,fontSize:11}}>{p.hs_meeting_outcome||"UNKNOWN"}</span></td>
+                          <td style={{padding:"8px 10px",color:C.sub}}>{crmOwnerMap[p.hubspot_owner_id]||p.hubspot_owner_id||"\u2014"}</td>
+                        </tr>);
+                      })}</tbody>
+                    </table>
+                  </div>)}
+                  {detailMeetings.inbound.length>0 && (<div>
+                    <div style={{fontSize:12,fontWeight:700,color:C.cyan,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Inbound ({detailMeetings.inbound.length})</div>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                      <thead><tr style={{borderBottom:"2px solid "+C.border}}>
+                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>T{"\u00ED"}tulo</th>
+                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>Hora</th>
+                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>Outcome</th>
+                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>Owner</th>
+                      </tr></thead>
+                      <tbody>{detailMeetings.inbound.map(function(m,i){
+                        var p=m.properties||{};
+                        var oc=outcomeColor[p.hs_meeting_outcome]||C.muted;
+                        var st=p.hs_meeting_start_time?new Date(p.hs_meeting_start_time):null;
+                        return (<tr key={"i"+i} style={{borderBottom:"1px solid "+C.border+"66",background:i%2===0?C.lBlue+"44":"transparent"}}>
+                          <td style={{padding:"8px 10px",fontWeight:600}}>{p.hs_meeting_title||"Sin t\u00EDtulo"}</td>
+                          <td style={{padding:"8px 10px",fontFamily:mono}}>{st?st.toLocaleTimeString("es",{hour:"2-digit",minute:"2-digit"}):"\u2014"}</td>
+                          <td style={{padding:"8px 10px"}}><span style={{background:oc+"18",color:oc,padding:"2px 8px",borderRadius:6,fontWeight:700,fontSize:11}}>{p.hs_meeting_outcome||"UNKNOWN"}</span></td>
+                          <td style={{padding:"8px 10px",color:C.sub}}>{crmOwnerMap[p.hubspot_owner_id]||p.hubspot_owner_id||"\u2014"}</td>
+                        </tr>);
+                      })}</tbody>
+                    </table>
+                  </div>)}
+                </div>)}
               </Cd>);
             })()}
 
@@ -3139,7 +3431,129 @@ export default function Dashboard(){
         </>);
       })()}
 
-      {section==="growth" && (function(){
+      {section==="growth" && subTab==="ads" && (function(){
+        var ad=adsData||{};
+        var adLeads=ad.leads||[];
+        var adDaily=ad.daily||[];
+        var adCountries=ad.countries||[];
+        var adByFaq=ad.byFaq||[[],[],[]];
+        var adMeetOffered=ad.meetOffered||[];
+        var adMeetConfirmed=ad.meetConfirmed||[];
+        var adSignups=ad.signupConfirmed||[];
+        var faqCounts=[adByFaq[0].length,adByFaq[1].length,adByFaq[2].length];
+        var faqData=ADS_FAQ_SHORT.map(function(label,i){return{name:label,leads:adByFaq[i],count:faqCounts[i],color:ADS_FAQ_COLORS[i]};});
+        var maxFaq=Math.max.apply(null,faqCounts.concat([1]));
+
+        function openAdsModal(title,leads){setAdsModal({title:title,leads:leads});}
+
+        return (<>
+          {adsModal && <MeetModal leads={adsModal.leads} mode={0} onClose={function(){setAdsModal(null);}} title={adsModal.title} crmContacts={crmContacts}/>}
+
+          {adsLoading && <div style={{textAlign:"center",padding:40,color:C.muted,fontSize:15}}><div style={{width:30,height:30,border:"3px solid "+C.border,borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto 12px"}}/>Cargando datos de Ads...</div>}
+          {adsError && <div style={{color:C.red,fontSize:13,fontWeight:600,marginBottom:16,background:C.lRed,padding:"12px 18px",borderRadius:10,border:"1px solid "+C.redBorder}}>Error: {adsError} <button onClick={function(){setAdsError(null);setAdsInited(false);}} style={{marginLeft:12,background:C.accent,color:"#fff",border:"none",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Reintentar</button></div>}
+
+          {/* Header bar */}
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:18,flexWrap:"wrap"}}>
+            <input type="month" value={growthMonth} onChange={function(e){setGrowthMonth(e.target.value);setAdsInited(false);}} style={{padding:"8px 14px",border:"1px solid "+C.border,borderRadius:10,fontSize:14,fontFamily:font,background:C.inputBg,color:C.text,outline:"none"}}/>
+            <button onClick={function(){setAdsInited(false);initAds();}} disabled={adsLoading} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"8px 20px",fontSize:13,fontWeight:700,cursor:adsLoading?"wait":"pointer",fontFamily:font,opacity:adsLoading?0.6:1}}>Actualizar</button>
+          </div>
+
+          {!adsLoading && adsInited && (<>
+            {/* KPI row 1: Total + FAQ breakdown */}
+            <Sec>Conversaciones por FAQ</Sec>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:22}}>
+              <Cd onClick={function(){openAdsModal("Todas las Conversaciones Ads ("+adLeads.length+")",adLeads);}} style={{cursor:"pointer",border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.accent+"08 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Total Conversaciones Ads</div>
+                <div style={{fontSize:36,fontWeight:900,color:C.accent,fontFamily:mono,marginTop:6}}>{(ad.total||0).toLocaleString()}</div>
+                <div style={{fontSize:11,color:C.accent,marginTop:8,fontWeight:600}}>Click para ver conversaciones {"\u2192"}</div>
+              </Cd>
+              {faqData.map(function(f,idx){
+                return <Cd key={idx} onClick={function(){openAdsModal(f.name+" ("+f.count+")",f.leads);}} style={{cursor:"pointer",border:"2px solid "+f.color+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+f.color+"08 100%)"}}>
+                  <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>{f.name}</div>
+                  <div style={{fontSize:36,fontWeight:900,color:f.color,fontFamily:mono,marginTop:6}}>{f.count.toLocaleString()}</div>
+                  <div style={{fontSize:12,color:C.muted,marginTop:2}}>{ad.total>0?(f.count/ad.total*100).toFixed(1):0}% del total</div>
+                  <div style={{fontSize:11,color:f.color,marginTop:8,fontWeight:600}}>Click para ver conversaciones {"\u2192"}</div>
+                </Cd>;
+              })}
+            </div>
+
+            {/* KPI row 2: Funnel - Meetings offered, confirmed, signups */}
+            <Sec>Funnel de Conversi{"\u00F3"}n</Sec>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,marginBottom:22}}>
+              <Cd onClick={function(){openAdsModal("Reuni\u00F3n Ofrecida ("+adMeetOffered.length+")",adMeetOffered);}} style={{cursor:"pointer",border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.cyan+"08 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Reuniones Ofrecidas</div>
+                <div style={{fontSize:36,fontWeight:900,color:C.cyan,fontFamily:mono,marginTop:6}}>{adMeetOffered.length.toLocaleString()}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{ad.total>0?(adMeetOffered.length/ad.total*100).toFixed(1):0}% de conversaciones</div>
+                <div style={{fontSize:11,color:C.cyan,marginTop:8,fontWeight:600}}>Click para ver conversaciones {"\u2192"}</div>
+              </Cd>
+              <Cd onClick={function(){openAdsModal("Reuniones Confirmadas ("+adMeetConfirmed.length+")",adMeetConfirmed);}} style={{cursor:"pointer",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.green+"08 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Reuniones Confirmadas</div>
+                <div style={{fontSize:36,fontWeight:900,color:C.green,fontFamily:mono,marginTop:6}}>{adMeetConfirmed.length.toLocaleString()}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{adMeetOffered.length>0?(adMeetConfirmed.length/adMeetOffered.length*100).toFixed(1):0}% de ofrecidas</div>
+                <div style={{fontSize:11,color:C.green,marginTop:8,fontWeight:600}}>Click para ver conversaciones {"\u2192"}</div>
+              </Cd>
+              <Cd onClick={function(){openAdsModal("Signups Confirmados ("+adSignups.length+")",adSignups);}} style={{cursor:"pointer",border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.purple+"08 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Signups Confirmados</div>
+                <div style={{fontSize:36,fontWeight:900,color:C.purple,fontFamily:mono,marginTop:6}}>{adSignups.length.toLocaleString()}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{ad.total>0?(adSignups.length/ad.total*100).toFixed(1):0}% de conversaciones</div>
+                <div style={{fontSize:11,color:C.purple,marginTop:8,fontWeight:600}}>Click para ver conversaciones {"\u2192"}</div>
+              </Cd>
+            </div>
+
+            {/* Daily trend chart */}
+            <Cd style={{marginBottom:22}}>
+              <Sec>Tendencia Diaria</Sec>
+              <div style={{width:"100%",height:260}}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={adDaily} margin={{top:10,right:30,left:0,bottom:0}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                    <XAxis dataKey="date" tick={{fontSize:11,fill:C.muted}} tickFormatter={function(v){return v.slice(8);}}/>
+                    <YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
+                    <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:12}} labelFormatter={function(v){return "Fecha: "+v;}}/>
+                    <Area type="monotone" dataKey="count" stroke={C.accent} fill={C.accent+"33"} strokeWidth={2} name="Conversaciones"/>
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </Cd>
+
+            {/* FAQ breakdown + Country breakdown side by side */}
+            <div style={{display:"flex",gap:16,marginBottom:22,flexWrap:"wrap"}}>
+              <Cd style={{flex:1,minWidth:300}}>
+                <Sec>Breakdown por FAQ</Sec>
+                {faqData.map(function(f,idx){
+                  var pct=maxFaq>0?(f.count/maxFaq*100):0;
+                  return <div key={idx} onClick={function(){openAdsModal(f.name+" ("+f.count+")",f.leads);}} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,cursor:"pointer",padding:"4px 6px",borderRadius:8,transition:"background 0.15s"}} onMouseEnter={function(e){e.currentTarget.style.background=C.rowAlt;}} onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}>
+                    <div style={{width:160,fontSize:12,fontWeight:600,color:C.sub,textAlign:"right",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.name}</div>
+                    <div style={{flex:1,background:C.barTrack,borderRadius:6,height:22,overflow:"hidden"}}>
+                      <div style={{height:"100%",borderRadius:6,background:f.color,width:pct+"%",transition:"width 0.3s ease"}}/>
+                    </div>
+                    <div style={{width:50,fontSize:13,fontWeight:800,fontFamily:mono,color:C.text}}>{f.count}</div>
+                  </div>;
+                })}
+                {faqData.length===0 && <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:20}}>Sin datos</div>}
+              </Cd>
+              <Cd style={{flex:1,minWidth:300}}>
+                <Sec>Breakdown por Pa{"\u00ED"}s</Sec>
+                {adCountries.map(function(c,idx){
+                  var maxC=adCountries.length>0?adCountries[0].count:1;
+                  var pct=maxC>0?(c.count/maxC*100):0;
+                  var clr=[C.accent,C.green,C.purple,C.cyan,C.orange,C.pink,C.yellow,C.red][idx%8];
+                  return <div key={c.country} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                    <div style={{width:120,fontSize:12,fontWeight:600,color:C.sub,textAlign:"right",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.country}</div>
+                    <div style={{flex:1,background:C.barTrack,borderRadius:6,height:22,overflow:"hidden"}}>
+                      <div style={{height:"100%",borderRadius:6,background:clr,width:pct+"%",transition:"width 0.3s ease"}}/>
+                    </div>
+                    <div style={{width:50,fontSize:13,fontWeight:800,fontFamily:mono,color:C.text}}>{c.count}</div>
+                  </div>;
+                })}
+                {adCountries.length===0 && <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:20}}>Sin datos</div>}
+              </Cd>
+            </div>
+          </>)}
+        </>);
+      })()}
+
+      {section==="growth" && subTab==="resumen" && (function(){
         var gd=growthData||{};
         var lat=gd.latam||{};var bra=gd.brasil||{};
         var latS=gd.latamSources||[];var braS=gd.brasilSources||[];

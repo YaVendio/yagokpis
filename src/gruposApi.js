@@ -1,17 +1,29 @@
 import { supabase } from "./supabase";
+import { withRetry } from "./apiRetry";
 
 export async function callMeuGrupoVip(endpoint, params) {
   var password = sessionStorage.getItem("dashboard_password") || "";
-  var { data, error } = await supabase.functions.invoke("meugrupovip", {
-    body: { endpoint: endpoint, params: params || {}, password: password },
-  });
-  if (error) {
-    var status = error.context && error.context.status;
-    if (status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
-    var msg = data && data.error || error.message || "MeuGrupoVip API error";
-    throw new Error(msg);
+  try {
+    return await withRetry(function () { return _invokeMeuGrupoVip(endpoint, params, password); });
+  } catch (e) {
+    if (e._status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
+    throw e;
   }
-  return data;
+}
+
+function _invokeMeuGrupoVip(endpoint, params, password) {
+  return supabase.functions.invoke("meugrupovip", {
+    body: { endpoint: endpoint, params: params || {}, password: password },
+  }).then(function (res) {
+    if (res.error) {
+      var status = res.error.context && res.error.context.status;
+      var msg = res.data && res.data.error || res.error.message || "MeuGrupoVip API error";
+      var err = new Error(msg);
+      err._status = status;
+      throw err;
+    }
+    return res.data;
+  });
 }
 
 export async function fetchCampaigns() {

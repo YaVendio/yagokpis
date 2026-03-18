@@ -1,20 +1,32 @@
 import { supabase } from "./supabase";
+import { withRetry } from "./apiRetry";
 
 export async function callHubSpot(endpoint, params, body) {
   var password = sessionStorage.getItem("dashboard_password") || "";
+  try {
+    return await withRetry(function () { return _invokeHubSpot(endpoint, params, body, password); });
+  } catch (e) {
+    if (e._status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
+    throw e;
+  }
+}
+
+function _invokeHubSpot(endpoint, params, body, password) {
   var payload = { endpoint: endpoint, password: password };
   if (body) payload.body = body;
   else if (params) payload.params = params;
-  var { data, error } = await supabase.functions.invoke("hubspot", {
+  return supabase.functions.invoke("hubspot", {
     body: payload,
+  }).then(function (res) {
+    if (res.error) {
+      var status = res.error.context && res.error.context.status;
+      var msg = res.data && res.data.error || res.error.message || "HubSpot API error";
+      var err = new Error(msg);
+      err._status = status;
+      throw err;
+    }
+    return res.data;
   });
-  if (error) {
-    var status = error.context && error.context.status;
-    if (status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
-    var msg = data && data.error || error.message || "HubSpot API error";
-    throw new Error(msg);
-  }
-  return data;
 }
 
 export async function fetchAllContacts() {

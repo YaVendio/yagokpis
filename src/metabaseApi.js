@@ -1,17 +1,29 @@
 import { supabase } from "./supabase";
+import { withRetry } from "./apiRetry";
 
 export async function queryMetabase(sql) {
   var password = sessionStorage.getItem("dashboard_password") || "";
-  var { data, error } = await supabase.functions.invoke("metabase", {
-    body: { sql: sql, password: password },
-  });
-  if (error) {
-    var status = error.context && error.context.status;
-    if (status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
-    var msg = data && data.error || error.message || "Metabase API error";
-    throw new Error(msg);
+  try {
+    return await withRetry(function () { return _invokeMetabase(sql, password); });
+  } catch (e) {
+    if (e._status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
+    throw e;
   }
-  return data;
+}
+
+function _invokeMetabase(sql, password) {
+  return supabase.functions.invoke("metabase", {
+    body: { sql: sql, password: password },
+  }).then(function (res) {
+    if (res.error) {
+      var status = res.error.context && res.error.context.status;
+      var msg = res.data && res.data.error || res.error.message || "Metabase API error";
+      var err = new Error(msg);
+      err._status = status;
+      throw err;
+    }
+    return res.data;
+  });
 }
 
 export async function fetchThreads(stepFilter, since) {
@@ -581,4 +593,58 @@ export function expandThreadMessages(threads) {
   }
 
   return rows;
+}
+
+export async function fetchAdsThreads(since, until) {
+  var query =
+    "WITH first_human AS (\n" +
+    "    SELECT\n" +
+    "        t.thread_id,\n" +
+    "        t.created_at AS thread_created_at,\n" +
+    "        t.metadata->>'phone_number' AS phone_from_meta,\n" +
+    "        t.metadata->>'phone' AS phone2,\n" +
+    "        t.metadata->>'wa_id' AS wa_id,\n" +
+    "        t.metadata->>'contact_phone' AS contact_phone,\n" +
+    "        (SELECT m.val->>'content'\n" +
+    "         FROM jsonb_array_elements(t.\"values\"->'messages') WITH ORDINALITY AS m(val, idx)\n" +
+    "         WHERE m.val->>'type' = 'human'\n" +
+    "         ORDER BY m.idx LIMIT 1\n" +
+    "        ) AS first_human_msg,\n" +
+    "        (SELECT count(*) FROM jsonb_array_elements(t.\"values\"->'messages') m2) AS total_messages,\n" +
+    "        (SELECT count(*) FROM jsonb_array_elements(t.\"values\"->'messages') m3 WHERE m3->>'type' = 'human') AS human_messages,\n" +
+    "        t.\"values\"::text AS values_json\n" +
+    "    FROM thread t\n" +
+    "    WHERE t.created_at >= '" + since + "'\n" +
+    "      AND t.created_at <= '" + until + "'\n" +
+    "      AND jsonb_array_length(COALESCE(t.\"values\"->'messages', '[]'::jsonb)) > 0\n" +
+    ")\n" +
+    "SELECT * FROM first_human\n" +
+    "WHERE first_human_msg ILIKE '%quiero m_s informaci_n sobre el vendedor ia%'\n" +
+    "   OR first_human_msg ILIKE '%quiero registrarme para obtener mi vendedor ia%'\n" +
+    "   OR first_human_msg ILIKE '%c_mo obtengo mi vendedor ia para whatsapp%'\n" +
+    "ORDER BY thread_created_at DESC";
+
+  var result = await queryMetabase(query);
+
+  var colIdx = {};
+  for (var i = 0; i < result.columns.length; i++) {
+    colIdx[result.columns[i]] = i;
+  }
+
+  var threads = [];
+  for (var j = 0; j < result.results.length; j++) {
+    var row = result.results[j];
+    var phone = row[colIdx["phone_from_meta"]] || row[colIdx["phone2"]] || row[colIdx["wa_id"]] || row[colIdx["contact_phone"]] || "";
+    threads.push({
+      thread_id: row[colIdx["thread_id"]],
+      phone_number: phone,
+      thread_created_at: row[colIdx["thread_created_at"]],
+      first_human_msg: row[colIdx["first_human_msg"]] || "",
+      total_messages: row[colIdx["total_messages"]] || 0,
+      human_messages: row[colIdx["human_messages"]] || 0,
+      values_json: row[colIdx["values_json"]] || "",
+    });
+  }
+
+  return threads;
 }

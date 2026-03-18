@@ -1,20 +1,32 @@
 import { supabase } from "./supabase";
+import { withRetry } from "./apiRetry";
 
 export async function callPostHog(endpoint, params, body) {
   var password = sessionStorage.getItem("dashboard_password") || "";
+  try {
+    return await withRetry(function () { return _invokePostHog(endpoint, params, body, password); });
+  } catch (e) {
+    if (e._status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
+    throw e;
+  }
+}
+
+function _invokePostHog(endpoint, params, body, password) {
   var payload = { endpoint: endpoint, password: password };
   if (body) payload.body = body;
   else if (params) payload.params = params;
-  var { data, error } = await supabase.functions.invoke("posthog", {
+  return supabase.functions.invoke("posthog", {
     body: payload,
+  }).then(function (res) {
+    if (res.error) {
+      var status = res.error.context && res.error.context.status;
+      var msg = res.data && res.data.error || res.error.message || "PostHog API error";
+      var err = new Error(msg);
+      err._status = status;
+      throw err;
+    }
+    return res.data;
   });
-  if (error) {
-    var status = error.context && error.context.status;
-    if (status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
-    var msg = data && data.error || error.message || "PostHog API error";
-    throw new Error(msg);
-  }
-  return data;
 }
 
 // Stub — will be implemented when specific PostHog insight IDs are defined

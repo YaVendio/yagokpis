@@ -1,21 +1,33 @@
 import { supabase } from "./supabase";
+import { withRetry } from "./apiRetry";
 
 export async function callBrevo(endpoint, params) {
   var password = sessionStorage.getItem("dashboard_password") || "";
-  var { data, error } = await supabase.functions.invoke("brevo", {
+  try {
+    return await withRetry(function () { return _invokeBrevo(endpoint, params, password); });
+  } catch (e) {
+    if (e._status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
+    throw e;
+  }
+}
+
+function _invokeBrevo(endpoint, params, password) {
+  return supabase.functions.invoke("brevo", {
     body: { endpoint: endpoint, params: params || {}, password: password },
+  }).then(function (res) {
+    if (res.error) {
+      var status = res.error.context && res.error.context.status;
+      var msg = (res.data && res.data.error) || res.error.message || "Brevo API error";
+      var err = new Error(msg);
+      err._status = status;
+      throw err;
+    }
+    // Handle proxied Brevo API errors (returned as 200 with ok:false)
+    if (res.data && res.data.ok === false) {
+      throw new Error(res.data.error || "Unknown Brevo API error");
+    }
+    return res.data;
   });
-  if (error) {
-    var status = error.context && error.context.status;
-    if (status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
-    var msg = (data && data.error) || error.message || "Brevo API error";
-    throw new Error(msg);
-  }
-  // Handle proxied Brevo API errors (returned as 200 with ok:false)
-  if (data && data.ok === false) {
-    throw new Error(data.error || "Unknown Brevo API error");
-  }
-  return data;
 }
 
 // --- Diagnostic: discover templates & transactional events available to this API key ---
