@@ -436,6 +436,69 @@ export function expandInboundThreadMessages(threads) {
   return rows;
 }
 
+var INBOUND_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
+export async function fetchInboundCached(since) {
+  // Try Supabase cache first
+  try {
+    var cacheRes = await supabase
+      .from("hubspot_cache")
+      .select("data, updated_at")
+      .eq("key", "inbound_rows")
+      .single();
+    if (cacheRes.data && cacheRes.data.data) {
+      var age = Date.now() - new Date(cacheRes.data.updated_at).getTime();
+      if (age < INBOUND_CACHE_TTL) {
+        console.log("[Inbound] Using cache (" + Math.round(age / 1000) + "s old, " + cacheRes.data.data.length + " rows)");
+        return cacheRes.data.data;
+      }
+    }
+  } catch (e) { /* cache miss */ }
+
+  // Cache miss — fetch from Metabase
+  console.log("[Inbound] Cache miss, fetching from Metabase...");
+  var threads = await fetchInboundThreadsFiltered(since);
+  var rows = expandInboundThreadMessages(threads);
+
+  // Save to cache (fire-and-forget)
+  supabase
+    .from("hubspot_cache")
+    .upsert({ key: "inbound_rows", data: rows, updated_at: new Date().toISOString() })
+    .then(function () { console.log("[Inbound] Cached " + rows.length + " rows"); })
+    .catch(function (e) { console.warn("[Inbound] Cache save failed:", e); });
+
+  return rows;
+}
+
+export async function fetchLifecyclePhonesCached() {
+  // Try Supabase cache first
+  try {
+    var cacheRes = await supabase
+      .from("hubspot_cache")
+      .select("data, updated_at")
+      .eq("key", "lifecycle_phones")
+      .single();
+    if (cacheRes.data && cacheRes.data.data) {
+      var age = Date.now() - new Date(cacheRes.data.updated_at).getTime();
+      if (age < INBOUND_CACHE_TTL) {
+        console.log("[Lifecycle] Using cache (" + Math.round(age / 1000) + "s old)");
+        return cacheRes.data.data;
+      }
+    }
+  } catch (e) { /* cache miss */ }
+
+  console.log("[Lifecycle] Cache miss, fetching from Metabase...");
+  var phones = await fetchLifecyclePhones();
+
+  supabase
+    .from("hubspot_cache")
+    .upsert({ key: "lifecycle_phones", data: phones, updated_at: new Date().toISOString() })
+    .then(function () { console.log("[Lifecycle] Cached"); })
+    .catch(function (e) { console.warn("[Lifecycle] Cache save failed:", e); });
+
+  return phones;
+}
+
 export function expandThreadMessages(threads) {
   // Phase 1: Parse messages for each thread and group threads by phone_number.
   // This merges all steps of the same lead into one virtual thread, reproducing
