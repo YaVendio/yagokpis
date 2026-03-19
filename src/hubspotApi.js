@@ -1,12 +1,13 @@
 import { supabase } from "./supabase";
 import { withRetry } from "./apiRetry";
+import { dispatchAuthRequired } from "./authGuard";
 
 export async function callHubSpot(endpoint, params, body) {
   var password = sessionStorage.getItem("dashboard_password") || "";
   try {
     return await withRetry(function () { return _invokeHubSpot(endpoint, params, body, password); });
   } catch (e) {
-    if (e._status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
+    if (e._status === 401) { dispatchAuthRequired(); throw new Error("Unauthorized"); }
     throw e;
   }
 }
@@ -47,6 +48,7 @@ export async function fetchAllContacts() {
 }
 
 // Fetch only contacts that have a phone number (search API)
+// Resilient: if a page fails (e.g. 502 rate limit), returns what was collected so far
 export async function fetchAllContactsWithPhone() {
   var all = [];
   var after = undefined;
@@ -60,10 +62,15 @@ export async function fetchAllContactsWithPhone() {
       limit: 100,
     };
     if (after) searchBody.after = after;
-    var data = await callHubSpot("/crm/v3/objects/contacts/search", null, searchBody);
-    if (data.results) all = all.concat(data.results);
-    if (!data.paging || !data.paging.next || !data.paging.next.after) break;
-    after = data.paging.next.after;
+    try {
+      var data = await callHubSpot("/crm/v3/objects/contacts/search", null, searchBody);
+      if (data.results) all = all.concat(data.results);
+      if (!data.paging || !data.paging.next || !data.paging.next.after) break;
+      after = data.paging.next.after;
+    } catch (e) {
+      console.warn("[HS] Contacts page failed, returning partial:", all.length, "contacts so far. Error:", e.message);
+      break;
+    }
   }
   console.log("[HS] Contacts with phone:", all.length);
   return all;
@@ -86,7 +93,7 @@ export async function fetchMeetingsSince(sinceIso) {
           value: String(sinceMs)
         }]
       }],
-      properties: ["hs_meeting_title", "hs_meeting_start_time", "hs_meeting_end_time", "hs_meeting_outcome", "hubspot_owner_id", "hs_meeting_source", "hs_createdate"],
+      properties: ["hs_meeting_title", "hs_meeting_start_time", "hs_meeting_end_time", "hs_meeting_outcome", "hubspot_owner_id", "hs_meeting_source", "hs_createdate", "hs_activity_type"],
       limit: 100,
     };
     if (after) searchBody.after = after;

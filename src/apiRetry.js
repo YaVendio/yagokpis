@@ -8,7 +8,7 @@ export async function withRetry(fn, maxRetries, delayMs) {
     } catch (e) {
       lastError = e;
       var status = e._status;
-      var retryable = !status || status === 401 || status === 502 || status === 503;
+      var retryable = !status || status === 429 || status === 502 || status === 503;
       if (attempt < maxRetries && retryable) {
         await new Promise(function (r) { setTimeout(r, delayMs * (attempt + 1)); });
       }

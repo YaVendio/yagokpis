@@ -1,12 +1,13 @@
 import { supabase } from "./supabase";
 import { withRetry } from "./apiRetry";
+import { dispatchAuthRequired } from "./authGuard";
 
 export async function queryMetabase(sql) {
   var password = sessionStorage.getItem("dashboard_password") || "";
   try {
     return await withRetry(function () { return _invokeMetabase(sql, password); });
   } catch (e) {
-    if (e._status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
+    if (e._status === 401) { dispatchAuthRequired(); throw new Error("Unauthorized"); }
     throw e;
   }
 }
@@ -436,6 +437,133 @@ export function expandInboundThreadMessages(threads) {
   return rows;
 }
 
+// Lightweight inbound fetch — extracts messages server-side to avoid 6MB response limit
+export async function fetchInboundThreadsLight(since) {
+  var query =
+    "SELECT\n" +
+    "    t.thread_id,\n" +
+    "    COALESCE(t.metadata->>'phone_number', t.metadata->>'phone',\n" +
+    "             t.metadata->>'wa_id', t.metadata->>'contact_phone', '') AS phone_number,\n" +
+    "    t.created_at AS thread_created_at,\n" +
+    "    msg->>'type' AS msg_type,\n" +
+    "    CASE WHEN jsonb_typeof(msg->'content') = 'array'\n" +
+    "         THEN (SELECT string_agg(COALESCE(el->>'text', el #>> '{}', ''), '')\n" +
+    "               FROM jsonb_array_elements(msg->'content') el)\n" +
+    "         ELSE msg->>'content' END AS msg_content,\n" +
+    "    msg->'additional_kwargs'->'metadata'->>'timestamp' AS msg_ts,\n" +
+    "    msg->'additional_kwargs'->'metadata'->>'phone_number' AS msg_phone,\n" +
+    "    msg->'additional_kwargs'->'metadata'->>'phone' AS msg_phone2,\n" +
+    "    msg->'additional_kwargs'->'metadata'->>'wa_id' AS msg_wa_id,\n" +
+    "    msg->'additional_kwargs'->'metadata'->>'contact_phone' AS msg_contact_phone\n" +
+    "FROM thread t\n" +
+    "LEFT JOIN LATERAL jsonb_array_elements(\n" +
+    "  CASE WHEN jsonb_typeof(t.\"values\"->'messages') = 'array'\n" +
+    "       THEN t.\"values\"->'messages'\n" +
+    "       ELSE '[]'::jsonb END\n" +
+    ") AS msg ON true\n" +
+    "WHERE t.created_at >= '" + since + "'\n" +
+    "  AND (t.metadata->>'flow_id' IS DISTINCT FROM '1')\n" +
+    "ORDER BY t.thread_id";
+
+  var result = await queryMetabase(query);
+
+  var colIdx = {};
+  for (var i = 0; i < result.columns.length; i++) {
+    colIdx[result.columns[i]] = i;
+  }
+
+  // Group rows by thread_id
+  var threadMap = {};
+  var threadOrder = [];
+
+  for (var j = 0; j < result.results.length; j++) {
+    var row = result.results[j];
+    var tid = row[colIdx["thread_id"]];
+    var phone = row[colIdx["phone_number"]];
+    var created = row[colIdx["thread_created_at"]];
+    var msgType = row[colIdx["msg_type"]];
+    var msgContent = row[colIdx["msg_content"]];
+    var msgTs = row[colIdx["msg_ts"]];
+
+    if (!threadMap[tid]) {
+      threadMap[tid] = { phone_number: phone, thread_created_at: created, messages: [] };
+      threadOrder.push(tid);
+    }
+
+    // Try phone from message metadata if thread-level is empty
+    if (!threadMap[tid].phone_number) {
+      var mp = row[colIdx["msg_phone"]] || row[colIdx["msg_phone2"]] || row[colIdx["msg_wa_id"]] || row[colIdx["msg_contact_phone"]] || "";
+      if (mp) threadMap[tid].phone_number = mp;
+    }
+
+    if (msgType) {
+      threadMap[tid].messages.push({ type: msgType, content: msgContent || "", ts: msgTs || "" });
+    }
+  }
+
+  // Build rows in same format as expandInboundThreadMessages
+  var rows = [];
+  for (var k = 0; k < threadOrder.length; k++) {
+    var id = threadOrder[k];
+    var t = threadMap[id];
+    var msgs = t.messages;
+    var threadCreated = t.thread_created_at || "";
+
+    var hasHuman = false;
+    for (var hi = 0; hi < msgs.length; hi++) {
+      if (msgs[hi].type === "human") { hasHuman = true; break; }
+    }
+
+    if (msgs.length === 0) {
+      rows.push({
+        thread_id: id,
+        phone_number: "",
+        template_sent_at: threadCreated,
+        template_name: "",
+        step_order: "",
+        lead_qualification: "",
+        message_type: "ai",
+        message_datetime: threadCreated,
+        message_content: "",
+        is_valid_response: "false",
+      });
+      continue;
+    }
+
+    for (var m = 0; m < msgs.length; m++) {
+      var msg = msgs[m];
+      var mType = msg.type === "human" ? "human" : msg.type === "tool" ? "tool" : "ai";
+
+      var msgDatetime = "";
+      if (msg.ts) {
+        var tsNum = Number(msg.ts);
+        if (!isNaN(tsNum) && tsNum > 0) {
+          msgDatetime = new Date(tsNum * 1000).toISOString();
+        } else {
+          msgDatetime = msg.ts;
+        }
+      }
+
+      var isValid = mType === "human";
+
+      rows.push({
+        thread_id: id,
+        phone_number: hasHuman ? (t.phone_number || "") : "",
+        template_sent_at: threadCreated,
+        template_name: "",
+        step_order: "",
+        lead_qualification: "",
+        message_type: mType,
+        message_datetime: msgDatetime,
+        message_content: msg.content,
+        is_valid_response: String(isValid),
+      });
+    }
+  }
+
+  return rows;
+}
+
 var INBOUND_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 export async function fetchInboundCached(since) {
@@ -455,10 +583,9 @@ export async function fetchInboundCached(since) {
     }
   } catch (e) { /* cache miss */ }
 
-  // Cache miss — fetch from Metabase
-  console.log("[Inbound] Cache miss, fetching from Metabase...");
-  var threads = await fetchInboundThreadsFiltered(since);
-  var rows = expandInboundThreadMessages(threads);
+  // Cache miss — fetch light (server-side message extraction)
+  console.log("[Inbound] Cache miss, fetching from Metabase (light)...");
+  var rows = await fetchInboundThreadsLight(since);
 
   // Save to cache (fire-and-forget)
   supabase

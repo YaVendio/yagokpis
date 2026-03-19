@@ -1,12 +1,13 @@
 import { supabase } from "./supabase";
 import { withRetry } from "./apiRetry";
+import { dispatchAuthRequired } from "./authGuard";
 
 export async function callBrevo(endpoint, params) {
   var password = sessionStorage.getItem("dashboard_password") || "";
   try {
     return await withRetry(function () { return _invokeBrevo(endpoint, params, password); });
   } catch (e) {
-    if (e._status === 401) { window.dispatchEvent(new Event("auth-required")); throw new Error("Unauthorized"); }
+    if (e._status === 401) { dispatchAuthRequired(); throw new Error("Unauthorized"); }
     throw e;
   }
 }

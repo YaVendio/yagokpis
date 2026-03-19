@@ -9,6 +9,7 @@ import TIPS from "./tooltips";
 import { fetchCampaigns, fetchCampaignGroups, fetchCampaignLeads, formatDateForApi, formatEndDateForApi } from "./gruposApi";
 import { fetchAllContacts, fetchAllContactsWithPhone, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones, fetchMeetingsSince, fetchContactsByIds, fetchDealsSince, fetchLeadsSince, fetchGrowthLeads, fetchOwnersByIds } from "./hubspotApi";
 import { fetchAutomationDiagnostic, aggregateWorkflowStats, calculateMetrics } from "./brevoApi.js";
+import { resetAuthGuard } from "./authGuard";
 
 function getFirstOfMonth(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";}
 
@@ -509,6 +510,7 @@ export default function Dashboard(){
   const [hsReunionOwnerFilter,setHsReunionOwnerFilter]=useState([]);
   const [hsReunionDateFrom,setHsReunionDateFrom]=useState("");
   const [hsReunionDateTo,setHsReunionDateTo]=useState("");
+  const [hsReunionTypeFilter,setHsReunionTypeFilter]=useState([]);
   const [hsDetailDay,setHsDetailDay]=useState(null);
 
   // Email (Brevo) tab state
@@ -536,7 +538,7 @@ export default function Dashboard(){
   const [adsModal,setAdsModal]=useState(null);
 
   useEffect(function(){
-    function onAuthRequired(){sessionStorage.removeItem("dashboard_password");setIsAuthenticated(false);setLoginError("Sesión expirada. Ingrese de nuevo.");}
+    function onAuthRequired(){sessionStorage.removeItem("dashboard_password");setIsAuthenticated(false);setLoginError("Sesión expirada. Ingrese de nuevo.");setLoadError(null);}
     window.addEventListener("auth-required",onAuthRequired);
     return function(){window.removeEventListener("auth-required",onAuthRequired);};
   },[]);
@@ -574,6 +576,18 @@ export default function Dashboard(){
       setCrmMeetingPhones(phones);
     }
   },[crmMeetings,crmContacts]);
+
+  // Re-process inbound data when crmContacts arrives after inbound was already loaded
+  useEffect(function(){
+    if((section==="inbound"||section==="resumen")&&inboundRawRows&&crmContacts.length>0){
+      var merged=Object.assign({},inboundHsPhones||{},extractHubSpotPhones(crmContacts));
+      if(Object.keys(merged).length>0){
+        var filtered=filterRowsByDate(inboundRawRows,dateFrom,dateTo);
+        var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData,merged);
+        if(section!=="resumen") applyResult(result);
+      }
+    }
+  },[crmContacts]);
 
   // Merge HubSpot lead-pipeline deals per day into daily chart data
   const [dailyWithHs,setDailyWithHs]=useState([]);
@@ -695,7 +709,13 @@ export default function Dashboard(){
     sessionStorage.setItem("dashboard_password",loginPassword);
     try{
       await queryMetabase("SELECT 1");
+      resetAuthGuard();
+      setLoadError(null);
+      setDbLoading(true);
+      setCrmInited(false);
       setIsAuthenticated(true);
+      setConfigLoaded(false);
+      setTimeout(function(){setConfigLoaded(true);},0);
     }catch(err){
       sessionStorage.removeItem("dashboard_password");
       if(err.message==="Unauthorized") setLoginError("Contraseña incorrecta");
@@ -1413,10 +1433,17 @@ export default function Dashboard(){
   function loadInboundData(){
     var isResumen=section==="resumen";
     if(!isResumen) setMode(0);
+    // Helper: merge inboundHsPhones + crmContacts phones
+    function mergePhones(hsPhones){
+      var merged=Object.assign({},hsPhones||{});
+      if(crmContacts.length>0){Object.assign(merged,extractHubSpotPhones(crmContacts));}
+      return Object.keys(merged).length>0?merged:null;
+    }
     if(inboundRawRows){
       if(!isResumen){
+        var hp=mergePhones(inboundHsPhones);
         var filtered=filterRowsByDate(inboundRawRows,dateFrom,dateTo);
-        var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData,inboundHsPhones);
+        var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData,hp);
         applyResult(result);
       }
     }else{
@@ -1427,19 +1454,24 @@ export default function Dashboard(){
         setInboundRawRows(csvRows);
         setLifecyclePhonesData(sp);
         if(!isResumen){
+          var hp=mergePhones(inboundHsPhones);
           var filtered2=filterRowsByDate(csvRows,dateFrom,dateTo);
-          var result2=processInboundRows(filtered2,regionFilter,sp,inboundHsPhones);
+          var result2=processInboundRows(filtered2,regionFilter,sp,hp);
           applyResult(result2);
         }
         setInboundLoading(false);
         // HubSpot phone match — load in background, update when ready
         if(!inboundHsPhones){
           fetchAllContactsWithPhone().then(function(c){
-            var hp=extractHubSpotPhones(c);
-            setInboundHsPhones(hp);
+            var fetchedHp=extractHubSpotPhones(c);
+            // Merge fetched phones with crmContacts phones
+            var merged=Object.assign({},fetchedHp);
+            if(crmContacts.length>0){Object.assign(merged,extractHubSpotPhones(crmContacts));}
+            var hp2=Object.keys(merged).length>0?merged:null;
+            setInboundHsPhones(hp2);
             if(!isResumen){
               var f2=filterRowsByDate(csvRows,dateFrom,dateTo);
-              var r2=processInboundRows(f2,regionFilter,sp,hp);
+              var r2=processInboundRows(f2,regionFilter,sp,hp2);
               applyResult(r2);
             }
           }).catch(function(e){console.warn("HubSpot phones fetch failed:",e);});
@@ -1592,7 +1624,7 @@ export default function Dashboard(){
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
     {showM && <MeetModal leads={meetings.filter(function(l){return l.ml;})} mode={mode} onClose={function(){setShowM(false);}} title={"\u{1F4C5} Leads con Oferta de Reuni\u00F3n"} crmContacts={crmContacts}/>}
     {showA && <MeetModal leads={meetings} mode={mode} onClose={function(){setShowA(false);}} title={"\u{1F4AC} Todas las Conversaciones"} crmContacts={crmContacts}/>}
-    {showConfirmed && <MeetModal leads={confirmedLeads} mode={mode} onClose={function(){setShowConfirmed(false);}} title={"\u2705 Reuniones Confirmadas (Cruce HubSpot)"} crmContacts={crmContacts}/>}
+    {showConfirmed && <MeetModal leads={confirmedLeads} mode={mode} onClose={function(){setShowConfirmed(false);}} title={"\u2705 Reuniones Agendadas (Cruce HubSpot)"} crmContacts={crmContacts}/>}
     {qualModalLeads && <MeetModal leads={qualModalLeads} mode={mode} onClose={function(){setQualModalLeads(null);}} title={qualModalTitle} crmContacts={crmContacts}/>}
     {chartDayModalData && <MeetModal leads={chartDayModalData.leads} mode={mode} onClose={function(){setChartDayModalData(null);}} title={chartDayModalData.title} crmContacts={crmContacts}/>}
     {selTpl && <TplModal tpl={selTpl} leads={meetings} mode={mode} onClose={function(){setSelTpl(null);}}/>}
@@ -1839,7 +1871,7 @@ export default function Dashboard(){
         var funnelData=[
           {n:"Conversaciones",v:totalLeads,c:C.accent},
           {n:"Ofertas Reuni\u00F3n",v:totalOferta,c:C.pink},
-          {n:"Confirmadas (HS)",v:confirmedCount,c:C.green},
+          {n:"Agendadas (HS)",v:confirmedCount,c:C.green},
           {n:"Realizadas",v:realizadas,c:C.cyan}
         ];
 
@@ -1879,12 +1911,12 @@ export default function Dashboard(){
               <div style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.pink,marginTop:4,lineHeight:1}}>{totalOferta}</div>
               <div style={{fontSize:13,color:C.muted,marginTop:6}}>{totalOfertaPct}% de leads {"\u00B7"} Out: <strong>{outOferta}</strong> / In: <strong>{inbOferta}</strong></div>
             </Cd>
-            {/* Card: Confirmadas */}
+            {/* Card: Agendadas */}
             <Cd onClick={confirmedArr.length>0?function(){setConfirmedLeads(confirmedArr);setShowConfirmed(true);}:undefined} style={{border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)",position:"relative",overflow:"hidden",cursor:confirmedArr.length>0?"pointer":"default"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u2705"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div>
-                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Reuniones Confirmadas</span>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Reuniones Agendadas</span>
               </div>
               <div style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.green,marginTop:4,lineHeight:1}}>{confirmedCount}</div>
               <div style={{fontSize:13,color:C.muted,marginTop:6}}>{totalOferta>0?((confirmedCount/totalOferta)*100).toFixed(1):"0"}% de ofertas {"\u00B7"} Out: <strong>{outConfirmed}</strong> / In: <strong>{inbConfirmed}</strong></div>
@@ -1897,7 +1929,7 @@ export default function Dashboard(){
                 <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Reuniones Realizadas</span>
               </div>
               <div style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.cyan,marginTop:4,lineHeight:1}}>{realizadas}</div>
-              <div style={{fontSize:13,color:C.muted,marginTop:6}}>{realizadasPct}% de confirmadas {"\u00B7"} {filtCrmMeetings.length} en HubSpot</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:6}}>{realizadasPct}% de agendadas {"\u00B7"} {filtCrmMeetings.length} en HubSpot</div>
             </Cd>
           </div>
 
@@ -1925,14 +1957,14 @@ export default function Dashboard(){
             </BarChart></ResponsiveContainer> : <div style={{fontSize:13,color:C.muted,padding:20,textAlign:"center"}}>Sin datos para el per{"\u00ED"}odo seleccionado</div>}
           </Cd>
 
-          {/* Chart: Ofertas vs Confirmadas vs Realizadas */}
-          <Cd style={{marginBottom:24}}><Sec>Ofertas vs Confirmadas vs Realizadas por D{"\u00ED"}a</Sec>
+          {/* Chart: Ofertas vs Agendadas vs Realizadas */}
+          <Cd style={{marginBottom:24}}><Sec>Ofertas vs Agendadas vs Realizadas por D{"\u00ED"}a</Sec>
             {dailyFunnel.length>0 ? <ResponsiveContainer width="100%" height={220}><BarChart data={dailyFunnel} margin={{left:-15,right:5,top:5,bottom:0}}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border}/><XAxis dataKey="d" tick={{fontSize:11,fill:C.muted}}/><YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
               <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}}/>
               <Legend wrapperStyle={{fontSize:12}}/>
               <Bar dataKey="ofertas" name="Ofertas" fill={C.pink}/>
-              <Bar dataKey="confirmadas" name="Confirmadas" fill={C.green}/>
+              <Bar dataKey="confirmadas" name="Agendadas" fill={C.green}/>
               <Bar dataKey="realizadas" name="Realizadas" fill={C.cyan}/>
             </BarChart></ResponsiveContainer> : <div style={{fontSize:13,color:C.muted,padding:20,textAlign:"center"}}>Sin datos para el per{"\u00ED"}odo seleccionado</div>}
           </Cd>
@@ -1946,7 +1978,7 @@ export default function Dashboard(){
                   {m:"Conversaciones",o:outTc,i:inbTc,t:totalLeads},
                   {m:"Ofertas Reuni\u00F3n",o:outOferta,i:inbOferta,t:totalOferta},
                   {m:"Tasa Oferta/Leads",o:outOfertaPct+"%",i:inbOfertaPct+"%",t:totalOfertaPct+"%"},
-                  {m:"Confirmadas",o:outConfirmed,i:inbConfirmed,t:confirmedCount},
+                  {m:"Agendadas",o:outConfirmed,i:inbConfirmed,t:confirmedCount},
                   {m:"Tasa Confirm/Oferta",o:outConfirmPct+"%",i:inbConfirmPct+"%",t:totalConfirmPct+"%"},
                   {m:"Realizadas (COMPLETED)",o:"\u2014",i:"\u2014",t:realizadas},
                   {m:"Tasa Realiz/Confirm",o:"\u2014",i:"\u2014",t:realizPct+"%"}
@@ -2064,12 +2096,12 @@ export default function Dashboard(){
               <div style={{fontSize:11,color:C.pink,fontWeight:700,marginTop:6}}>{"\u{1F4C5} Ver contactos \u2192"}</div>
               {periodMeetPhones&&notBookedCount>0&&<div onClick={function(e){e.stopPropagation();var nbTagged=notBookedArr.map(function(l){return Object.assign({},l,{_confirmed:false});});setChartDayModalData({title:"\u274C Leads que NO agendaron reuni\u00F3n ("+notBookedCount+")",leads:nbTagged});}} style={{fontSize:11,color:"#e67e22",fontWeight:700,marginTop:4,borderTop:"1px solid "+C.border,paddingTop:4,cursor:"pointer"}}>{"\u{1F50D} Ver "+notBookedCount+" que no agendaron \u2192"}</div>}
             </Cd>
-            {/* Card 4: Reunión Confirmada (HubSpot cross-reference) */}
+            {/* Card 4: Reunión Agendada (HubSpot cross-reference) */}
             <Cd onClick={function(){if(confirmedArr.length>0){setConfirmedLeads(confirmedArr);setShowConfirmed(true);}}} style={{position:"relative",cursor:periodMeetPhones&&actualMeetCount>0?"pointer":"default",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u2705"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div>
-                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Reuni{"\u00F3"}n Confirmada</span>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Reuni{"\u00F3"}n Agendada</span>
               </div>
               {periodMeetPhones?(<>
                 <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.green}}>{actualMeetCount}</div>
@@ -2165,7 +2197,7 @@ export default function Dashboard(){
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u2705"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div>
-                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Reuni{"\u00F3"}n Confirmada</span>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Reuni{"\u00F3"}n Agendada</span>
               </div>
               {qPeriodPhones?(<>
                 <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.green}}>{qActualMeet}</div>
@@ -2197,7 +2229,7 @@ export default function Dashboard(){
                 }
                 var funnelRespCount=mode===1?(regionFilter==="all"&&responseStats&&responseStats.outboundRespondedReal!=null?responseStats.outboundRespondedReal:d.resp):(regionFilter==="all"&&responseStats&&responseStats.outboundResponded!=null?responseStats.outboundResponded:d.resp);
                 var correctedFunnel=funnel.map(function(f,i){if(i===0&&tc>0)return{n:f.n,v:tc,c:f.c};if(i===1)return{n:f.n,v:funnelRespCount,c:f.c};return f;});
-                var funnelFull=correctedFunnel.concat([{n:"Reuni\u00F3n Confirmada",v:actualMC,c:C.green}]);
+                var funnelFull=correctedFunnel.concat([{n:"Reuni\u00F3n Agendada",v:actualMC,c:C.green}]);
                 return funnelFull.map(function(f,i){var w=Math.max((f.v/(tc||1))*100,4);var prev=i>0?((f.v/(funnelFull[i-1].v||1))*100).toFixed(0):null;
                 return (<div key={i} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:C.sub,fontWeight:500}}><span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:6,background:f.c+"18",color:f.c,fontSize:11,fontWeight:800,marginRight:6}}>{i+1}</span>{f.n}</span><div><span style={{fontSize:17,fontWeight:800,fontFamily:mono}}>{f.v}</span><span style={{fontSize:13,color:C.muted,marginLeft:6}}>{(f.v/(tc||1)*100).toFixed(1)}%</span>{prev && <span style={{fontSize:12,color:parseFloat(prev)>=50?C.green:parseFloat(prev)>=20?C.yellow:C.red,marginLeft:6}}>({prev}%{"\u2193"})</span>}</div></div><div style={{height:24,background:C.rowAlt,borderRadius:6,overflow:"hidden"}}><div style={{height:"100%",width:w+"%",background:"linear-gradient(90deg, "+f.c+" 0%, "+f.c+"CC 100%)",borderRadius:6,transition:"width 0.5s ease"}}/></div></div>);});
               })()}
@@ -2306,7 +2338,7 @@ export default function Dashboard(){
             }else{
               leads=confirmedByDay[day]||[];
             }
-            if(leads.length>0)setChartDayModalData({title:(dataKey==="ofertadas"?"\u{1F4C5} Ofertadas ":"\u2705 Confirmadas ")+day,leads:leads});
+            if(leads.length>0)setChartDayModalData({title:(dataKey==="ofertadas"?"\u{1F4C5} Ofertadas ":"\u2705 Agendadas ")+day,leads:leads});
           };
           var handleLegendClick=function(e){
             var dk=e.dataKey;
@@ -2314,7 +2346,7 @@ export default function Dashboard(){
           };
           return (
             <Cd style={{marginBottom:16}}>
-              <Sec>Reuniones Ofertadas vs Confirmadas por D{"\u00ED"}a</Sec>
+              <Sec>Reuniones Ofertadas vs Agendadas por D{"\u00ED"}a</Sec>
               <div style={{fontSize:11,color:C.muted,marginBottom:4,marginTop:-4}}>Click en una barra para ver las conversaciones</div>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={chartData} margin={{left:-15,right:5,top:5,bottom:0}}>
@@ -2324,7 +2356,7 @@ export default function Dashboard(){
                   <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}} formatter={function(value,name,props){if(chartHiddenBars[props.dataKey])return [null,null];return [value,name];}}/>
                   <Legend wrapperStyle={{fontSize:12,cursor:"pointer"}} onClick={handleLegendClick} formatter={function(value,entry){var hidden=chartHiddenBars[entry.dataKey];return (<span style={{color:hidden?C.muted:entry.color,textDecoration:hidden?"line-through":"none",opacity:hidden?0.5:1}}>{value}</span>);}}/>
                   <Bar dataKey="ofertadas" name="Ofertadas" stackId="a" fill={chartHiddenBars.ofertadas?"transparent":C.pink} radius={[0,0,0,0]} cursor={chartHiddenBars.ofertadas?"default":"pointer"} onClick={chartHiddenBars.ofertadas?undefined:function(d){handleBarClick(d,"ofertadas");}}/>
-                  <Bar dataKey="confirmadas" name="Confirmadas" stackId="a" fill={chartHiddenBars.confirmadas?"transparent":C.green} radius={[4,4,0,0]} cursor={chartHiddenBars.confirmadas?"default":"pointer"} onClick={chartHiddenBars.confirmadas?undefined:function(d){handleBarClick(d,"confirmadas");}}/>
+                  <Bar dataKey="confirmadas" name="Agendadas" stackId="a" fill={chartHiddenBars.confirmadas?"transparent":C.green} radius={[4,4,0,0]} cursor={chartHiddenBars.confirmadas?"default":"pointer"} onClick={chartHiddenBars.confirmadas?undefined:function(d){handleBarClick(d,"confirmadas");}}/>
 
                 </BarChart>
               </ResponsiveContainer>
@@ -2379,7 +2411,7 @@ export default function Dashboard(){
               );
             })()}
             {(function(){
-              // Reunión Confirmada card for inbound
+              // Reunión Agendada card for inbound
               var inbPeriodPhones=null;var inbActualMeet=0;var inbConfirmedArr=[];
               if(crmMeetings.length>0&&crmContacts.length>0){
                 var inbFromD=dateFrom?new Date(dateFrom+"T00:00:00"):null;
@@ -2411,7 +2443,7 @@ export default function Dashboard(){
                   <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u2705"}</div>
                   <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                     <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div>
-                    <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Reuni{"\u00F3"}n Confirmada</span>
+                    <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Reuni{"\u00F3"}n Agendada</span>
                   </div>
                   {inbPeriodPhones?(<>
                     <div style={{fontSize:36,fontWeight:900,fontFamily:mono,lineHeight:1,color:C.green}}>{inbActualMeet}</div>
@@ -2463,14 +2495,14 @@ export default function Dashboard(){
               }else{
                 leads=confirmedByDay[day]||[];
               }
-              if(leads.length>0)setChartDayModalData({title:(dataKey==="ofertadas"?"\u{1F4C5} Ofertadas ":"\u2705 Confirmadas ")+day,leads:leads});
+              if(leads.length>0)setChartDayModalData({title:(dataKey==="ofertadas"?"\u{1F4C5} Ofertadas ":"\u2705 Agendadas ")+day,leads:leads});
             };
             var handleInbLegendClick=function(e){
               var dk=e.dataKey;
               setChartHiddenBars(function(prev){var n=Object.assign({},prev);n[dk]=!n[dk];return n;});
             };
             return (<Cd style={{marginBottom:16}}>
-              <Sec>Reuniones Ofertadas vs Confirmadas por D{"\u00ED"}a</Sec>
+              <Sec>Reuniones Ofertadas vs Agendadas por D{"\u00ED"}a</Sec>
               <div style={{fontSize:11,color:C.muted,marginBottom:4,marginTop:-4}}>Click en una barra para ver las conversaciones</div>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={chartData} margin={{left:-15,right:5,top:5,bottom:0}}>
@@ -2478,7 +2510,7 @@ export default function Dashboard(){
                   <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}} formatter={function(value,name,props){if(chartHiddenBars[props.dataKey])return [null,null];return [value,name];}}/>
                   <Legend wrapperStyle={{fontSize:12,cursor:"pointer"}} onClick={handleInbLegendClick} formatter={function(value,entry){var hidden=chartHiddenBars[entry.dataKey];return (<span style={{color:hidden?C.muted:entry.color,textDecoration:hidden?"line-through":"none",opacity:hidden?0.5:1}}>{value}</span>);}}/>
                   <Bar dataKey="ofertadas" name="Ofertadas" stackId="a" fill={chartHiddenBars.ofertadas?"transparent":C.pink} radius={[0,0,0,0]} cursor={chartHiddenBars.ofertadas?"default":"pointer"} onClick={chartHiddenBars.ofertadas?undefined:function(d){handleInbBarClick(d,"ofertadas");}}/>
-                  <Bar dataKey="confirmadas" name="Confirmadas" stackId="a" fill={chartHiddenBars.confirmadas?"transparent":C.green} radius={[4,4,0,0]} cursor={chartHiddenBars.confirmadas?"default":"pointer"} onClick={chartHiddenBars.confirmadas?undefined:function(d){handleInbBarClick(d,"confirmadas");}}/>
+                  <Bar dataKey="confirmadas" name="Agendadas" stackId="a" fill={chartHiddenBars.confirmadas?"transparent":C.green} radius={[4,4,0,0]} cursor={chartHiddenBars.confirmadas?"default":"pointer"} onClick={chartHiddenBars.confirmadas?undefined:function(d){handleInbBarClick(d,"confirmadas");}}/>
                 </BarChart>
               </ResponsiveContainer>
             </Cd>);
@@ -3640,6 +3672,14 @@ export default function Dashboard(){
         }
         var ownerList=Object.keys(ownerIds).map(function(id){return{id:id,name:crmOwnerMap[id]||id};}).sort(function(a,b){return a.name.localeCompare(b.name);});
 
+        // Build list of unique meeting types
+        var typeIds={};
+        for(var ti=0;ti<dedupMeetings.length;ti++){
+          var tval=dedupMeetings[ti].properties&&dedupMeetings[ti].properties.hs_activity_type;
+          if(tval)typeIds[tval]=true;
+        }
+        var typeList=Object.keys(typeIds).sort();
+
         // Filter meetings by selected owners
         var filteredMeetings=dedupMeetings;
         if(hsReunionOwnerFilter.length>0){
@@ -3664,6 +3704,16 @@ export default function Dashboard(){
           filteredMeetings=filteredMeetings.filter(function(m){
             var st=m.properties&&m.properties.hs_meeting_start_time;
             return st&&new Date(st)<=dto;
+          });
+        }
+
+        // Filter meetings by selected type
+        if(hsReunionTypeFilter.length>0){
+          var typeSet={};
+          for(var tfi=0;tfi<hsReunionTypeFilter.length;tfi++)typeSet[hsReunionTypeFilter[tfi]]=true;
+          filteredMeetings=filteredMeetings.filter(function(m){
+            var mt=m.properties&&m.properties.hs_activity_type;
+            return mt&&typeSet[mt];
           });
         }
 
@@ -3703,6 +3753,14 @@ export default function Dashboard(){
           });
         }
 
+        function toggleType(val){
+          setHsReunionTypeFilter(function(prev){
+            var idx=prev.indexOf(val);
+            if(idx>=0){var n=prev.slice();n.splice(idx,1);return n;}
+            return prev.concat([val]);
+          });
+        }
+
         // Build contact map for associated contact info
         var contactMap={};
         for(var cmi=0;cmi<crmContacts.length;cmi++){contactMap[crmContacts[cmi].id]=crmContacts[cmi];}
@@ -3736,6 +3794,14 @@ export default function Dashboard(){
               <span style={{fontSize:12,color:C.purple,fontWeight:700,background:C.lPurple,padding:"4px 10px",borderRadius:6}}>{sorted.length} reuniones</span>
               {crmRefreshing && <span style={{fontSize:12,color:C.orange,fontWeight:600,display:"flex",alignItems:"center",gap:6}}><span style={{width:12,height:12,border:"2px solid "+C.orange,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>Actualizando datos de HubSpot...</span>}
             </div>
+            {typeList.length>0 && <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18,flexWrap:"wrap"}}>
+              <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Tipo:</span>
+              <button onClick={function(){setHsReunionTypeFilter([]);}} style={{background:hsReunionTypeFilter.length===0?C.accent:C.rowAlt,color:hsReunionTypeFilter.length===0?"#fff":C.muted,border:"1px solid "+(hsReunionTypeFilter.length===0?C.accent:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Todos</button>
+              {typeList.map(function(tv){
+                var active=hsReunionTypeFilter.indexOf(tv)>=0;
+                return <button key={tv} onClick={function(){toggleType(tv);}} style={{background:active?C.cyan:C.rowAlt,color:active?"#fff":C.sub,border:"1px solid "+(active?C.cyan:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,transition:"all 0.15s ease"}}>{tv}</button>;
+              })}
+            </div>}
 
             {/* Outcome KPI cards */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:12,marginBottom:22}}>
@@ -3783,6 +3849,7 @@ export default function Dashboard(){
                       <th style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>Creaci{"\u00F3"}n</th>
                       <th style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>T{"\u00ED"}tulo</th>
                       <th style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>Contacto</th>
+                      <th style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>Tipo</th>
                       <th style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>Outcome</th>
                       <th style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>Propietario</th>
                     </tr>
@@ -3805,11 +3872,12 @@ export default function Dashboard(){
                         <td style={{padding:"8px 12px"}}>
                           {ctName?<div><span style={{fontWeight:600,color:C.text}}>{ctName}</span>{ctEmail&&<span style={{fontSize:11,color:C.muted,marginLeft:6}}>{ctEmail}</span>}</div>:<span style={{color:C.muted,fontSize:12}}>Sin contacto</span>}
                         </td>
+                        <td style={{padding:"8px 12px",color:C.sub,fontSize:12}}>{p.hs_activity_type||"\u2014"}</td>
                         <td style={{padding:"8px 12px"}}><span style={{background:oc+"18",color:oc,padding:"3px 10px",borderRadius:6,fontSize:11,fontWeight:700}}>{p.hs_meeting_outcome||"UNKNOWN"}</span></td>
                         <td style={{padding:"8px 12px",color:C.sub,fontSize:12}}>{crmOwnerMap[p.hubspot_owner_id]||p.hubspot_owner_id||"\u2014"}</td>
                       </tr>;
                     })}
-                    {sorted.length===0 && <tr><td colSpan={7} style={{padding:20,textAlign:"center",color:C.muted,fontSize:13}}>No hay reuniones{(hsReunionOwnerFilter.length>0||hsReunionDateFrom||hsReunionDateTo)?" con los filtros seleccionados":""}</td></tr>}
+                    {sorted.length===0 && <tr><td colSpan={8} style={{padding:20,textAlign:"center",color:C.muted,fontSize:13}}>No hay reuniones{(hsReunionOwnerFilter.length>0||hsReunionTypeFilter.length>0||hsReunionDateFrom||hsReunionDateTo)?" con los filtros seleccionados":""}</td></tr>}
                   </tbody>
                 </table>
               </div>
@@ -4089,8 +4157,8 @@ export default function Dashboard(){
                 <div style={{fontSize:12,color:C.muted,marginTop:2}}>{ad.total>0?(adMeetOffered.length/ad.total*100).toFixed(1):0}% de conversaciones</div>
                 <div style={{fontSize:11,color:C.cyan,marginTop:8,fontWeight:600}}>Click para ver conversaciones {"\u2192"}</div>
               </Cd>
-              <Cd onClick={function(){openAdsModal("Reuniones Confirmadas ("+adMeetConfirmed.length+")",adMeetConfirmed);}} style={{cursor:"pointer",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.green+"08 100%)"}}>
-                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Reuniones Confirmadas</div>
+              <Cd onClick={function(){openAdsModal("Reuniones Agendadas ("+adMeetConfirmed.length+")",adMeetConfirmed);}} style={{cursor:"pointer",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.green+"08 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Reuniones Agendadas</div>
                 <div style={{fontSize:36,fontWeight:900,color:C.green,fontFamily:mono,marginTop:6}}>{adMeetConfirmed.length.toLocaleString()}</div>
                 <div style={{fontSize:12,color:C.muted,marginTop:2}}>{adMeetOffered.length>0?(adMeetConfirmed.length/adMeetOffered.length*100).toFixed(1):0}% de ofrecidas</div>
                 <div style={{fontSize:11,color:C.green,marginTop:8,fontWeight:600}}>Click para ver conversaciones {"\u2192"}</div>
