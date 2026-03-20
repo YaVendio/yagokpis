@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Legend } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Legend, PieChart, Pie } from "recharts";
 import { processCSVRows, processInboundRows, parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
 import { fetchThreads, expandThreadMessages, fetchInboundThreads, expandInboundThreadMessages, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats, fetchAdsThreads, fetchInboundCached, fetchLifecyclePhonesCached } from "./metabaseApi";
 import { DEFAULT_MEETINGS as _RAW_MEETINGS } from "./defaultData";
@@ -7,7 +7,7 @@ import { supabase } from "./supabase";
 import InfoTip from "./components/InfoTip";
 import TIPS from "./tooltips";
 import { fetchCampaigns, fetchCampaignGroups, fetchCampaignLeads, formatDateForApi, formatEndDateForApi } from "./gruposApi";
-import { fetchAllContacts, fetchAllContactsWithPhone, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones, fetchMeetingsSince, fetchContactsByIds, fetchDealsSince, fetchLeadsSince, fetchGrowthLeads, fetchOwnersByIds } from "./hubspotApi";
+import { fetchAllContacts, fetchAllContactsWithPhone, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones, getMeetingContactIds, fetchMeetingsSince, fetchContactsByIds, fetchDealsSince, fetchLeadsSince, fetchGrowthLeads, fetchOwnersByIds } from "./hubspotApi";
 import { fetchAutomationDiagnostic, aggregateWorkflowStats, calculateMetrics } from "./brevoApi.js";
 import { resetAuthGuard } from "./authGuard";
 
@@ -21,7 +21,7 @@ var C=_CLight;
 var _isDark=false;
 
 // Filter default meetings to only those that received MSG1, and compute ml/igL/igA flags
-var DEFAULT_MEETINGS=_RAW_MEETINGS.filter(function(m){return m.tr.indexOf("MSG1")>=0;}).map(function(m){var hasMl=false,hasIgL=false,hasIgA=false;for(var i=0;i<m.c.length;i++){if(m.c[i][0]===2&&m.c[i][1]&&(/https?:\/\/meetings\.hubspot\.com\/\S+/.test(m.c[i][1])||/https?:\/\/yavendio\.com\/meetings\S*/.test(m.c[i][1])))hasMl=true;if(m.c[i][0]===1&&m.c[i][1]){if(/instagram\.com/i.test(m.c[i][1]))hasIgL=true;if(/@\w+|ig\s*:/i.test(m.c[i][1]))hasIgA=true;}}return Object.assign({},m,{ml:hasMl,igL:hasIgL,igA:hasIgA});});
+var DEFAULT_MEETINGS=_RAW_MEETINGS.filter(function(m){return m.tr.indexOf("MSG1")>=0;}).map(function(m){var hasMl=false,hasIgL=false,hasIgA=false;for(var i=0;i<m.c.length;i++){if(m.c[i][0]===2&&m.c[i][1]&&(/meetings\.hubspot\.com\//.test(m.c[i][1])||/yavendio\.com\/[^\s]*meetings/.test(m.c[i][1])))hasMl=true;if(m.c[i][0]===1&&m.c[i][1]){if(/instagram\.com/i.test(m.c[i][1]))hasIgL=true;if(/@\w+|ig\s*:/i.test(m.c[i][1]))hasIgA=true;}}return Object.assign({},m,{ml:hasMl,igL:hasIgL,igA:hasIgA});});
 var _dIgL=DEFAULT_MEETINGS.filter(function(m){return m.igL;}).length;
 var _dIgA=DEFAULT_MEETINGS.filter(function(m){return m.igA&&!m.igL;}).length;
 
@@ -89,6 +89,7 @@ function ConvView({lead,onBack,crmContacts}){
           <span style={{fontSize:17,fontWeight:800}}>{name||lead.p}</span>
           {company && <span style={{fontSize:14,color:C.muted,fontWeight:600}}>{"\u00B7 "+company}</span>}
           <Bd color={ql.c}>{ql.t}</Bd>
+          {lead._src && <Bd color={lead._src==="outbound"?C.green:lead._src==="inbound"?C.cyan:C.purple}>{lead._src==="outbound"?"OUTBOUND":lead._src==="inbound"?"INBOUND":"AMBOS"}</Bd>}
           {lead.au && <Bd color={C.red}>AUTO-REPLY</Bd>}
         </div>
         <div style={{fontSize:12,color:C.muted,marginTop:2}}>
@@ -134,15 +135,21 @@ function ConvView({lead,onBack,crmContacts}){
 function buildPhoneContactMap(crmContacts){
   var map={};
   if(!crmContacts)return map;
+  function addToMap(ct,ph){
+    if(!ph)return;
+    var d=ph.replace(/\D/g,"");
+    if(!d)return;
+    if(!map[d])map[d]=ct;
+    if(d.length>11&&!map[d.slice(-11)])map[d.slice(-11)]=ct;
+    if(d.length>10&&!map[d.slice(-10)])map[d.slice(-10)]=ct;
+  }
   for(var i=0;i<crmContacts.length;i++){
     var ct=crmContacts[i];
-    var ph=ct.properties&&ct.properties.phone;
-    if(!ph)continue;
-    var d=ph.replace(/\D/g,"");
-    if(!d)continue;
-    map[d]=ct;
-    if(d.length>11)map[d.slice(-11)]=ct;
-    if(d.length>10)map[d.slice(-10)]=ct;
+    var props=ct.properties;
+    if(!props)continue;
+    addToMap(ct,props.phone);
+    addToMap(ct,props.mobilephone);
+    addToMap(ct,props.hs_whatsapp_phone_number);
   }
   return map;
 }
@@ -218,6 +225,7 @@ function MeetModal({leads,onClose,mode,title,crmContacts}){
                   <span style={{fontWeight:800,fontSize:15,color:C.text}}>{name||l.p}</span>
                   {company && <span style={{fontSize:13,color:C.muted,fontWeight:600}}>{"\u00B7 "+company}</span>}
                   <Bd color={ql.c}>{ql.t}</Bd>
+                  {l._src && <Bd color={l._src==="outbound"?C.green:l._src==="inbound"?C.cyan:C.purple}>{l._src==="outbound"?"OUTBOUND":l._src==="inbound"?"INBOUND":"AMBOS"}</Bd>}
                   {l._confirmed!==undefined && <Bd color={l._confirmed?C.green:C.red}>{l._confirmed?"\u2705 Confirmada":"\u274C No confirmada"}</Bd>}
                   {l.au && <Bd color={C.red}>AUTO</Bd>}
                 </div>
@@ -516,6 +524,8 @@ export default function Dashboard(){
   const [hsReunionTypeFilter,setHsReunionTypeFilter]=useState([]);
   const [hsReunionOutcomeFilter,setHsReunionOutcomeFilter]=useState("");
   const [hsDetailDay,setHsDetailDay]=useState(null);
+  const [hsDealPipelineFilter,setHsDealPipelineFilter]=useState("all");
+  const [hsDealOwnerFilter,setHsDealOwnerFilter]=useState([]);
 
   // Email (Brevo) tab state
   const [emailLoading,setEmailLoading]=useState(false);
@@ -978,6 +988,10 @@ export default function Dashboard(){
       var ownId=meetingsRes[oi].properties&&meetingsRes[oi].properties.hubspot_owner_id;
       if(ownId)ownerIdSet[ownId]=true;
     }
+    for(var doi=0;doi<dealsRes.length;doi++){
+      var dOwnId=dealsRes[doi].properties&&dealsRes[doi].properties.hubspot_owner_id;
+      if(dOwnId)ownerIdSet[dOwnId]=true;
+    }
     var ownerIds=Object.keys(ownerIdSet);
     var ownerMap={};
     if(ownerIds.length>0){
@@ -1314,7 +1328,7 @@ export default function Dashboard(){
         msgDt=typeof ts==="number"?new Date(ts*1000).toISOString():String(ts);
       }
       if(msgType===1){humanMsgCount++;wordCount+=content.split(/\s+/).filter(Boolean).length;}
-      if(msg.type==="ai"&&content&&(/https?:\/\/meetings\.hubspot\.com\/\S+/.test(content)||/https?:\/\/yavendio\.com\/meetings\S*/.test(content)))hasMeetingLink=true;
+      if(msg.type==="ai"&&content&&(/meetings\.hubspot\.com\//.test(content)||/yavendio\.com\/[^\s]*meetings/.test(content)))hasMeetingLink=true;
       conversation.push([msgType,content,msgDt]);
     }
     var phone=t.phone_number||"";
@@ -1604,19 +1618,38 @@ export default function Dashboard(){
       <button onClick={onClickFilter} style={{background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"6px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Filtrar</button>
       <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6}}>{tc} leads</span>
     </div>);
-    if(section==="hubspot"&&subTab==="analytics") return (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
-      <div style={{display:"flex",alignItems:"center",gap:6}}>
-        <span style={{fontSize:12,color:C.muted}}>De</span>
-        <input type="date" value={dateFrom} onChange={onDateFromChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
-      </div>
-      <div style={{display:"flex",alignItems:"center",gap:6}}>
-        <span style={{fontSize:12,color:C.muted}}>Hasta</span>
-        <input type="date" value={dateTo} onChange={onDateToChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
-      </div>
-      <button onClick={onClickFilter} style={{background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"6px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Filtrar</button>
-      {crmMeetings.length>0 && <span style={{fontSize:12,color:C.purple,fontWeight:700,background:C.lPurple,padding:"4px 10px",borderRadius:6}}>{crmMeetings.length} reuniones</span>}
-      {crmRefreshing && <span style={{fontSize:12,color:C.orange,fontWeight:600,display:"flex",alignItems:"center",gap:6}}><span style={{width:12,height:12,border:"2px solid "+C.orange,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>Actualizando datos de HubSpot...</span>}
-    </div>);
+    if(section==="hubspot"&&subTab==="analytics"){
+      var _dealOwnerIds={};
+      for(var _doi=0;_doi<crmDeals.length;_doi++){var _doId=crmDeals[_doi].properties&&crmDeals[_doi].properties.hubspot_owner_id;if(_doId)_dealOwnerIds[_doId]=true;}
+      var _dealOwnerList=Object.keys(_dealOwnerIds).sort(function(a,b){return(crmOwnerMap[a]||a).localeCompare(crmOwnerMap[b]||b);});
+      return (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:12,color:C.muted}}>De</span>
+          <input type="date" value={dateFrom} onChange={onDateFromChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:12,color:C.muted}}>Hasta</span>
+          <input type="date" value={dateTo} onChange={onDateToChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+        </div>
+        <div style={{width:1,height:24,background:C.border}}/>
+        <div style={{display:"flex",alignItems:"center",gap:4}}>
+          {["all","720627716","833703951"].map(function(pv){
+            var pLabel=pv==="all"?"Ambos":pv==="720627716"?"New Sales":"Self Service PLG";
+            var isSel=hsDealPipelineFilter===pv;
+            return <button key={pv} onClick={function(){setHsDealPipelineFilter(pv);}} style={{background:isSel?C.accent:C.rowBg,color:isSel?"#fff":C.sub,border:"1px solid "+(isSel?C.accent:C.border),borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>{pLabel}</button>;
+          })}
+        </div>
+        <div style={{width:1,height:24,background:C.border}}/>
+        <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
+          {_dealOwnerList.map(function(oid){
+            var isSel=hsDealOwnerFilter.indexOf(oid)>=0;
+            return <button key={oid} onClick={function(){setHsDealOwnerFilter(function(prev){return prev.indexOf(oid)>=0?prev.filter(function(x){return x!==oid;}):prev.concat([oid]);});}} style={{background:isSel?C.purple:C.rowBg,color:isSel?"#fff":C.sub,border:"1px solid "+(isSel?C.purple:C.border),borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:font}}>{crmOwnerMap[oid]||oid}</button>;
+          })}
+          {hsDealOwnerFilter.length>0 && <button onClick={function(){setHsDealOwnerFilter([]);}} style={{background:"none",border:"none",color:C.muted,fontSize:11,cursor:"pointer",fontWeight:600,textDecoration:"underline"}}>Limpiar</button>}
+        </div>
+        {crmRefreshing && <span style={{fontSize:12,color:C.orange,fontWeight:600,display:"flex",alignItems:"center",gap:6}}><span style={{width:12,height:12,border:"2px solid "+C.orange,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>Actualizando...</span>}
+      </div>);
+    }
     return null;
   }
 
@@ -1755,9 +1788,13 @@ export default function Dashboard(){
         var inbTc=inbLeads.length;
         var inbOferta=inbLeads.filter(function(l){return l.ml;}).length;
 
-        // --- Combined ---
+        // --- Combined (tag source) ---
         var totalLeads=outTc+inbTc;
         var totalOferta=outOferta+inbOferta;
+        var outPhones={};for(var _oi=0;_oi<outLeads.length;_oi++){var _op=(outLeads[_oi].p||"").replace(/\D/g,"");if(_op)outPhones[_op]=true;}
+        var inbPhones={};for(var _ii2=0;_ii2<inbLeads.length;_ii2++){var _ip=(inbLeads[_ii2].p||"").replace(/\D/g,"");if(_ip)inbPhones[_ip]=true;}
+        for(var _ti=0;_ti<outLeads.length;_ti++){var _tp=(outLeads[_ti].p||"").replace(/\D/g,"");outLeads[_ti]._src=(_tp&&inbPhones[_tp])?"ambos":"outbound";}
+        for(var _ti2=0;_ti2<inbLeads.length;_ti2++){var _tp2=(inbLeads[_ti2].p||"").replace(/\D/g,"");inbLeads[_ti2]._src=(_tp2&&outPhones[_tp2])?"ambos":"inbound";}
         var allLeads=outLeads.concat(inbLeads);
 
         // --- CRM meetings filtered by date ---
@@ -1779,6 +1816,7 @@ export default function Dashboard(){
         var outConfirmed=0;var inbConfirmed=0;
         if(filtCrmMeetings.length>0&&crmContacts.length>0){
           var periodMeetPhones=getMeetingContactPhones(filtCrmMeetings,crmContacts);
+          var contactIdIdx=getMeetingContactIds(filtCrmMeetings);
           var phoneIdx={};
           var mpKeys=Object.keys(periodMeetPhones);
           for(var pi=0;pi<mpKeys.length;pi++){
@@ -1793,20 +1831,23 @@ export default function Dashboard(){
           var ofertaAll=allLeads.filter(function(l){return l.ml;});
           var ofertaOut=outLeads.filter(function(l){return l.ml;});
           var ofertaInb=inbLeads.filter(function(l){return l.ml;});
-          function matchPhone(phone){
-            var p=(phone||"").replace(/\D/g,"");if(!p)return false;
-            if(phoneIdx[p])return true;
-            if(p.length>11&&phoneIdx[p.slice(-11)])return true;
-            if(p.length>10&&phoneIdx[p.slice(-10)])return true;
-            if(p.length>9&&phoneIdx[p.slice(-9)])return true;
-            if(p.length>8&&phoneIdx[p.slice(-8)])return true;
+          function matchPhone(phone,hid){
+            var p=(phone||"").replace(/\D/g,"");
+            if(p){
+              if(phoneIdx[p])return true;
+              if(p.length>11&&phoneIdx[p.slice(-11)])return true;
+              if(p.length>10&&phoneIdx[p.slice(-10)])return true;
+              if(p.length>9&&phoneIdx[p.slice(-9)])return true;
+              if(p.length>8&&phoneIdx[p.slice(-8)])return true;
+            }
+            if(hid&&contactIdIdx[hid])return true;
             return false;
           }
           for(var ai=0;ai<ofertaAll.length;ai++){
-            if(matchPhone(ofertaAll[ai].p)){confirmedCount++;confirmedArr.push(ofertaAll[ai]);}
+            if(matchPhone(ofertaAll[ai].p,ofertaAll[ai].hid)){confirmedCount++;confirmedArr.push(ofertaAll[ai]);}
           }
-          for(var oi=0;oi<ofertaOut.length;oi++){if(matchPhone(ofertaOut[oi].p))outConfirmed++;}
-          for(var ii=0;ii<ofertaInb.length;ii++){if(matchPhone(ofertaInb[ii].p))inbConfirmed++;}
+          for(var oi=0;oi<ofertaOut.length;oi++){if(matchPhone(ofertaOut[oi].p,ofertaOut[oi].hid))outConfirmed++;}
+          for(var ii=0;ii<ofertaInb.length;ii++){if(matchPhone(ofertaInb[ii].p,ofertaInb[ii].hid))inbConfirmed++;}
         }
 
         // --- Realizadas (COMPLETED) ---
@@ -1848,7 +1889,7 @@ export default function Dashboard(){
           var ol=ofertaAllLeads[ofi];
           var oDay="";
           for(var oci=0;oci<ol.c.length;oci++){
-            if(ol.c[oci][0]===2&&ol.c[oci][1]&&(/https?:\/\/meetings\.hubspot\.com\/\S+/.test(ol.c[oci][1])||/https?:\/\/yavendio\.com\/meetings\S*/.test(ol.c[oci][1]))){
+            if(ol.c[oci][0]===2&&ol.c[oci][1]&&(/meetings\.hubspot\.com\//.test(ol.c[oci][1])||/yavendio\.com\/[^\s]*meetings/.test(ol.c[oci][1]))){
               if(ol.c[oci][2]){var opd=parseDatetime(ol.c[oci][2]);if(opd){oDay=String(opd.getDate()).padStart(2,"0")+"/"+String(opd.getMonth()+1).padStart(2,"0");}}
               break;
             }
@@ -2026,6 +2067,7 @@ export default function Dashboard(){
               }
               periodMeetPhones=getMeetingContactPhones(filtMeetings,crmContacts);
             }
+            var contactIdIdx=filtMeetings?getMeetingContactIds(filtMeetings):{};
             // Cross only leads with ml:true (received meeting link) against HS meetings
             var actualMeetCount=0;
             var confirmedArr=[];
@@ -2043,16 +2085,19 @@ export default function Dashboard(){
               }
               var ofertaLeadsArr=meetings.filter(function(l){return l.ml;});
               for(var ami=0;ami<ofertaLeadsArr.length;ami++){
-                var olPhone=(ofertaLeadsArr[ami].p||"").replace(/\D/g,"");
-                if(!olPhone)continue;
+                var olLead=ofertaLeadsArr[ami];
+                var olPhone=(olLead.p||"").replace(/\D/g,"");
                 // Check full number + suffix variants against the index
                 var matched=false;
-                if(phoneIdx[olPhone])matched=true;
-                else if(olPhone.length>11&&phoneIdx[olPhone.slice(-11)])matched=true;
-                else if(olPhone.length>10&&phoneIdx[olPhone.slice(-10)])matched=true;
-                else if(olPhone.length>9&&phoneIdx[olPhone.slice(-9)])matched=true;
-                else if(olPhone.length>8&&phoneIdx[olPhone.slice(-8)])matched=true;
-                if(matched){actualMeetCount++;confirmedArr.push(ofertaLeadsArr[ami]);}
+                if(olPhone){
+                  if(phoneIdx[olPhone])matched=true;
+                  else if(olPhone.length>11&&phoneIdx[olPhone.slice(-11)])matched=true;
+                  else if(olPhone.length>10&&phoneIdx[olPhone.slice(-10)])matched=true;
+                  else if(olPhone.length>9&&phoneIdx[olPhone.slice(-9)])matched=true;
+                  else if(olPhone.length>8&&phoneIdx[olPhone.slice(-8)])matched=true;
+                }
+                if(!matched&&olLead.hid&&contactIdIdx[olLead.hid])matched=true;
+                if(matched){actualMeetCount++;confirmedArr.push(olLead);}
               }
             }
             // Leads that received meeting link but did NOT book
@@ -2089,7 +2134,7 @@ export default function Dashboard(){
               <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:4}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
             </Cd>
             {/* Card 3: Oferta de Reunión */}
-            <Cd onClick={function(){var tagged=meetings.filter(function(l){return l.ml;}).map(function(l){var lp=(l.p||"").replace(/\D/g,"");var isConf=false;if(lp&&typeof phoneIdx!=="undefined"&&phoneIdx){if(phoneIdx[lp])isConf=true;else if(lp.length>11&&phoneIdx[lp.slice(-11)])isConf=true;else if(lp.length>10&&phoneIdx[lp.slice(-10)])isConf=true;else if(lp.length>9&&phoneIdx[lp.slice(-9)])isConf=true;else if(lp.length>8&&phoneIdx[lp.slice(-8)])isConf=true;}return Object.assign({},l,{_confirmed:isConf});});setChartDayModalData({title:"\u{1F4C5} Leads con Oferta de Reuni\u00F3n",leads:tagged});}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
+            <Cd onClick={function(){var tagged=meetings.filter(function(l){return l.ml;}).map(function(l){var lp=(l.p||"").replace(/\D/g,"");var isConf=false;if(lp&&typeof phoneIdx!=="undefined"&&phoneIdx){if(phoneIdx[lp])isConf=true;else if(lp.length>11&&phoneIdx[lp.slice(-11)])isConf=true;else if(lp.length>10&&phoneIdx[lp.slice(-10)])isConf=true;else if(lp.length>9&&phoneIdx[lp.slice(-9)])isConf=true;else if(lp.length>8&&phoneIdx[lp.slice(-8)])isConf=true;}if(!isConf&&l.hid&&contactIdIdx[l.hid])isConf=true;return Object.assign({},l,{_confirmed:isConf});});setChartDayModalData({title:"\u{1F4C5} Leads con Oferta de Reuni\u00F3n",leads:tagged});}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4C5}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.pink+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4C5}"}</div>
@@ -2140,19 +2185,24 @@ export default function Dashboard(){
               if(qFromD||qToD){qFiltM=crmMeetings.filter(function(m){var st=m.properties&&m.properties.hs_createdate||m.createdAt;if(!st)return false;var md=new Date(st);if(qFromD&&md<qFromD)return false;if(qToD&&md>qToD)return false;return true;});}
               qPeriodPhones=getMeetingContactPhones(qFiltM,crmContacts);
             }
+            var qContactIdIdx=qFiltM?getMeetingContactIds(qFiltM):{};
             var qActualMeet=0;var qConfirmedArr=[];
             if(qPeriodPhones){
               var qPhIdx={};var qMpK=Object.keys(qPeriodPhones);
               for(var qpi=0;qpi<qMpK.length;qpi++){var qpd=qMpK[qpi];qPhIdx[qpd]=true;if(qpd.length>11)qPhIdx[qpd.slice(-11)]=true;if(qpd.length>10)qPhIdx[qpd.slice(-10)]=true;if(qpd.length>9)qPhIdx[qpd.slice(-9)]=true;if(qpd.length>8)qPhIdx[qpd.slice(-8)]=true;}
               var qOfertaLeads=qMeetings.filter(function(l){return l.ml;});
               for(var qai=0;qai<qOfertaLeads.length;qai++){
-                var qOlP=(qOfertaLeads[qai].p||"").replace(/\D/g,"");if(!qOlP)continue;
+                var qOlLead=qOfertaLeads[qai];
+                var qOlP=(qOlLead.p||"").replace(/\D/g,"");
                 var qMatched=false;
-                if(qPhIdx[qOlP])qMatched=true;
-                else if(qOlP.length>11&&qPhIdx[qOlP.slice(-11)])qMatched=true;
-                else if(qOlP.length>10&&qPhIdx[qOlP.slice(-10)])qMatched=true;
-                else if(qOlP.length>9&&qPhIdx[qOlP.slice(-9)])qMatched=true;
-                else if(qOlP.length>8&&qPhIdx[qOlP.slice(-8)])qMatched=true;
+                if(qOlP){
+                  if(qPhIdx[qOlP])qMatched=true;
+                  else if(qOlP.length>11&&qPhIdx[qOlP.slice(-11)])qMatched=true;
+                  else if(qOlP.length>10&&qPhIdx[qOlP.slice(-10)])qMatched=true;
+                  else if(qOlP.length>9&&qPhIdx[qOlP.slice(-9)])qMatched=true;
+                  else if(qOlP.length>8&&qPhIdx[qOlP.slice(-8)])qMatched=true;
+                }
+                if(!qMatched&&qOlLead.hid&&qContactIdIdx[qOlLead.hid])qMatched=true;
                 if(qMatched){qActualMeet++;qConfirmedArr.push(qOfertaLeads[qai]);}
               }
             }
@@ -2187,7 +2237,7 @@ export default function Dashboard(){
               <div style={{marginTop:6,fontSize:12,color:C.purple,fontWeight:600,borderTop:"1px solid "+C.border,paddingTop:6}}>{qTwoMsg} con 2+ msgs ({qTwoMsgPct}%)</div>
               <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:4}}>{"\u{1F4AC} Ver conversaciones \u2192"}</div>
             </Cd>
-            <Cd onClick={function(){var tagged=qMeetings.filter(function(l){return l.ml;}).map(function(l){var lp=(l.p||"").replace(/\D/g,"");var isConf=false;if(lp&&typeof qPhIdx!=="undefined"&&qPhIdx){if(qPhIdx[lp])isConf=true;else if(lp.length>11&&qPhIdx[lp.slice(-11)])isConf=true;else if(lp.length>10&&qPhIdx[lp.slice(-10)])isConf=true;else if(lp.length>9&&qPhIdx[lp.slice(-9)])isConf=true;else if(lp.length>8&&qPhIdx[lp.slice(-8)])isConf=true;}return Object.assign({},l,{_confirmed:isConf});});setChartDayModalData({title:"\u{1F4C5} Oferta Reuni\u00F3n Calificados (Alta + Media)",leads:tagged});}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
+            <Cd onClick={function(){var tagged=qMeetings.filter(function(l){return l.ml;}).map(function(l){var lp=(l.p||"").replace(/\D/g,"");var isConf=false;if(lp&&typeof qPhIdx!=="undefined"&&qPhIdx){if(qPhIdx[lp])isConf=true;else if(lp.length>11&&qPhIdx[lp.slice(-11)])isConf=true;else if(lp.length>10&&qPhIdx[lp.slice(-10)])isConf=true;else if(lp.length>9&&qPhIdx[lp.slice(-9)])isConf=true;else if(lp.length>8&&qPhIdx[lp.slice(-8)])isConf=true;}if(!isConf&&l.hid&&qContactIdIdx[l.hid])isConf=true;return Object.assign({},l,{_confirmed:isConf});});setChartDayModalData({title:"\u{1F4C5} Oferta Reuni\u00F3n Calificados (Alta + Media)",leads:tagged});}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4C5}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.pink+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4C5}"}</div>
@@ -2254,7 +2304,7 @@ export default function Dashboard(){
             if(lead.c){
               for(var ci2=0;ci2<lead.c.length;ci2++){
                 var msg=lead.c[ci2];
-                if(msg[0]===2&&msg[1]&&(/https?:\/\/meetings\.hubspot\.com\/\S+/.test(msg[1])||/https?:\/\/yavendio\.com\/meetings\S*/.test(msg[1]))){
+                if(msg[0]===2&&msg[1]&&(/meetings\.hubspot\.com\//.test(msg[1])||/yavendio\.com\/[^\s]*meetings/.test(msg[1]))){
                   if(msg[2])mlDate=parseDatetime(msg[2]);
                   break;
                 }
@@ -2270,6 +2320,7 @@ export default function Dashboard(){
           // Confirmadas: rebuild phone matching (self-contained, same logic as KPI cards)
           var confirmedByDay={};
           var gPhoneToMeetDate={};
+          var gContactIdToMeetDate={};
           if(crmMeetings.length>0&&crmContacts.length>0){
             var gFromD=dateFrom?new Date(dateFrom+"T00:00:00"):null;
             var gToD=dateTo?new Date(dateTo+"T23:59:59"):null;
@@ -2282,10 +2333,11 @@ export default function Dashboard(){
               if(gcc.properties){
                 if(gcc.properties.phone){var gp1=gcc.properties.phone.replace(/\D/g,"");if(gp1)gps.push(gp1);}
                 if(gcc.properties.mobilephone){var gp2=gcc.properties.mobilephone.replace(/\D/g,"");if(gp2&&gps.indexOf(gp2)<0)gps.push(gp2);}
+                if(gcc.properties.hs_whatsapp_phone_number){var gp3=gcc.properties.hs_whatsapp_phone_number.replace(/\D/g,"");if(gp3&&gps.indexOf(gp3)<0)gps.push(gp3);}
               }
               if(gps.length>0)gContactPhones[gcc.id]=gps;
             }
-            // Build meeting→phones→date map
+            // Build meeting→phones→date map + contactId→date map
             for(var gmi=0;gmi<gFiltM.length;gmi++){
               var gm=gFiltM[gmi];
               var gAssoc=gm.associations&&gm.associations.contacts&&gm.associations.contacts.results;
@@ -2293,7 +2345,9 @@ export default function Dashboard(){
               var gSt=gm.properties&&(gm.properties.hs_createdate||gm.properties.hs_meeting_start_time)||gm.createdAt;
               if(!gSt)continue;
               for(var gak=0;gak<gAssoc.length;gak++){
-                var gCPs=gContactPhones[gAssoc[gak].id];
+                var gAId=gAssoc[gak].id;
+                if(gAId)gContactIdToMeetDate[gAId]=gSt;
+                var gCPs=gContactPhones[gAId];
                 if(!gCPs)continue;
                 for(var gpi=0;gpi<gCPs.length;gpi++){
                   var gph=gCPs[gpi];
@@ -2307,15 +2361,17 @@ export default function Dashboard(){
             }
             // Match leads and group by HS meeting date
             for(var gli=0;gli<allMlLeads.length;gli++){
-              var glP=(allMlLeads[gli].p||"").replace(/\D/g,"");
-              if(!glP)continue;
-              var gMSt=gPhoneToMeetDate[glP]||(glP.length>11&&gPhoneToMeetDate[glP.slice(-11)])||(glP.length>10&&gPhoneToMeetDate[glP.slice(-10)])||(glP.length>9&&gPhoneToMeetDate[glP.slice(-9)])||(glP.length>8&&gPhoneToMeetDate[glP.slice(-8)])||null;
+              var gl=allMlLeads[gli];
+              var glP=(gl.p||"").replace(/\D/g,"");
+              var gMSt=null;
+              if(glP){gMSt=gPhoneToMeetDate[glP]||(glP.length>11&&gPhoneToMeetDate[glP.slice(-11)])||(glP.length>10&&gPhoneToMeetDate[glP.slice(-10)])||(glP.length>9&&gPhoneToMeetDate[glP.slice(-9)])||(glP.length>8&&gPhoneToMeetDate[glP.slice(-8)])||null;}
+              if(!gMSt&&gl.hid)gMSt=gContactIdToMeetDate[gl.hid]||null;
               if(gMSt){
                 var gMD=new Date(gMSt);
                 if(!isNaN(gMD.getTime())){
                   var gdk=String(gMD.getDate()).padStart(2,"0")+"/"+String(gMD.getMonth()+1).padStart(2,"0");
                   if(!confirmedByDay[gdk])confirmedByDay[gdk]=[];
-                  confirmedByDay[gdk].push(allMlLeads[gli]);
+                  confirmedByDay[gdk].push(gl);
                 }
               }
             }
@@ -2338,6 +2394,7 @@ export default function Dashboard(){
                 var lp=(l.p||"").replace(/\D/g,"");
                 var isConf=false;
                 if(lp){isConf=!!(gPhoneToMeetDate[lp]||(lp.length>11&&gPhoneToMeetDate[lp.slice(-11)])||(lp.length>10&&gPhoneToMeetDate[lp.slice(-10)])||(lp.length>9&&gPhoneToMeetDate[lp.slice(-9)])||(lp.length>8&&gPhoneToMeetDate[lp.slice(-8)]));}
+                if(!isConf&&l.hid&&gContactIdToMeetDate[l.hid])isConf=true;
                 return Object.assign({},l,{_confirmed:isConf});
               });
             }else{
@@ -2440,19 +2497,24 @@ export default function Dashboard(){
                 if(inbFromD||inbToD){inbFiltM=crmMeetings.filter(function(m){var st=m.properties&&m.properties.hs_createdate||m.createdAt;if(!st)return false;var md=new Date(st);if(inbFromD&&md<inbFromD)return false;if(inbToD&&md>inbToD)return false;return true;});}
                 inbPeriodPhones=getMeetingContactPhones(inbFiltM,crmContacts);
               }
+              var inbContactIdIdx=inbFiltM?getMeetingContactIds(inbFiltM):{};
               if(inbPeriodPhones){
                 var inbPhIdx={};var inbMpK=Object.keys(inbPeriodPhones);
                 for(var ipi=0;ipi<inbMpK.length;ipi++){var ipd=inbMpK[ipi];inbPhIdx[ipd]=true;if(ipd.length>11)inbPhIdx[ipd.slice(-11)]=true;if(ipd.length>10)inbPhIdx[ipd.slice(-10)]=true;if(ipd.length>9)inbPhIdx[ipd.slice(-9)]=true;if(ipd.length>8)inbPhIdx[ipd.slice(-8)]=true;}
                 var inbMlLeads=meetings.filter(function(l){return l.ml;});
                 for(var iai=0;iai<inbMlLeads.length;iai++){
-                  var iaP=(inbMlLeads[iai].p||"").replace(/\D/g,"");if(!iaP)continue;
+                  var iaLead=inbMlLeads[iai];
+                  var iaP=(iaLead.p||"").replace(/\D/g,"");
                   var iaMatched=false;
-                  if(inbPhIdx[iaP])iaMatched=true;
-                  else if(iaP.length>11&&inbPhIdx[iaP.slice(-11)])iaMatched=true;
-                  else if(iaP.length>10&&inbPhIdx[iaP.slice(-10)])iaMatched=true;
-                  else if(iaP.length>9&&inbPhIdx[iaP.slice(-9)])iaMatched=true;
-                  else if(iaP.length>8&&inbPhIdx[iaP.slice(-8)])iaMatched=true;
-                  if(iaMatched){inbActualMeet++;inbConfirmedArr.push(inbMlLeads[iai]);}
+                  if(iaP){
+                    if(inbPhIdx[iaP])iaMatched=true;
+                    else if(iaP.length>11&&inbPhIdx[iaP.slice(-11)])iaMatched=true;
+                    else if(iaP.length>10&&inbPhIdx[iaP.slice(-10)])iaMatched=true;
+                    else if(iaP.length>9&&inbPhIdx[iaP.slice(-9)])iaMatched=true;
+                    else if(iaP.length>8&&inbPhIdx[iaP.slice(-8)])iaMatched=true;
+                  }
+                  if(!iaMatched&&iaLead.hid&&inbContactIdIdx[iaLead.hid])iaMatched=true;
+                  if(iaMatched){inbActualMeet++;inbConfirmedArr.push(iaLead);}
                 }
               }
               var inbOfertaCount=meetings.filter(function(l){return l.ml;}).length;
@@ -2484,20 +2546,21 @@ export default function Dashboard(){
             for(var odi=0;odi<inbMlLeads.length;odi++){
               var lead=inbMlLeads[odi];var mlDate=null;
               if(lead.c){
-                for(var ci2=0;ci2<lead.c.length;ci2++){var msg=lead.c[ci2];if(msg[0]===2&&msg[1]&&(/https?:\/\/meetings\.hubspot\.com\/\S+/.test(msg[1])||/https?:\/\/yavendio\.com\/meetings\S*/.test(msg[1]))){if(msg[2])mlDate=parseDatetime(msg[2]);break;}}
+                for(var ci2=0;ci2<lead.c.length;ci2++){var msg=lead.c[ci2];if(msg[0]===2&&msg[1]&&(/meetings\.hubspot\.com\//.test(msg[1])||/yavendio\.com\/[^\s]*meetings/.test(msg[1]))){if(msg[2])mlDate=parseDatetime(msg[2]);break;}}
                 if(!mlDate&&lead.c[0]&&lead.c[0][2])mlDate=parseDatetime(lead.c[0][2]);
               }
               if(mlDate&&!isNaN(mlDate.getTime())){var dk=String(mlDate.getDate()).padStart(2,"0")+"/"+String(mlDate.getMonth()+1).padStart(2,"0");if(!ofertaByDay[dk])ofertaByDay[dk]=[];ofertaByDay[dk].push(lead);}
             }
             var confirmedByDay={};
             var gPTD={};
+            var gCIDToDate={};
             if(crmMeetings.length>0&&crmContacts.length>0){
               var gFromD=dateFrom?new Date(dateFrom+"T00:00:00"):null;var gToD=dateTo?new Date(dateTo+"T23:59:59"):null;
               var gFiltM=crmMeetings;
               if(gFromD||gToD){gFiltM=crmMeetings.filter(function(m){var st=m.properties&&m.properties.hs_createdate||m.createdAt;if(!st)return false;var md=new Date(st);if(gFromD&&md<gFromD)return false;if(gToD&&md>gToD)return false;return true;});}
-              var gCP={};for(var gci=0;gci<crmContacts.length;gci++){var gcc=crmContacts[gci];var gps=[];if(gcc.properties){if(gcc.properties.phone){var gp1=gcc.properties.phone.replace(/\D/g,"");if(gp1)gps.push(gp1);}if(gcc.properties.mobilephone){var gp2=gcc.properties.mobilephone.replace(/\D/g,"");if(gp2&&gps.indexOf(gp2)<0)gps.push(gp2);}}if(gps.length>0)gCP[gcc.id]=gps;}
-              for(var gmi=0;gmi<gFiltM.length;gmi++){var gm=gFiltM[gmi];var gA=gm.associations&&gm.associations.contacts&&gm.associations.contacts.results;if(!gA)continue;var gSt=gm.properties&&(gm.properties.hs_createdate||gm.properties.hs_meeting_start_time)||gm.createdAt;if(!gSt)continue;for(var gak=0;gak<gA.length;gak++){var gCPs=gCP[gA[gak].id];if(!gCPs)continue;for(var gpi=0;gpi<gCPs.length;gpi++){var gph=gCPs[gpi];gPTD[gph]=gSt;if(gph.length>11)gPTD[gph.slice(-11)]=gSt;if(gph.length>10)gPTD[gph.slice(-10)]=gSt;if(gph.length>9)gPTD[gph.slice(-9)]=gSt;if(gph.length>8)gPTD[gph.slice(-8)]=gSt;}}}
-              for(var gli=0;gli<inbMlLeads.length;gli++){var glP=(inbMlLeads[gli].p||"").replace(/\D/g,"");if(!glP)continue;var gMSt=gPTD[glP]||(glP.length>11&&gPTD[glP.slice(-11)])||(glP.length>10&&gPTD[glP.slice(-10)])||(glP.length>9&&gPTD[glP.slice(-9)])||(glP.length>8&&gPTD[glP.slice(-8)])||null;if(gMSt){var gMD=new Date(gMSt);if(!isNaN(gMD.getTime())){var gdk=String(gMD.getDate()).padStart(2,"0")+"/"+String(gMD.getMonth()+1).padStart(2,"0");if(!confirmedByDay[gdk])confirmedByDay[gdk]=[];confirmedByDay[gdk].push(inbMlLeads[gli]);}}}
+              var gCP={};for(var gci=0;gci<crmContacts.length;gci++){var gcc=crmContacts[gci];var gps=[];if(gcc.properties){if(gcc.properties.phone){var gp1=gcc.properties.phone.replace(/\D/g,"");if(gp1)gps.push(gp1);}if(gcc.properties.mobilephone){var gp2=gcc.properties.mobilephone.replace(/\D/g,"");if(gp2&&gps.indexOf(gp2)<0)gps.push(gp2);}if(gcc.properties.hs_whatsapp_phone_number){var gp3=gcc.properties.hs_whatsapp_phone_number.replace(/\D/g,"");if(gp3&&gps.indexOf(gp3)<0)gps.push(gp3);}}if(gps.length>0)gCP[gcc.id]=gps;}
+              for(var gmi=0;gmi<gFiltM.length;gmi++){var gm=gFiltM[gmi];var gA=gm.associations&&gm.associations.contacts&&gm.associations.contacts.results;if(!gA)continue;var gSt=gm.properties&&(gm.properties.hs_createdate||gm.properties.hs_meeting_start_time)||gm.createdAt;if(!gSt)continue;for(var gak=0;gak<gA.length;gak++){var gAId=gA[gak].id;if(gAId)gCIDToDate[gAId]=gSt;var gCPs=gCP[gAId];if(!gCPs)continue;for(var gpi=0;gpi<gCPs.length;gpi++){var gph=gCPs[gpi];gPTD[gph]=gSt;if(gph.length>11)gPTD[gph.slice(-11)]=gSt;if(gph.length>10)gPTD[gph.slice(-10)]=gSt;if(gph.length>9)gPTD[gph.slice(-9)]=gSt;if(gph.length>8)gPTD[gph.slice(-8)]=gSt;}}}
+              for(var gli=0;gli<inbMlLeads.length;gli++){var gl=inbMlLeads[gli];var glP=(gl.p||"").replace(/\D/g,"");var gMSt=null;if(glP){gMSt=gPTD[glP]||(glP.length>11&&gPTD[glP.slice(-11)])||(glP.length>10&&gPTD[glP.slice(-10)])||(glP.length>9&&gPTD[glP.slice(-9)])||(glP.length>8&&gPTD[glP.slice(-8)])||null;}if(!gMSt&&gl.hid)gMSt=gCIDToDate[gl.hid]||null;if(gMSt){var gMD=new Date(gMSt);if(!isNaN(gMD.getTime())){var gdk=String(gMD.getDate()).padStart(2,"0")+"/"+String(gMD.getMonth()+1).padStart(2,"0");if(!confirmedByDay[gdk])confirmedByDay[gdk]=[];confirmedByDay[gdk].push(gl);}}}
             }
             var allDays={};var odK=Object.keys(ofertaByDay);for(var ok=0;ok<odK.length;ok++)allDays[odK[ok]]=true;var cdK=Object.keys(confirmedByDay);for(var ck=0;ck<cdK.length;ck++)allDays[cdK[ck]]=true;
             var chartData=Object.keys(allDays).sort(function(a,b){var pa=a.split("/"),pb=b.split("/");return(parseInt(pa[1])*100+parseInt(pa[0]))-(parseInt(pb[1])*100+parseInt(pb[0]));}).map(function(dk){return{d:dk,ofertadas:(ofertaByDay[dk]||[]).length,confirmadas:(confirmedByDay[dk]||[]).length};});
@@ -2510,6 +2573,7 @@ export default function Dashboard(){
                   var lp=(l.p||"").replace(/\D/g,"");
                   var isConf=false;
                   if(lp){isConf=!!(gPTD[lp]||(lp.length>11&&gPTD[lp.slice(-11)])||(lp.length>10&&gPTD[lp.slice(-10)])||(lp.length>9&&gPTD[lp.slice(-9)])||(lp.length>8&&gPTD[lp.slice(-8)]));}
+                  if(!isConf&&l.hid&&gCIDToDate[l.hid])isConf=true;
                   return Object.assign({},l,{_confirmed:isConf});
                 });
               }else{
@@ -3128,64 +3192,101 @@ export default function Dashboard(){
       </>)}
 
       {section==="hubspot" && subTab==="analytics" && (function(){
-        // Build pipeline stage map
-        var stageMap={};
+        var TARGET_PIPELINES={"720627716":"New Sales Framework","833703951":"Self Service PLG"};
+        // Build pipeline stage map + stage order
+        var stageMap={};var stageOrder={};var pipelineMap={};
         if(crmPipelines&&crmPipelines.results){
           for(var pi=0;pi<crmPipelines.results.length;pi++){
             var pl=crmPipelines.results[pi];
+            pipelineMap[pl.id]=pl.label;
             if(pl.stages){
               for(var si=0;si<pl.stages.length;si++){
                 stageMap[pl.stages[si].id]=pl.stages[si].label;
+                stageOrder[pl.stages[si].id]=si;
               }
             }
           }
         }
 
-        // Deal pipeline stats
-        var dealsByStage={};var totalPipelineValue=0;
-        for(var di=0;di<crmDeals.length;di++){
-          var ds=crmDeals[di].properties&&crmDeals[di].properties.dealstage||"unknown";
-          var amt=parseFloat(crmDeals[di].properties&&crmDeals[di].properties.amount)||0;
-          if(!dealsByStage[ds])dealsByStage[ds]={count:0,value:0,label:stageMap[ds]||ds};
-          dealsByStage[ds].count++;
-          dealsByStage[ds].value+=amt;
-          totalPipelineValue+=amt;
-        }
-        var pipelineData=Object.keys(dealsByStage).map(function(k){return{stage:dealsByStage[k].label,count:dealsByStage[k].count,value:dealsByStage[k].value};});
-
-        var outcomeColor={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:C.yellow,RESCHEDULED:C.orange,"NO CALIFICADA":C.pink,UNKNOWN:C.muted};
-
-        // Filter meetings by selected date period (Bug 3 fix)
-        var filtMeetings=crmMeetings;
-        if(dateFrom||dateTo){
-          var hFromD=dateFrom?new Date(dateFrom+"T00:00:00"):null;
-          var hToD=dateTo?new Date(dateTo+"T23:59:59"):null;
-          filtMeetings=crmMeetings.filter(function(m){
-            var st=m.properties&&m.properties.hs_createdate||m.createdAt;
-            if(!st)return false;var md=new Date(st);
-            if(hFromD&&md<hFromD)return false;
-            if(hToD&&md>hToD)return false;
-            return true;
-          });
-        }
-
-        // Build phone → meetings reverse lookup (Bug 1+2 fix: both phone + mobilephone, variant matching)
-        var phoneMeetings={};
-        var contactPhonesMap={};
-        for(var ci=0;ci<crmContacts.length;ci++){
-          var cc=crmContacts[ci];
-          var cPhones=[];
-          if(cc.properties){
-            if(cc.properties.phone){var cp1=cc.properties.phone.replace(/\D/g,"");if(cp1)cPhones.push(cp1);}
-            if(cc.properties.mobilephone){var cp2=cc.properties.mobilephone.replace(/\D/g,"");if(cp2&&cPhones.indexOf(cp2)<0)cPhones.push(cp2);}
+        // Filter deals by target pipelines + date + pipeline filter + owner filter
+        var filteredDeals=crmDeals.filter(function(d){
+          var p=d.properties||{};
+          if(!TARGET_PIPELINES[p.pipeline])return false;
+          if(hsDealPipelineFilter!=="all"&&p.pipeline!==hsDealPipelineFilter)return false;
+          if(hsDealOwnerFilter.length>0&&hsDealOwnerFilter.indexOf(p.hubspot_owner_id)<0)return false;
+          if(dateFrom||dateTo){
+            var cd=p.createdate?new Date(p.createdate):null;
+            if(!cd)return false;
+            if(dateFrom&&cd<new Date(dateFrom+"T00:00:00"))return false;
+            if(dateTo&&cd>new Date(dateTo+"T23:59:59"))return false;
           }
-          if(cPhones.length>0)contactPhonesMap[cc.id]=cPhones;
+          return true;
+        });
+
+        // KPIs
+        var totalDeals=filteredDeals.length;
+        var wonDeals=filteredDeals.filter(function(d){return d.properties&&d.properties.hs_is_closed_won==="true";});
+        var lostDeals=filteredDeals.filter(function(d){return d.properties&&d.properties.hs_is_closed_lost==="true";});
+        var openDeals=filteredDeals.filter(function(d){var p=d.properties||{};return p.hs_is_closed_won!=="true"&&p.hs_is_closed_lost!=="true";});
+        var wonRevenue=0;for(var wi=0;wi<wonDeals.length;wi++)wonRevenue+=parseFloat(wonDeals[wi].properties.amount)||0;
+        var avgTicket=wonDeals.length>0?wonRevenue/wonDeals.length:0;
+        var winRate=(wonDeals.length+lostDeals.length)>0?(wonDeals.length/(wonDeals.length+lostDeals.length)*100):0;
+        var totalDaysClose=0;var daysCount=0;
+        for(var dci=0;dci<wonDeals.length;dci++){var dtc=parseFloat(wonDeals[dci].properties.days_to_close);if(!isNaN(dtc)){totalDaysClose+=dtc;daysCount++;}}
+        var avgDays=daysCount>0?Math.round(totalDaysClose/daysCount):0;
+        function computePipelineKPIs(pid){
+          var pDeals=filteredDeals.filter(function(d){return d.properties&&d.properties.pipeline===pid;});
+          var pWon=pDeals.filter(function(d){return d.properties.hs_is_closed_won==="true";});
+          var pLost=pDeals.filter(function(d){return d.properties.hs_is_closed_lost==="true";});
+          var pOpen=pDeals.filter(function(d){return d.properties.hs_is_closed_won!=="true"&&d.properties.hs_is_closed_lost!=="true";});
+          var pRev=0;for(var ri=0;ri<pWon.length;ri++)pRev+=parseFloat(pWon[ri].properties.amount)||0;
+          var pAvgT=pWon.length>0?pRev/pWon.length:0;
+          var pWR=(pWon.length+pLost.length)>0?(pWon.length/(pWon.length+pLost.length)*100):0;
+          var pDays=0;var pDC=0;for(var pdi=0;pdi<pWon.length;pdi++){var v=parseFloat(pWon[pdi].properties.days_to_close);if(!isNaN(v)){pDays+=v;pDC++;}}
+          return{total:pDeals.length,won:pWon.length,lost:pLost.length,open:pOpen.length,revenue:pRev,avgTicket:pAvgT,winRate:pWR,avgDays:pDC>0?Math.round(pDays/pDC):0};
         }
-        // Build expanded phone index for variant matching
-        var hsPhoneIdx={};
-        for(var mj=0;mj<filtMeetings.length;mj++){
-          var mm=filtMeetings[mj];
-          var assoc=mm.associations&&mm.associations.contacts&&mm.associations.contacts.results;
+        var nsKPI=computePipelineKPIs("720627716");
+        var ssKPI=computePipelineKPIs("833703951");
+        function buildFunnelData(pid){
+          var byStage={};
+          for(var fi=0;fi<filteredDeals.length;fi++){
+            var fp=filteredDeals[fi].properties||{};
+            if(fp.pipeline!==pid)continue;
+            var stg=fp.dealstage||"unknown";
+            if(!byStage[stg])byStage[stg]={count:0,value:0,order:stageOrder[stg]!=null?stageOrder[stg]:999};
+            byStage[stg].count++;
+            byStage[stg].value+=parseFloat(fp.amount)||0;
+          }
+          return Object.keys(byStage).map(function(k){return{stage:stageMap[k]||k,count:byStage[k].count,value:byStage[k].value,order:byStage[k].order};}).sort(function(a,b){return a.order-b.order;});
+        }
+        var nsFunnel=buildFunnelData("720627716");
+        var ssFunnel=buildFunnelData("833703951");
+        var revByDay={};
+        for(var rvi=0;rvi<filteredDeals.length;rvi++){
+          var rvp=filteredDeals[rvi].properties||{};
+          if(rvp.hs_is_closed_won!=="true"||!rvp.closedate)continue;
+          var rvd=new Date(rvp.closedate);if(isNaN(rvd.getTime()))continue;
+          var rvk=rvd.toISOString().slice(0,10);
+          if(!revByDay[rvk])revByDay[rvk]={ns:0,ss:0};
+          if(rvp.pipeline==="720627716")revByDay[rvk].ns+=parseFloat(rvp.amount)||0;
+          else revByDay[rvk].ss+=parseFloat(rvp.amount)||0;
+        }
+        var revenueChartData=Object.keys(revByDay).sort().map(function(k){return{d:k.slice(5),ns:revByDay[k].ns,ss:revByDay[k].ss};});
+        var crByDay={};
+        for(var cri=0;cri<filteredDeals.length;cri++){
+          var crp=filteredDeals[cri].properties||{};
+          if(!crp.createdate)continue;
+          var crd=new Date(crp.createdate);if(isNaN(crd.getTime()))continue;
+          var crk=crd.toISOString().slice(0,10);
+          if(!crByDay[crk])crByDay[crk]={ns:0,ss:0};
+          if(crp.pipeline==="720627716")crByDay[crk].ns++;
+          else crByDay[crk].ss++;
+        }
+        var creationChartData=Object.keys(crByDay).sort().map(function(k){return{d:k.slice(5),ns:crByDay[k].ns,ss:crByDay[k].ss};});
+        var dealsByOwner={};
+        for(var obi=0;obi<filteredDeals.length;obi++){
+          var obp=filteredDeals[obi].properties||{};
+          var obOid=obp.hubspot_owner_id||"unassigned";
           if(!assoc)continue;
           for(var ak=0;ak<assoc.length;ak++){
             var aPhones=contactPhonesMap[assoc[ak].id];
@@ -3204,20 +3305,33 @@ export default function Dashboard(){
           }
         }
 
+        // Build contactId → meetings map for hid fallback
+        var contactIdMeetings={};
+        for(var cmi=0;cmi<filtMeetings.length;cmi++){
+          var cmm=filtMeetings[cmi];
+          var cmAssoc=cmm.associations&&cmm.associations.contacts&&cmm.associations.contacts.results;
+          if(!cmAssoc)continue;
+          for(var cmk=0;cmk<cmAssoc.length;cmk++){
+            var cmId=cmAssoc[cmk].id;
+            if(cmId){if(!contactIdMeetings[cmId])contactIdMeetings[cmId]=[];contactIdMeetings[cmId].push(cmm);}
+          }
+        }
+
         // Cross outbound leads with HS meetings using variant matching
         var ofertaLeads=meetings.filter(function(l){return l.ml;});
         var matchedLeads=[];
         var unmatchedLeads=[];
         for(var oi=0;oi<ofertaLeads.length;oi++){
-          var oPhone=(ofertaLeads[oi].p||"").replace(/\D/g,"");
-          if(!oPhone){unmatchedLeads.push(ofertaLeads[oi]);continue;}
+          var oLead=ofertaLeads[oi];
+          var oPhone=(oLead.p||"").replace(/\D/g,"");
           // Try full, last-11, last-10, last-9, last-8 against expanded index
-          var resolvedPhone=hsPhoneIdx[oPhone]||(oPhone.length>11&&hsPhoneIdx[oPhone.slice(-11)])||(oPhone.length>10&&hsPhoneIdx[oPhone.slice(-10)])||(oPhone.length>9&&hsPhoneIdx[oPhone.slice(-9)])||(oPhone.length>8&&hsPhoneIdx[oPhone.slice(-8)])||null;
+          var resolvedPhone=oPhone?(hsPhoneIdx[oPhone]||(oPhone.length>11&&hsPhoneIdx[oPhone.slice(-11)])||(oPhone.length>10&&hsPhoneIdx[oPhone.slice(-10)])||(oPhone.length>9&&hsPhoneIdx[oPhone.slice(-9)])||(oPhone.length>8&&hsPhoneIdx[oPhone.slice(-8)])||null):null;
           var hsMeets=resolvedPhone?phoneMeetings[resolvedPhone]:null;
+          if(!hsMeets&&oLead.hid){hsMeets=contactIdMeetings[oLead.hid]||null;}
           if(hsMeets&&hsMeets.length>0){
-            matchedLeads.push({lead:ofertaLeads[oi],meetings:hsMeets});
+            matchedLeads.push({lead:oLead,meetings:hsMeets});
           }else{
-            unmatchedLeads.push(ofertaLeads[oi]);
+            unmatchedLeads.push(oLead);
           }
         }
         var ofertaCount=ofertaLeads.length;
@@ -3317,7 +3431,7 @@ export default function Dashboard(){
               for(var hci=0;hci<hcMlLeads.length;hci++){
                 var hcLead=hcMlLeads[hci];var hcDate=null;
                 if(hcLead.c){
-                  for(var hcc=0;hcc<hcLead.c.length;hcc++){var hcMsg=hcLead.c[hcc];if(hcMsg[0]===2&&hcMsg[1]&&(/https?:\/\/meetings\.hubspot\.com\/\S+/.test(hcMsg[1])||/https?:\/\/yavendio\.com\/meetings\S*/.test(hcMsg[1]))){if(hcMsg[2])hcDate=parseDatetime(hcMsg[2]);break;}}
+                  for(var hcc=0;hcc<hcLead.c.length;hcc++){var hcMsg=hcLead.c[hcc];if(hcMsg[0]===2&&hcMsg[1]&&(/meetings\.hubspot\.com\//.test(hcMsg[1])||/yavendio\.com\/[^\s]*meetings/.test(hcMsg[1]))){if(hcMsg[2])hcDate=parseDatetime(hcMsg[2]);break;}}
                   if(!hcDate&&hcLead.c[0]&&hcLead.c[0][2])hcDate=parseDatetime(hcLead.c[0][2]);
                 }
                 if(hcDate&&!isNaN(hcDate.getTime())){var hdk=String(hcDate.getDate()).padStart(2,"0")+"/"+String(hcDate.getMonth()+1).padStart(2,"0");if(!hcOfertaByDay[hdk])hcOfertaByDay[hdk]=0;hcOfertaByDay[hdk]++;}

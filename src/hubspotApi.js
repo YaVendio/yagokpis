@@ -57,8 +57,9 @@ export async function fetchAllContactsWithPhone() {
       filterGroups: [
         { filters: [{ propertyName: "phone", operator: "HAS_PROPERTY" }] },
         { filters: [{ propertyName: "mobilephone", operator: "HAS_PROPERTY" }] },
+        { filters: [{ propertyName: "hs_whatsapp_phone_number", operator: "HAS_PROPERTY" }] },
       ],
-      properties: ["firstname", "lastname", "phone", "mobilephone", "email", "createdate", "hs_lead_status", "lifecyclestage", "company"],
+      properties: ["firstname", "lastname", "phone", "mobilephone", "hs_whatsapp_phone_number", "email", "createdate", "hs_lead_status", "lifecyclestage", "company"],
       limit: 100,
     };
     if (after) searchBody.after = after;
@@ -165,7 +166,7 @@ export async function fetchContactsByIds(contactIds) {
       var inputs = batch.map(function(id) { return { id: id }; });
       return callHubSpot("/crm/v3/objects/contacts/batch/read", null, {
         inputs: inputs,
-        properties: ["firstname", "lastname", "phone", "mobilephone", "email", "createdate", "hs_lead_status", "lifecyclestage", "company"]
+        properties: ["firstname", "lastname", "phone", "mobilephone", "hs_whatsapp_phone_number", "email", "createdate", "hs_lead_status", "lifecyclestage", "company"]
       });
     });
     var results = await Promise.all(promises);
@@ -239,13 +240,17 @@ export async function fetchDealsSince(sinceIso) {
   while (true) {
     var searchBody = {
       filterGroups: [{
-        filters: [{
-          propertyName: "createdate",
-          operator: "GTE",
-          value: String(sinceMs)
-        }]
+        filters: [
+          { propertyName: "createdate", operator: "GTE", value: String(sinceMs) },
+          { propertyName: "pipeline", operator: "EQ", value: "720627716" }
+        ]
+      },{
+        filters: [
+          { propertyName: "createdate", operator: "GTE", value: String(sinceMs) },
+          { propertyName: "pipeline", operator: "EQ", value: "833703951" }
+        ]
       }],
-      properties: ["dealname", "dealstage", "amount", "pipeline", "createdate", "closedate"],
+      properties: ["dealname", "dealstage", "amount", "pipeline", "createdate", "closedate", "days_to_close", "hs_is_closed_won", "hs_is_closed_lost", "hubspot_owner_id"],
       limit: 100,
     };
     if (after) searchBody.after = after;
@@ -284,6 +289,7 @@ export function getMeetingContactPhones(meetings, contacts) {
     if (c.properties) {
       if (c.properties.phone) { var p1 = c.properties.phone.replace(/\D/g, ""); if (p1) phones.push(p1); }
       if (c.properties.mobilephone) { var p2 = c.properties.mobilephone.replace(/\D/g, ""); if (p2 && phones.indexOf(p2) < 0) phones.push(p2); }
+      if (c.properties.hs_whatsapp_phone_number) { var p3 = c.properties.hs_whatsapp_phone_number.replace(/\D/g, ""); if (p3 && phones.indexOf(p3) < 0) phones.push(p3); }
     }
     if (phones.length > 0) contactPhonesMap[c.id] = phones;
   }
@@ -419,6 +425,18 @@ export async function fetchOwnersByIds(ownerIds) {
   return map;
 }
 
+export function getMeetingContactIds(meetings) {
+  var ids = {};
+  for (var i = 0; i < meetings.length; i++) {
+    var assoc = meetings[i].associations && meetings[i].associations.contacts && meetings[i].associations.contacts.results;
+    if (!assoc) continue;
+    for (var j = 0; j < assoc.length; j++) {
+      if (assoc[j].id) ids[assoc[j].id] = true;
+    }
+  }
+  return ids;
+}
+
 export function extractHubSpotPhones(contacts) {
   var phones = {};
   function addPhone(raw) {
@@ -436,6 +454,7 @@ export function extractHubSpotPhones(contacts) {
     if (c.properties) {
       addPhone(c.properties.phone);
       addPhone(c.properties.mobilephone);
+      addPhone(c.properties.hs_whatsapp_phone_number);
     }
   }
   return phones;

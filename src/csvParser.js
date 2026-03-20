@@ -400,7 +400,7 @@ export function processInboundRows(rows, regionFilter, lifecyclePhones, hubspotP
       var type = msg.message_type;
       var dt = formatDatetime(msg.message_datetime);
 
-      if (type === "ai" && content && (content.includes("meetings.hubspot.com/") || content.includes("yavendio.com/meetings"))) hasMeetingLink = true;
+      if (type === "ai" && content && (/meetings\.hubspot\.com\//.test(content) || /yavendio\.com\/[^\s]*meetings/.test(content))) hasMeetingLink = true;
 
       if (type === "ai") {
         if (/yavendio\.com|yavendió\.com|crear\s+(?:tu\s+)?cuenta|criar\s+(?:sua\s+)?conta|crea\s+una\s+cuenta|registr(?:ar|ate|o)/i.test(content)) hasSignupLink = true;
@@ -513,6 +513,7 @@ export function processInboundRows(rows, regionFilter, lifecyclePhones, hubspotP
         au: isAuto,
         e: depth,
         q: "",
+        hid: "",
         co: getCountryFlag(phone),
         tr: [],
         fr: null,
@@ -798,10 +799,12 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
     var isAuto = false;
     var firstHumanSeen = false;
 
-    // Find phone and qualification
+    // Find phone, qualification, and hubspot_id
+    var hid = "";
     for (var mi = 0; mi < msgs.length; mi++) {
       if (msgs[mi].phone_number) phone = msgs[mi].phone_number;
       if (msgs[mi].lead_qualification) qual = msgs[mi].lead_qualification;
+      if (msgs[mi].hubspot_id) hid = msgs[mi].hubspot_id;
     }
 
     // Detect region by phone prefix (+55 = BR), fallback to template-based detection
@@ -835,7 +838,7 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
       var type = msg.message_type;
       var dt = formatDatetime(msg.message_datetime);
 
-      if (type === "ai" && content && (content.includes("meetings.hubspot.com/") || content.includes("yavendio.com/meetings"))) hasMeetingLink = true;
+      if (type === "ai" && content && (/meetings\.hubspot\.com\//.test(content) || /yavendio\.com\/[^\s]*meetings/.test(content))) hasMeetingLink = true;
 
       if (type === "ai") {
         if (isTemplate(content) || msg.template_name) {
@@ -1001,6 +1004,7 @@ export function processCSVRows(rows, templateConfig, regionFilter) {
         au: isAuto,
         e: engagement,
         q: qual,
+        hid: hid,
         co: getCountryFlag(phone),
         tr: templatesSent.filter(function (v, i, a) { return a.indexOf(v) === i; }),
         fr: firstResponseTpl,

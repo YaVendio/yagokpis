@@ -37,7 +37,8 @@ export async function fetchThreads(stepFilter, since) {
     "WITH last_lead_qualification AS (\n" +
     "    SELECT DISTINCT ON (company_id)\n" +
     "        company_id,\n" +
-    "        event_data->>'qualification' AS lead_qualification\n" +
+    "        event_data->>'qualification' AS lead_qualification,\n" +
+    "        event_data->>'hubspot_ID' AS hubspot_id\n" +
     "    FROM lifecycle_events\n" +
     "    WHERE event_name = 'lead_qualification'\n" +
     "    ORDER BY company_id, event_timestamp DESC\n" +
@@ -50,6 +51,7 @@ export async function fetchThreads(stepFilter, since) {
     "    le.template_name,\n" +
     "    lfs.step_order,\n" +
     "    llq.lead_qualification,\n" +
+    "    llq.hubspot_id,\n" +
     '    t."values"::text AS values_json\n' +
     "FROM thread t\n" +
     "JOIN lifecycle_executions le\n" +
@@ -81,6 +83,7 @@ export async function fetchThreads(stepFilter, since) {
       template_name: row[colIdx["template_name"]],
       step_order: row[colIdx["step_order"]],
       lead_qualification: row[colIdx["lead_qualification"]],
+      hubspot_id: row[colIdx["hubspot_id"]],
       values_json: row[colIdx["values_json"]],
     });
   }
@@ -398,11 +401,20 @@ export function expandInboundThreadMessages(threads) {
       if (typeof msg.content === "string") {
         msgContent = msg.content;
       } else if (Array.isArray(msg.content)) {
-        msgContent = msg.content.map(function (block) {
-          if (typeof block === "string") return block;
-          if (block && block.text) return block.text;
-          return "";
-        }).join("");
+        var _tp = [];
+        var _tlp = [];
+        for (var bi = 0; bi < msg.content.length; bi++) {
+          var blk = msg.content[bi];
+          if (typeof blk === "string") { _tp.push(blk); }
+          else if (blk && blk.text) { _tp.push(blk.text); }
+          else if (blk && blk.type === "tool_use" && blk.input) {
+            for (var _k in blk.input) {
+              if (typeof blk.input[_k] === "string") _tlp.push(blk.input[_k]);
+            }
+          }
+        }
+        msgContent = _tp.join("");
+        if (_tlp.length > 0) msgContent += "\n" + _tlp.join("\n");
       }
 
       var msgDatetime = "";
@@ -690,6 +702,15 @@ export function expandThreadMessages(threads) {
       }
     }
 
+    // Get hubspot_id from first thread that has one
+    var groupHubspotId = "";
+    for (var hi = 0; hi < indices.length; hi++) {
+      if (parsed[indices[hi]].thread.hubspot_id) {
+        groupHubspotId = parsed[indices[hi]].thread.hubspot_id;
+        break;
+      }
+    }
+
     // Get template_sent_at from step 1 thread (first in sorted order)
     var step1Thread = parsed[indices[0]].thread;
     var groupSentAt = step1Thread.template_sent_at || "";
@@ -713,6 +734,7 @@ export function expandThreadMessages(threads) {
           template_name: thr.template_name || "",
           step_order: thr.step_order != null ? String(thr.step_order) : "",
           lead_qualification: groupQualification,
+          hubspot_id: groupHubspotId,
           message_type: "ai",
           message_datetime: groupSentAt,
           message_content: "",
@@ -725,16 +747,25 @@ export function expandThreadMessages(threads) {
         var msg = msgs[j];
         var msgType = msg.type === "human" ? "human" : msg.type === "tool" ? "tool" : "ai";
 
-        // Normalize content to string
+        // Normalize content to string (include tool_use input text for link detection)
         var msgContent = "";
         if (typeof msg.content === "string") {
           msgContent = msg.content;
         } else if (Array.isArray(msg.content)) {
-          msgContent = msg.content.map(function (block) {
-            if (typeof block === "string") return block;
-            if (block && block.text) return block.text;
-            return "";
-          }).join("");
+          var _textParts = [];
+          var _toolParts = [];
+          for (var bi = 0; bi < msg.content.length; bi++) {
+            var block = msg.content[bi];
+            if (typeof block === "string") { _textParts.push(block); }
+            else if (block && block.text) { _textParts.push(block.text); }
+            else if (block && block.type === "tool_use" && block.input) {
+              for (var _k in block.input) {
+                if (typeof block.input[_k] === "string") _toolParts.push(block.input[_k]);
+              }
+            }
+          }
+          msgContent = _textParts.join("");
+          if (_toolParts.length > 0) msgContent += "\n" + _toolParts.join("\n");
         }
 
         // template_name: per-message metadata first, then execution-level for first AI msg
@@ -773,6 +804,7 @@ export function expandThreadMessages(threads) {
           template_name: msgTemplateName,
           step_order: thr.step_order != null ? String(thr.step_order) : "",
           lead_qualification: groupQualification,
+          hubspot_id: groupHubspotId,
           message_type: msgType,
           message_datetime: msgDatetime,
           message_content: msgContent,
