@@ -511,6 +511,7 @@ export default function Dashboard(){
   const [hsReunionDateFrom,setHsReunionDateFrom]=useState("");
   const [hsReunionDateTo,setHsReunionDateTo]=useState("");
   const [hsReunionTypeFilter,setHsReunionTypeFilter]=useState([]);
+  const [hsReunionOutcomeFilter,setHsReunionOutcomeFilter]=useState("");
   const [hsDetailDay,setHsDetailDay]=useState(null);
 
   // Email (Brevo) tab state
@@ -1902,7 +1903,7 @@ export default function Dashboard(){
               <div style={{fontSize:13,color:C.muted,marginTop:6}}>Out: <strong>{outTc}</strong> / In: <strong>{inbTc}</strong></div>
             </Cd>
             {/* Card: Ofertas de Reunión */}
-            <Cd style={{border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)",position:"relative",overflow:"hidden"}}>
+            <Cd onClick={totalOferta>0?function(){setQualModalLeads(allLeads.filter(function(l){return l.ml;}));setQualModalTitle("\u{1F4C5} Leads con Oferta de Reuni\u00F3n ("+totalOferta+")");}:undefined} style={{border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)",position:"relative",overflow:"hidden",cursor:totalOferta>0?"pointer":"default"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4C5}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.pink+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4C5}"}</div>
@@ -1922,7 +1923,7 @@ export default function Dashboard(){
               <div style={{fontSize:13,color:C.muted,marginTop:6}}>{totalOferta>0?((confirmedCount/totalOferta)*100).toFixed(1):"0"}% de ofertas {"\u00B7"} Out: <strong>{outConfirmed}</strong> / In: <strong>{inbConfirmed}</strong></div>
             </Cd>
             {/* Card: Realizadas */}
-            <Cd style={{border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)",position:"relative",overflow:"hidden"}}>
+            <Cd onClick={realizadas>0?function(){setHsReunionOutcomeFilter("COMPLETED");navigateTo("hubspot","reuniones");}:undefined} style={{border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)",position:"relative",overflow:"hidden",cursor:realizadas>0?"pointer":"default"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F3AF}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.cyan+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F3AF}"}</div>
@@ -1941,7 +1942,7 @@ export default function Dashboard(){
             </Cd>
             <Cd><Sec>Distribuci{"\u00F3"}n de Resultados (HubSpot)</Sec>
               {outcomeData.length>0 ? outcomeData.map(function(o,i){var maxC=outcomeData[0].count||1;var w2=Math.max((o.count/maxC)*100,3);
-                return (<div key={i} style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:13,fontWeight:600,color:o.color}}>{o.name}</span><span style={{fontSize:14,fontWeight:800,fontFamily:mono}}>{o.count}</span></div><div style={{height:18,background:C.rowAlt,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:w2+"%",background:o.color,borderRadius:4,opacity:0.7,transition:"width 0.4s ease"}}/></div></div>);
+                return (<div key={i} onClick={function(){setHsReunionOutcomeFilter(o.name);navigateTo("hubspot","reuniones");}} style={{marginBottom:8,cursor:"pointer",borderRadius:6,padding:"4px 6px",transition:"background 0.15s ease"}} onMouseEnter={function(e){e.currentTarget.style.background=C.rowAlt;}} onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:13,fontWeight:600,color:o.color}}>{o.name}</span><span style={{fontSize:14,fontWeight:800,fontFamily:mono}}>{o.count}</span></div><div style={{height:18,background:C.rowAlt,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:w2+"%",background:o.color,borderRadius:4,opacity:0.7,transition:"width 0.4s ease"}}/></div></div>);
               }) : <div style={{fontSize:13,color:C.muted,padding:20,textAlign:"center"}}>Sin datos de reuniones en HubSpot para este per{"\u00ED"}odo</div>}
             </Cd>
           </div>
@@ -3717,6 +3718,14 @@ export default function Dashboard(){
           });
         }
 
+        // Filter meetings by outcome
+        if(hsReunionOutcomeFilter){
+          filteredMeetings=filteredMeetings.filter(function(m){
+            var mo=m.properties&&m.properties.hs_meeting_outcome||"UNKNOWN";
+            return mo===hsReunionOutcomeFilter;
+          });
+        }
+
         // Sort by date descending
         var sorted=filteredMeetings.slice().sort(function(a,b){
           var sa=a.properties&&a.properties.hs_meeting_start_time||"";
@@ -3802,6 +3811,15 @@ export default function Dashboard(){
                 return <button key={tv} onClick={function(){toggleType(tv);}} style={{background:active?C.cyan:C.rowAlt,color:active?"#fff":C.sub,border:"1px solid "+(active?C.cyan:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,transition:"all 0.15s ease"}}>{tv}</button>;
               })}
             </div>}
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18,flexWrap:"wrap"}}>
+              <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Outcome:</span>
+              <button onClick={function(){setHsReunionOutcomeFilter("");}} style={{background:!hsReunionOutcomeFilter?C.accent:C.rowAlt,color:!hsReunionOutcomeFilter?"#fff":C.muted,border:"1px solid "+(!hsReunionOutcomeFilter?C.accent:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Todos</button>
+              {outcomeKeys.map(function(oc){
+                var active=hsReunionOutcomeFilter===oc;
+                var clr=outcomeColor[oc]||C.muted;
+                return <button key={oc} onClick={function(){setHsReunionOutcomeFilter(active?"":oc);}} style={{background:active?clr:C.rowAlt,color:active?"#fff":C.sub,border:"1px solid "+(active?clr:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,transition:"all 0.15s ease"}}>{outcomeLabels[oc]||oc}</button>;
+              })}
+            </div>
 
             {/* Outcome KPI cards */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:12,marginBottom:22}}>
