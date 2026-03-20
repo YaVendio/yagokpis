@@ -90,6 +90,8 @@ function ConvView({lead,onBack,crmContacts}){
           {company && <span style={{fontSize:14,color:C.muted,fontWeight:600}}>{"\u00B7 "+company}</span>}
           <Bd color={ql.c}>{ql.t}</Bd>
           {lead._src && <Bd color={lead._src==="outbound"?C.green:lead._src==="inbound"?C.cyan:C.purple}>{lead._src==="outbound"?"OUTBOUND":lead._src==="inbound"?"INBOUND":"AMBOS"}</Bd>}
+          {lead.ml && <Bd color={C.pink}>{"\uD83D\uDCC5"} Reuni\u00F3n Ofertada</Bd>}
+          {lead._confirmed!==undefined && <Bd color={lead._confirmed?C.green:C.red}>{lead._confirmed?"\u2705 Reuni\u00F3n Agendada":"\u274C No agend\u00F3"}</Bd>}
           {lead.au && <Bd color={C.red}>AUTO-REPLY</Bd>}
         </div>
         <div style={{fontSize:12,color:C.muted,marginTop:2}}>
@@ -226,7 +228,8 @@ function MeetModal({leads,onClose,mode,title,crmContacts}){
                   {company && <span style={{fontSize:13,color:C.muted,fontWeight:600}}>{"\u00B7 "+company}</span>}
                   <Bd color={ql.c}>{ql.t}</Bd>
                   {l._src && <Bd color={l._src==="outbound"?C.green:l._src==="inbound"?C.cyan:C.purple}>{l._src==="outbound"?"OUTBOUND":l._src==="inbound"?"INBOUND":"AMBOS"}</Bd>}
-                  {l._confirmed!==undefined && <Bd color={l._confirmed?C.green:C.red}>{l._confirmed?"\u2705 Confirmada":"\u274C No confirmada"}</Bd>}
+                  {l.ml && <Bd color={C.pink}>{"\uD83D\uDCC5"} Ofertada</Bd>}
+                  {l._confirmed!==undefined && <Bd color={l._confirmed?C.green:C.red}>{l._confirmed?"\u2705 Agendada":"\u274C No agend\u00F3"}</Bd>}
                   {l.au && <Bd color={C.red}>AUTO</Bd>}
                 </div>
                 <div style={{fontSize:12,color:C.muted,marginTop:3,display:"flex",flexWrap:"wrap",gap:4}}>
@@ -3287,492 +3290,195 @@ export default function Dashboard(){
         for(var obi=0;obi<filteredDeals.length;obi++){
           var obp=filteredDeals[obi].properties||{};
           var obOid=obp.hubspot_owner_id||"unassigned";
-          if(!assoc)continue;
-          for(var ak=0;ak<assoc.length;ak++){
-            var aPhones=contactPhonesMap[assoc[ak].id];
-            if(!aPhones)continue;
-            for(var api=0;api<aPhones.length;api++){
-              var aphone=aPhones[api];
-              if(!phoneMeetings[aphone])phoneMeetings[aphone]=[];
-              phoneMeetings[aphone].push(mm);
-              // Expand into variant index
-              hsPhoneIdx[aphone]=aphone;
-              if(aphone.length>11)hsPhoneIdx[aphone.slice(-11)]=aphone;
-              if(aphone.length>10)hsPhoneIdx[aphone.slice(-10)]=aphone;
-              if(aphone.length>9)hsPhoneIdx[aphone.slice(-9)]=aphone;
-              if(aphone.length>8)hsPhoneIdx[aphone.slice(-8)]=aphone;
-            }
-          }
+          if(!dealsByOwner[obOid])dealsByOwner[obOid]={total:0,won:0,lost:0,revenue:0,days:0,daysN:0};
+          dealsByOwner[obOid].total++;
+          if(obp.hs_is_closed_won==="true"){dealsByOwner[obOid].won++;dealsByOwner[obOid].revenue+=parseFloat(obp.amount)||0;var obd=parseFloat(obp.days_to_close);if(!isNaN(obd)){dealsByOwner[obOid].days+=obd;dealsByOwner[obOid].daysN++;}}
+          if(obp.hs_is_closed_lost==="true")dealsByOwner[obOid].lost++;
         }
-
-        // Build contactId → meetings map for hid fallback
-        var contactIdMeetings={};
-        for(var cmi=0;cmi<filtMeetings.length;cmi++){
-          var cmm=filtMeetings[cmi];
-          var cmAssoc=cmm.associations&&cmm.associations.contacts&&cmm.associations.contacts.results;
-          if(!cmAssoc)continue;
-          for(var cmk=0;cmk<cmAssoc.length;cmk++){
-            var cmId=cmAssoc[cmk].id;
-            if(cmId){if(!contactIdMeetings[cmId])contactIdMeetings[cmId]=[];contactIdMeetings[cmId].push(cmm);}
-          }
-        }
-
-        // Cross outbound leads with HS meetings using variant matching
-        var ofertaLeads=meetings.filter(function(l){return l.ml;});
-        var matchedLeads=[];
-        var unmatchedLeads=[];
-        for(var oi=0;oi<ofertaLeads.length;oi++){
-          var oLead=ofertaLeads[oi];
-          var oPhone=(oLead.p||"").replace(/\D/g,"");
-          // Try full, last-11, last-10, last-9, last-8 against expanded index
-          var resolvedPhone=oPhone?(hsPhoneIdx[oPhone]||(oPhone.length>11&&hsPhoneIdx[oPhone.slice(-11)])||(oPhone.length>10&&hsPhoneIdx[oPhone.slice(-10)])||(oPhone.length>9&&hsPhoneIdx[oPhone.slice(-9)])||(oPhone.length>8&&hsPhoneIdx[oPhone.slice(-8)])||null):null;
-          var hsMeets=resolvedPhone?phoneMeetings[resolvedPhone]:null;
-          if(!hsMeets&&oLead.hid){hsMeets=contactIdMeetings[oLead.hid]||null;}
-          if(hsMeets&&hsMeets.length>0){
-            matchedLeads.push({lead:oLead,meetings:hsMeets});
-          }else{
-            unmatchedLeads.push(oLead);
-          }
-        }
-        var ofertaCount=ofertaLeads.length;
-        var matchedCount=matchedLeads.length;
-        var convRate=ofertaCount>0?(matchedCount/ofertaCount*100).toFixed(1):"0";
-        var respCount=d.resp||0;
-        var ofertaPctResp=respCount>0?(ofertaCount/respCount*100).toFixed(1):"0";
-
-        // Meeting outcome stats — filtered by period
-        var totalMeetOutcomes={};
-        for(var tmi=0;tmi<filtMeetings.length;tmi++){
-          var tmo=filtMeetings[tmi].properties&&filtMeetings[tmi].properties.hs_meeting_outcome||"UNKNOWN";
-          if(!totalMeetOutcomes[tmo])totalMeetOutcomes[tmo]=0;
-          totalMeetOutcomes[tmo]++;
-        }
-
-        // Stats by owner (SDR)
-        var meetByOwner={};
-        for(var soi=0;soi<filtMeetings.length;soi++){
-          var sowId=filtMeetings[soi].properties&&filtMeetings[soi].properties.hubspot_owner_id||"unassigned";
-          var sowOut=filtMeetings[soi].properties&&filtMeetings[soi].properties.hs_meeting_outcome||"UNKNOWN";
-          if(!meetByOwner[sowId])meetByOwner[sowId]={total:0,outcomes:{}};
-          meetByOwner[sowId].total++;
-          if(!meetByOwner[sowId].outcomes[sowOut])meetByOwner[sowId].outcomes[sowOut]=0;
-          meetByOwner[sowId].outcomes[sowOut]++;
-        }
-
-        // Stats by source
-        var meetBySource={};
-        for(var ssi=0;ssi<filtMeetings.length;ssi++){
-          var src=filtMeetings[ssi].properties&&filtMeetings[ssi].properties.hs_meeting_source||"UNKNOWN";
-          if(!meetBySource[src])meetBySource[src]=0;
-          meetBySource[src]++;
-        }
-        var sourceLabels={MEETINGS_PUBLIC:"Agendamiento P\u00FAblico",BIDIRECTIONAL_SYNC:"Sync Calendario",CRM_UI:"Creado Manualmente"};
-
-        // Outbound-only meeting outcomes + IDs
-        var outboundOutcomes={};
-        var outboundMeetingIds={};
-        for(var mi2=0;mi2<matchedLeads.length;mi2++){
-          for(var mj2=0;mj2<matchedLeads[mi2].meetings.length;mj2++){
-            var om=matchedLeads[mi2].meetings[mj2].properties&&matchedLeads[mi2].meetings[mj2].properties.hs_meeting_outcome||"UNKNOWN";
-            if(!outboundOutcomes[om])outboundOutcomes[om]=0;
-            outboundOutcomes[om]++;
-            outboundMeetingIds[matchedLeads[mi2].meetings[mj2].id]=true;
-          }
-        }
-        var totalOutboundMeetings=0;
-        for(var ok in outboundOutcomes)totalOutboundMeetings+=outboundOutcomes[ok];
-        var totalInboundMeetings=filtMeetings.length-totalOutboundMeetings;
-        var inboundOutcomes={};
-        for(var ibi=0;ibi<filtMeetings.length;ibi++){
-          if(outboundMeetingIds[filtMeetings[ibi].id])continue;
-          var ibo=filtMeetings[ibi].properties&&filtMeetings[ibi].properties.hs_meeting_outcome||"UNKNOWN";
-          if(!inboundOutcomes[ibo])inboundOutcomes[ibo]=0;
-          inboundOutcomes[ibo]++;
-        }
-        var totalCompletadas=(totalMeetOutcomes.COMPLETED||0);
-        var pctCompletadas=filtMeetings.length>0?(totalCompletadas/filtMeetings.length*100).toFixed(1):"0";
+        var topDeals=filteredDeals.slice().sort(function(a,b){return(parseFloat(b.properties&&b.properties.amount)||0)-(parseFloat(a.properties&&a.properties.amount)||0);}).slice(0,20);
+        var donutData=[{name:"Won",value:wonDeals.length,fill:C.green},{name:"Lost",value:lostDeals.length,fill:C.red},{name:"Open",value:openDeals.length,fill:C.accent}].filter(function(dd){return dd.value>0;});
 
         return (<>
           {crmLoading && <div style={{textAlign:"center",padding:40,color:C.muted,fontSize:15}}><div style={{width:30,height:30,border:"3px solid "+C.border,borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto 12px"}}/>Cargando datos de HubSpot...</div>}
           {crmError && <div style={{color:C.red,fontSize:13,fontWeight:600,marginBottom:16,background:C.lRed,padding:"12px 18px",borderRadius:10,border:"1px solid "+C.redBorder}}>Error: {crmError} <button onClick={function(){setCrmError(null);setCrmInited(false);}} style={{marginLeft:12,background:C.accent,color:"#fff",border:"none",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Reintentar</button></div>}
-
           {!crmLoading && crmInited && (<>
-            {/* Section 1: KPI Cards — Inbound + Outbound */}
+            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12}}>
+              <span style={{fontSize:12,color:C.purple,fontWeight:700,background:C.lPurple,padding:"4px 12px",borderRadius:6}}>{filteredDeals.length} negocios</span>
+            </div>
+            {/* A. KPI Cards */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:22}}>
-              <Cd style={{border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
-                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Inbound</div>
-                <div style={{fontSize:32,fontWeight:900,color:C.cyan,fontFamily:mono,marginTop:6}}>{totalInboundMeetings}</div>
-                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{inboundOutcomes.COMPLETED||0} completadas {"\u00B7"} {inboundOutcomes.SCHEDULED||0} agendadas</div>
+              <Cd style={{border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Total Deals</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.accent,fontFamily:mono,marginTop:6}}>{totalDeals}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{openDeals.length} abiertos</div>
               </Cd>
               <Cd style={{border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
-                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Outbound</div>
-                <div style={{fontSize:32,fontWeight:900,color:C.green,fontFamily:mono,marginTop:6}}>{totalOutboundMeetings}</div>
-                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{outboundOutcomes.COMPLETED||0} completadas {"\u00B7"} {outboundOutcomes.SCHEDULED||0} agendadas</div>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Receita Won</div>
+                <div style={{fontSize:28,fontWeight:900,color:C.green,fontFamily:mono,marginTop:6}}>${wonRevenue.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>avg ticket ${avgTicket.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
               </Cd>
               <Cd style={{border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)"}}>
-                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Total Reuniones</div>
-                <div style={{fontSize:32,fontWeight:900,color:C.purple,fontFamily:mono,marginTop:6}}>{filtMeetings.length}</div>
-                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{totalMeetOutcomes.COMPLETED||0} completadas {"\u00B7"} {totalMeetOutcomes.NO_SHOW||0} no show</div>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Win Rate</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.purple,fontFamily:mono,marginTop:6}}>{winRate.toFixed(1)}%</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{wonDeals.length} won / {lostDeals.length} lost</div>
               </Cd>
-              <Cd style={{border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
-                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>% Completadas</div>
-                <div style={{fontSize:36,fontWeight:900,color:C.accent,fontFamily:mono,marginTop:6}}>{pctCompletadas}%</div>
-                <div style={{position:"relative",background:C.rowAlt,borderRadius:10,height:10,overflow:"hidden",marginTop:8}}>
-                  <div style={{background:"linear-gradient(90deg, "+C.accent+", "+C.green+")",height:"100%",width:Math.min(parseFloat(pctCompletadas),100)+"%",borderRadius:10,transition:"width 0.5s ease"}}/>
-                </div>
+              <Cd style={{border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
+                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>D{"í"}as Medio p/ Fechar</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.cyan,fontFamily:mono,marginTop:6}}>{avgDays}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>de {daysCount} deals cerrados</div>
               </Cd>
             </div>
-
-            {/* Daily chart: Reuniones por día — stacked inbound+outbound */}
-            {(function(){
-              // Ofertadas: leads with ml:true grouped by link date
-              var hcOfertaByDay={};
-              var hcMlLeads=meetings.filter(function(l){return l.ml;});
-              for(var hci=0;hci<hcMlLeads.length;hci++){
-                var hcLead=hcMlLeads[hci];var hcDate=null;
-                if(hcLead.c){
-                  for(var hcc=0;hcc<hcLead.c.length;hcc++){var hcMsg=hcLead.c[hcc];if(hcMsg[0]===2&&hcMsg[1]&&(/meetings\.hubspot\.com\//.test(hcMsg[1])||/yavendio\.com\/[^\s]*meetings/.test(hcMsg[1]))){if(hcMsg[2])hcDate=parseDatetime(hcMsg[2]);break;}}
-                  if(!hcDate&&hcLead.c[0]&&hcLead.c[0][2])hcDate=parseDatetime(hcLead.c[0][2]);
-                }
-                if(hcDate&&!isNaN(hcDate.getTime())){var hdk=String(hcDate.getDate()).padStart(2,"0")+"/"+String(hcDate.getMonth()+1).padStart(2,"0");if(!hcOfertaByDay[hdk])hcOfertaByDay[hdk]=0;hcOfertaByDay[hdk]++;}
-              }
-              // Split HS meetings into inbound and outbound per day (with meeting lists for detail)
-              var hcInboundByDay={};
-              var hcOutboundByDay={};
-              var hcInboundMeetByDay={};
-              var hcOutboundMeetByDay={};
-              for(var hmi=0;hmi<filtMeetings.length;hmi++){
-                var hSt=filtMeetings[hmi].properties&&(filtMeetings[hmi].properties.hs_createdate||filtMeetings[hmi].properties.hs_meeting_start_time)||filtMeetings[hmi].createdAt;
-                if(!hSt)continue;
-                var hMD=new Date(hSt);
-                if(isNaN(hMD.getTime()))continue;
-                var hmdk=String(hMD.getDate()).padStart(2,"0")+"/"+String(hMD.getMonth()+1).padStart(2,"0");
-                if(outboundMeetingIds[filtMeetings[hmi].id]){
-                  if(!hcOutboundByDay[hmdk])hcOutboundByDay[hmdk]=0;
-                  hcOutboundByDay[hmdk]++;
-                  if(!hcOutboundMeetByDay[hmdk])hcOutboundMeetByDay[hmdk]=[];
-                  hcOutboundMeetByDay[hmdk].push(filtMeetings[hmi]);
-                }else{
-                  if(!hcInboundByDay[hmdk])hcInboundByDay[hmdk]=0;
-                  hcInboundByDay[hmdk]++;
-                  if(!hcInboundMeetByDay[hmdk])hcInboundMeetByDay[hmdk]=[];
-                  hcInboundMeetByDay[hmdk].push(filtMeetings[hmi]);
-                }
-              }
-              var hcAllDays={};
-              var hcOK=Object.keys(hcOfertaByDay);for(var hok=0;hok<hcOK.length;hok++)hcAllDays[hcOK[hok]]=true;
-              var hcIK=Object.keys(hcInboundByDay);for(var hik=0;hik<hcIK.length;hik++)hcAllDays[hcIK[hik]]=true;
-              var hcBK=Object.keys(hcOutboundByDay);for(var hbk=0;hbk<hcBK.length;hbk++)hcAllDays[hcBK[hbk]]=true;
-              var hcData=Object.keys(hcAllDays).sort(function(a,b){var pa=a.split("/"),pb=b.split("/");return(parseInt(pa[1])*100+parseInt(pa[0]))-(parseInt(pb[1])*100+parseInt(pb[0]));}).map(function(dk){return{d:dk,ofertadas:hcOfertaByDay[dk]||0,inbound:hcInboundByDay[dk]||0,outbound:hcOutboundByDay[dk]||0};});
-              if(hcData.length===0)return null;
-              var handleHsBarClick=function(data){
-                var day=(data.payload||data).d;
-                setHsDetailDay(hsDetailDay===day?null:day);
-              };
-              // Build detail for selected day
-              var detailMeetings=null;
-              if(hsDetailDay){
-                var inbM=hcInboundMeetByDay[hsDetailDay]||[];
-                var outM=hcOutboundMeetByDay[hsDetailDay]||[];
-                detailMeetings={inbound:inbM,outbound:outM};
-              }
-              return (<Cd style={{marginBottom:22}}>
-                <Sec>Reuniones Ofertadas vs Reuniones por D{"\u00ED"}a</Sec>
-                <div style={{fontSize:11,color:C.muted,marginBottom:4,marginTop:-4}}>Click en una barra para ver detalle del d{"\u00ED"}a</div>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={hcData} margin={{left:-15,right:5,top:5,bottom:0}}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={C.border}/><XAxis dataKey="d" tick={{fontSize:11,fill:C.muted}}/><YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
-                    <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}}/>
-                    <Bar dataKey="ofertadas" name="Ofertadas" fill={C.pink} radius={[4,4,0,0]} stackId="a" cursor="pointer" onClick={handleHsBarClick}/>
-                    <Bar dataKey="outbound" name="Outbound" fill={C.green} stackId="b" radius={[0,0,0,0]} cursor="pointer" onClick={handleHsBarClick}/>
-                    <Bar dataKey="inbound" name="Inbound" fill={C.cyan} stackId="b" radius={[4,4,0,0]} cursor="pointer" onClick={handleHsBarClick}/>
-                  </BarChart>
-                </ResponsiveContainer>
-                {detailMeetings && (<div style={{marginTop:16,borderTop:"1px solid "+C.border,paddingTop:16}}>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-                    <div style={{fontSize:15,fontWeight:800,color:C.text}}>Detalle {hsDetailDay} {"\u2014"} {detailMeetings.inbound.length+detailMeetings.outbound.length} reuniones</div>
-                    <button onClick={function(){setHsDetailDay(null);}} style={{background:"none",border:"1px solid "+C.border,borderRadius:6,padding:"4px 10px",fontSize:12,fontWeight:600,cursor:"pointer",color:C.muted,fontFamily:font}}>Cerrar</button>
+            {/* B. Comparacion Pipelines */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:22}}>
+              {[{id:"720627716",name:"New Sales Framework",kpi:nsKPI,color:C.purple},{id:"833703951",name:"Self Service PLG",kpi:ssKPI,color:C.cyan}].map(function(pp){
+                return (<Cd key={pp.id} style={{border:"2px solid "+pp.color+"33"}}>
+                  <div style={{fontSize:14,fontWeight:800,color:pp.color,marginBottom:12}}>{pp.name}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                    <div><div style={{fontSize:11,color:C.muted,fontWeight:700}}>Total</div><div style={{fontSize:22,fontWeight:900,fontFamily:mono,color:C.text}}>{pp.kpi.total}</div></div>
+                    <div><div style={{fontSize:11,color:C.muted,fontWeight:700}}>Receita Won</div><div style={{fontSize:18,fontWeight:900,fontFamily:mono,color:C.green}}>${pp.kpi.revenue.toLocaleString(undefined,{maximumFractionDigits:0})}</div></div>
+                    <div><div style={{fontSize:11,color:C.muted,fontWeight:700}}>Won / Lost / Open</div><div style={{fontSize:14,fontWeight:700,fontFamily:mono}}><span style={{color:C.green}}>{pp.kpi.won}</span> / <span style={{color:C.red}}>{pp.kpi.lost}</span> / <span style={{color:C.accent}}>{pp.kpi.open}</span></div></div>
+                    <div><div style={{fontSize:11,color:C.muted,fontWeight:700}}>Ticket Medio</div><div style={{fontSize:16,fontWeight:800,fontFamily:mono,color:C.text}}>${pp.kpi.avgTicket.toLocaleString(undefined,{maximumFractionDigits:0})}</div></div>
                   </div>
-                  {detailMeetings.outbound.length>0 && (<div style={{marginBottom:14}}>
-                    <div style={{fontSize:12,fontWeight:700,color:C.green,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Outbound ({detailMeetings.outbound.length})</div>
-                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                      <thead><tr style={{borderBottom:"2px solid "+C.border}}>
-                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>T{"\u00ED"}tulo</th>
-                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>Hora</th>
-                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>Outcome</th>
-                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>Owner</th>
-                      </tr></thead>
-                      <tbody>{detailMeetings.outbound.map(function(m,i){
-                        var p=m.properties||{};
-                        var oc=outcomeColor[p.hs_meeting_outcome]||C.muted;
-                        var st=p.hs_meeting_start_time?new Date(p.hs_meeting_start_time):null;
-                        return (<tr key={"o"+i} style={{borderBottom:"1px solid "+C.border+"66",background:i%2===0?C.lGreen+"44":"transparent"}}>
-                          <td style={{padding:"8px 10px",fontWeight:600}}>{p.hs_meeting_title||"Sin t\u00EDtulo"}</td>
-                          <td style={{padding:"8px 10px",fontFamily:mono}}>{st?st.toLocaleTimeString("es",{hour:"2-digit",minute:"2-digit"}):"\u2014"}</td>
-                          <td style={{padding:"8px 10px"}}><span style={{background:oc+"18",color:oc,padding:"2px 8px",borderRadius:6,fontWeight:700,fontSize:11}}>{p.hs_meeting_outcome||"UNKNOWN"}</span></td>
-                          <td style={{padding:"8px 10px",color:C.sub}}>{crmOwnerMap[p.hubspot_owner_id]||p.hubspot_owner_id||"\u2014"}</td>
-                        </tr>);
-                      })}</tbody>
-                    </table>
-                  </div>)}
-                  {detailMeetings.inbound.length>0 && (<div>
-                    <div style={{fontSize:12,fontWeight:700,color:C.cyan,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Inbound ({detailMeetings.inbound.length})</div>
-                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                      <thead><tr style={{borderBottom:"2px solid "+C.border}}>
-                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>T{"\u00ED"}tulo</th>
-                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>Hora</th>
-                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>Outcome</th>
-                        <th style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:11}}>Owner</th>
-                      </tr></thead>
-                      <tbody>{detailMeetings.inbound.map(function(m,i){
-                        var p=m.properties||{};
-                        var oc=outcomeColor[p.hs_meeting_outcome]||C.muted;
-                        var st=p.hs_meeting_start_time?new Date(p.hs_meeting_start_time):null;
-                        return (<tr key={"i"+i} style={{borderBottom:"1px solid "+C.border+"66",background:i%2===0?C.lBlue+"44":"transparent"}}>
-                          <td style={{padding:"8px 10px",fontWeight:600}}>{p.hs_meeting_title||"Sin t\u00EDtulo"}</td>
-                          <td style={{padding:"8px 10px",fontFamily:mono}}>{st?st.toLocaleTimeString("es",{hour:"2-digit",minute:"2-digit"}):"\u2014"}</td>
-                          <td style={{padding:"8px 10px"}}><span style={{background:oc+"18",color:oc,padding:"2px 8px",borderRadius:6,fontWeight:700,fontSize:11}}>{p.hs_meeting_outcome||"UNKNOWN"}</span></td>
-                          <td style={{padding:"8px 10px",color:C.sub}}>{crmOwnerMap[p.hubspot_owner_id]||p.hubspot_owner_id||"\u2014"}</td>
-                        </tr>);
-                      })}</tbody>
-                    </table>
-                  </div>)}
-                </div>)}
-              </Cd>);
-            })()}
-
-            {/* Section 2: Tabla de Cruzamiento Lead-a-Lead */}
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                    <div style={{fontSize:12,fontWeight:700,color:C.muted,minWidth:60}}>Win Rate</div>
+                    <div style={{flex:1,position:"relative",background:C.barTrack,borderRadius:10,height:14,overflow:"hidden"}}><div style={{background:pp.color,height:"100%",width:Math.min(pp.kpi.winRate,100)+"%",borderRadius:10,transition:"width 0.5s ease"}}/></div>
+                    <div style={{fontSize:13,fontWeight:800,fontFamily:mono,color:pp.color,minWidth:50,textAlign:"right"}}>{pp.kpi.winRate.toFixed(1)}%</div>
+                  </div>
+                  <div style={{fontSize:12,color:C.muted}}>D{"í"}as medio: <strong style={{color:C.text}}>{pp.kpi.avgDays}</strong></div>
+                </Cd>);
+              })}
+            </div>
+            {/* C. Funil por Pipeline */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:22}}>
+              {[{name:"New Sales Framework",data:nsFunnel,color:C.purple},{name:"Self Service PLG",data:ssFunnel,color:C.cyan}].map(function(fp){
+                if(fp.data.length===0)return null;
+                return (<Cd key={fp.name}>
+                  <Sec>{fp.name} {"—"} Funil</Sec>
+                  <div style={{height:Math.max(180,fp.data.length*40)}}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={fp.data} layout="vertical" margin={{top:5,right:30,left:10,bottom:5}}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                        <XAxis type="number" tick={{fontSize:11,fill:C.muted}}/>
+                        <YAxis type="category" dataKey="stage" tick={{fontSize:11,fill:C.sub}} width={110}/>
+                        <Tooltip contentStyle={{borderRadius:10,border:"1px solid "+C.border,fontSize:13,background:C.card,color:C.text}} formatter={function(v,name){return name==="value"?"$"+v.toLocaleString():v;}}/>
+                        <Bar dataKey="count" name="Deals" fill={fp.color} radius={[0,6,6,0]}/>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8,marginTop:12}}>
+                    {fp.data.map(function(s,i){return (<div key={i} style={{background:fp.color+"08",borderRadius:8,padding:"10px 12px",border:"1px solid "+fp.color+"18"}}><div style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>{s.stage}</div><div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginTop:2}}><span style={{fontSize:18,fontWeight:800,fontFamily:mono,color:fp.color}}>{s.count}</span><span style={{fontSize:12,fontWeight:700,color:C.green,fontFamily:mono}}>${s.value.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div></div>);})}
+                  </div>
+                </Cd>);
+              })}
+            </div>
+            {/* D. Receita ao Longo do Tempo */}
+            {revenueChartData.length>0 && (<Cd style={{marginBottom:22}}>
+              <Sec>Receita ao Longo do Tempo (Won)</Sec>
+              <ResponsiveContainer width="100%" height={240}>
+                <AreaChart data={revenueChartData} margin={{left:-5,right:5,top:5,bottom:0}}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.border}/><XAxis dataKey="d" tick={{fontSize:11,fill:C.muted}}/><YAxis tick={{fontSize:11,fill:C.muted}} tickFormatter={function(v){return"$"+v.toLocaleString();}}/>
+                  <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}} formatter={function(v){return"$"+v.toLocaleString();}}/>
+                  <Area type="monotone" dataKey="ns" name="New Sales" stackId="1" stroke={C.purple} fill={C.purple+"44"}/><Area type="monotone" dataKey="ss" name="Self Service" stackId="1" stroke={C.cyan} fill={C.cyan+"44"}/>
+                  <Legend/>
+                </AreaChart>
+              </ResponsiveContainer>
+            </Cd>)}
+            {/* E. Deals Creados por Dia */}
+            {creationChartData.length>0 && (<Cd style={{marginBottom:22}}>
+              <Sec>Deals Creados por D{"í"}a</Sec>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={creationChartData} margin={{left:-15,right:5,top:5,bottom:0}}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.border}/><XAxis dataKey="d" tick={{fontSize:11,fill:C.muted}}/><YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
+                  <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}}/>
+                  <Bar dataKey="ns" name="New Sales" fill={C.purple} stackId="a" radius={[0,0,0,0]}/><Bar dataKey="ss" name="Self Service" fill={C.cyan} stackId="a" radius={[4,4,0,0]}/>
+                  <Legend/>
+                </BarChart>
+              </ResponsiveContainer>
+            </Cd>)}
+            {/* F. Won vs Lost + Donut */}
             <Cd style={{marginBottom:22}}>
-              <Sec>Cruce Outbound {"\u2194"} Reuniones HubSpot</Sec>
-              <div style={{fontSize:13,color:C.muted,marginBottom:14}}>Leads que recibieron link <strong>meetings.hubspot.com</strong> y si agendaron reuni{"\u00F3"}n real en HubSpot</div>
-              {ofertaLeads.length===0 ? (
-                <div style={{textAlign:"center",padding:30,color:C.muted,fontSize:14}}>No hay leads con oferta de reuni{"\u00F3"}n en los datos cargados</div>
-              ) : (
-                <div style={{overflowX:"auto"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-                    <thead>
-                      <tr style={{borderBottom:"2px solid "+C.border}}>
-                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Tel{"\u00E9"}fono</th>
-                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Pa{"\u00ED"}s</th>
-                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Engagement</th>
-                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Templates</th>
-                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Status Reuni{"\u00F3"}n (HS)</th>
-                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Detalle HS</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {matchedLeads.map(function(item,idx){
-                        var l=item.lead;
-                        var hsM=item.meetings[0];
-                        var hsProps=hsM.properties||{};
-                        var hsOutcome=hsProps.hs_meeting_outcome||"UNKNOWN";
-                        var hsTitle=hsProps.hs_meeting_title||"Sin t\u00EDtulo";
-                        var hsStart=hsProps.hs_meeting_start_time?new Date(hsProps.hs_meeting_start_time):null;
-                        var eC2={alto:C.green,medio:C.accent,bajo:C.yellow,minimo:C.red,profunda:C.green,media:C.accent,corta:C.yellow,rebote:C.red};
-                        return (<tr key={"m"+idx} style={{borderBottom:"1px solid "+C.border+"66",background:C.lGreen+"66"}}>
-                          <td style={{padding:"10px 12px",fontFamily:mono,fontWeight:700}}>{l.p} {l.hid && <span style={{color:C.accent,fontSize:11}}>HS #{l.hid}</span>}</td>
-                          <td style={{padding:"10px 12px",fontSize:18}}>{l.co}</td>
-                          <td style={{padding:"10px 12px"}}><Bd color={eC2[l.e]||C.muted}>{l.e}</Bd></td>
-                          <td style={{padding:"10px 12px",fontSize:12,color:C.sub}}>{l.tr&&l.tr.length>0?l.tr.join(", "):"—"}</td>
-                          <td style={{padding:"10px 12px"}}><span style={{display:"inline-flex",alignItems:"center",gap:6,background:(outcomeColor[hsOutcome]||C.green)+"12",border:"1px solid "+(outcomeColor[hsOutcome]||C.green)+"30",borderRadius:8,padding:"4px 10px"}}><span style={{width:8,height:8,borderRadius:"50%",background:outcomeColor[hsOutcome]||C.green,flexShrink:0}}/><span style={{fontSize:12,fontWeight:700,color:outcomeColor[hsOutcome]||C.green}}>{hsOutcome}</span></span></td>
-                          <td style={{padding:"10px 12px",fontSize:12,color:C.sub}}>{hsTitle}{hsStart?" \u00B7 "+hsStart.toLocaleDateString("es",{day:"2-digit",month:"short"}):""}</td>
-                        </tr>);
-                      })}
-                      {unmatchedLeads.map(function(l,idx){
-                        var eC2={alto:C.green,medio:C.accent,bajo:C.yellow,minimo:C.red,profunda:C.green,media:C.accent,corta:C.yellow,rebote:C.red};
-                        return (<tr key={"u"+idx} style={{borderBottom:"1px solid "+C.border+"66"}}>
-                          <td style={{padding:"10px 12px",fontFamily:mono,fontWeight:700}}>{l.p} {l.hid && <span style={{color:C.accent,fontSize:11}}>HS #{l.hid}</span>}</td>
-                          <td style={{padding:"10px 12px",fontSize:18}}>{l.co}</td>
-                          <td style={{padding:"10px 12px"}}><Bd color={eC2[l.e]||C.muted}>{l.e}</Bd></td>
-                          <td style={{padding:"10px 12px",fontSize:12,color:C.sub}}>{l.tr&&l.tr.length>0?l.tr.join(", "):"—"}</td>
-                          <td style={{padding:"10px 12px"}}><Bd color={C.red}>SIN REUNI{"\u00D3"}N</Bd></td>
-                          <td style={{padding:"10px 12px",fontSize:12,color:C.muted}}>{"\u2014"}</td>
-                        </tr>);
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              <Sec>Won vs Lost vs Open</Sec>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:16,marginBottom:16}}>
+                <div style={{background:C.green+"10",borderRadius:10,padding:"14px 16px",border:"1px solid "+C.green+"22",textAlign:"center"}}><div style={{fontSize:11,fontWeight:700,color:C.green,textTransform:"uppercase"}}>Won</div><div style={{fontSize:28,fontWeight:900,fontFamily:mono,color:C.green,marginTop:4}}>{wonDeals.length}</div><div style={{fontSize:12,color:C.muted}}>{totalDeals>0?(wonDeals.length/totalDeals*100).toFixed(1):"0"}%</div></div>
+                <div style={{background:C.red+"10",borderRadius:10,padding:"14px 16px",border:"1px solid "+C.red+"22",textAlign:"center"}}><div style={{fontSize:11,fontWeight:700,color:C.red,textTransform:"uppercase"}}>Lost</div><div style={{fontSize:28,fontWeight:900,fontFamily:mono,color:C.red,marginTop:4}}>{lostDeals.length}</div><div style={{fontSize:12,color:C.muted}}>{totalDeals>0?(lostDeals.length/totalDeals*100).toFixed(1):"0"}%</div></div>
+                <div style={{background:C.accent+"10",borderRadius:10,padding:"14px 16px",border:"1px solid "+C.accent+"22",textAlign:"center"}}><div style={{fontSize:11,fontWeight:700,color:C.accent,textTransform:"uppercase"}}>Open</div><div style={{fontSize:28,fontWeight:900,fontFamily:mono,color:C.accent,marginTop:4}}>{openDeals.length}</div><div style={{fontSize:12,color:C.muted}}>{totalDeals>0?(openDeals.length/totalDeals*100).toFixed(1):"0"}%</div></div>
+                {donutData.length>0 && (<div style={{display:"flex",alignItems:"center",justifyContent:"center"}}><PieChart width={120} height={120}><Pie data={donutData} dataKey="value" cx={55} cy={55} innerRadius={30} outerRadius={52} paddingAngle={3}>{donutData.map(function(entry,i){return <Cell key={i} fill={entry.fill}/>;})}</Pie><Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:12,color:C.text}}/></PieChart></div>)}
+              </div>
             </Cd>
-
-            {/* Section 3: Breakdown por Outcome (only outbound meetings) */}
-            {Object.keys(outboundOutcomes).length>0 && (
-              <Cd style={{marginBottom:22}}>
-                <Sec>Outcome de Reuniones Outbound</Sec>
-                <div style={{fontSize:13,color:C.muted,marginBottom:12}}>Solo reuniones generadas por leads del Yago</div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:12}}>
-                  {Object.keys(outboundOutcomes).map(function(o){
-                    var cnt=outboundOutcomes[o];
-                    var totalOut=matchedLeads.length;
-                    var pct=totalOut>0?(cnt/totalOut*100).toFixed(1):"0";
-                    var oc=outcomeColor[o]||C.muted;
-                    return (<div key={o} style={{background:oc+"08",borderRadius:10,padding:"14px 16px",border:"1px solid "+oc+"20",textAlign:"center"}}>
-                      <div style={{fontSize:11,fontWeight:700,color:oc,textTransform:"uppercase",letterSpacing:0.5}}>{o}</div>
-                      <div style={{fontSize:26,fontWeight:900,fontFamily:mono,color:oc,marginTop:4}}>{cnt}</div>
-                      <div style={{fontSize:12,color:C.muted,marginTop:2}}>{pct}%</div>
-                    </div>);
-                  })}
-                </div>
-              </Cd>
-            )}
-
-            {/* Section 4: Breakdown por Outcome — ALL filtered HS meetings */}
-            {filtMeetings.length>0 && (
-              <Cd style={{marginBottom:22}}>
-                <Sec>Breakdown por Outcome (Todas las Reuniones HS)</Sec>
-                <div style={{fontSize:13,color:C.muted,marginBottom:12}}>Todas las {filtMeetings.length} reuniones HubSpot en el per{"\u00ED"}odo</div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:12}}>
-                  {Object.keys(totalMeetOutcomes).sort(function(a,b){return totalMeetOutcomes[b]-totalMeetOutcomes[a];}).map(function(o){
-                    var cnt=totalMeetOutcomes[o];
-                    var pct=filtMeetings.length>0?(cnt/filtMeetings.length*100).toFixed(1):"0";
-                    var oc=outcomeColor[o]||C.muted;
-                    return (<div key={o} style={{background:oc+"08",borderRadius:10,padding:"14px 16px",border:"1px solid "+oc+"20",textAlign:"center"}}>
-                      <div style={{fontSize:11,fontWeight:700,color:oc,textTransform:"uppercase",letterSpacing:0.5}}>{o}</div>
-                      <div style={{fontSize:26,fontWeight:900,fontFamily:mono,color:oc,marginTop:4}}>{cnt}</div>
-                      <div style={{fontSize:12,color:C.muted,marginTop:2}}>{pct}%</div>
-                    </div>);
-                  })}
-                </div>
-              </Cd>
-            )}
-
-            {/* Section 5: Tabla por SDR/Owner */}
-            {Object.keys(meetByOwner).length>0 && (
-              <Cd style={{marginBottom:22}}>
-                <Sec>Reuniones por SDR / Owner</Sec>
-                <div style={{overflowX:"auto"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-                    <thead>
-                      <tr style={{borderBottom:"2px solid "+C.border}}>
-                        <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>SDR</th>
-                        <th style={{textAlign:"center",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Total</th>
-                        <th style={{textAlign:"center",padding:"8px 12px",color:C.green,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Completed</th>
-                        <th style={{textAlign:"center",padding:"8px 12px",color:C.red,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>No Show</th>
-                        <th style={{textAlign:"center",padding:"8px 12px",color:C.pink,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>No Calificada</th>
-                        <th style={{textAlign:"center",padding:"8px 12px",color:C.accent,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Scheduled</th>
-                        <th style={{textAlign:"center",padding:"8px 12px",color:C.purple,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>% Completed</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Object.keys(meetByOwner).sort(function(a,b){return meetByOwner[b].total-meetByOwner[a].total;}).map(function(oid,idx){
-                        var row=meetByOwner[oid];
-                        var ownerName=crmOwnerMap[oid]||oid;
-                        var compPct=row.total>0?((row.outcomes.COMPLETED||0)/row.total*100).toFixed(1):"0";
-                        return (<tr key={oid} style={{borderBottom:"1px solid "+C.border+"66",background:idx%2===0?C.rowBg:"transparent"}}>
-                          <td style={{padding:"10px 12px",fontWeight:700}}>{ownerName}</td>
-                          <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,fontWeight:800}}>{row.total}</td>
-                          <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,color:C.green,fontWeight:700}}>{row.outcomes.COMPLETED||0}</td>
-                          <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,color:C.red,fontWeight:700}}>{row.outcomes.NO_SHOW||0}</td>
-                          <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,color:C.pink,fontWeight:700}}>{row.outcomes["NO CALIFICADA"]||0}</td>
-                          <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,color:C.accent,fontWeight:700}}>{row.outcomes.SCHEDULED||0}</td>
-                          <td style={{padding:"10px 12px",textAlign:"center"}}><span style={{background:parseFloat(compPct)>=50?C.green+"18":parseFloat(compPct)>=30?C.yellow+"18":C.red+"18",color:parseFloat(compPct)>=50?C.green:parseFloat(compPct)>=30?C.yellow:C.red,padding:"4px 10px",borderRadius:8,fontWeight:800,fontFamily:mono,fontSize:13}}>{compPct}%</span></td>
-                        </tr>);
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </Cd>
-            )}
-
-            {/* Section 6: Breakdown por Fonte/Source */}
-            {Object.keys(meetBySource).length>0 && (
-              <Cd style={{marginBottom:22}}>
-                <Sec>Reuniones por Fuente</Sec>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:12}}>
-                  {Object.keys(meetBySource).sort(function(a,b){return meetBySource[b]-meetBySource[a];}).map(function(src){
-                    var cnt=meetBySource[src];
-                    var pct=filtMeetings.length>0?(cnt/filtMeetings.length*100).toFixed(1):"0";
-                    var srcColor=src==="MEETINGS_PUBLIC"?C.accent:src==="BIDIRECTIONAL_SYNC"?C.purple:src==="CRM_UI"?C.orange:C.cyan;
-                    return (<div key={src} style={{background:srcColor+"08",borderRadius:10,padding:"14px 16px",border:"1px solid "+srcColor+"20",textAlign:"center"}}>
-                      <div style={{fontSize:11,fontWeight:700,color:srcColor,textTransform:"uppercase",letterSpacing:0.5}}>{sourceLabels[src]||src}</div>
-                      <div style={{fontSize:26,fontWeight:900,fontFamily:mono,color:srcColor,marginTop:4}}>{cnt}</div>
-                      <div style={{fontSize:12,color:C.muted,marginTop:2}}>{pct}%</div>
-                    </div>);
-                  })}
-                </div>
-              </Cd>
-            )}
-
-            {/* Section 7: Pipeline de Deals (kept) */}
-            {pipelineData.length>0 && (
-              <Cd style={{marginBottom:22}}>
-                <Sec>Pipeline de Deals</Sec>
-                <div style={{height:Math.max(200,pipelineData.length*50)}}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={pipelineData} layout="vertical" margin={{top:5,right:30,left:20,bottom:5}}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
-                      <XAxis type="number" tick={{fontSize:11,fill:C.muted}}/>
-                      <YAxis type="category" dataKey="stage" tick={{fontSize:11,fill:C.sub}} width={120}/>
-                      <Tooltip contentStyle={{borderRadius:10,border:"1px solid "+C.border,fontSize:13,background:C.card,color:C.text}} formatter={function(v,name){return name==="value"?"$"+v.toLocaleString():v;}}/>
-                      <Bar dataKey="count" name="Deals" fill={C.purple} radius={[0,6,6,0]}/>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12,marginTop:16}}>
-                  {pipelineData.map(function(s,i){
-                    return (<div key={i} style={{background:C.lPurple,borderRadius:10,padding:"12px 16px",border:"1px solid "+C.purple+"18"}}>
-                      <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{s.stage}</div>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginTop:4}}>
-                        <span style={{fontSize:22,fontWeight:800,fontFamily:mono,color:C.purple}}>{s.count}</span>
-                        <span style={{fontSize:14,fontWeight:700,color:C.green,fontFamily:mono}}>${s.value.toLocaleString()}</span>
-                      </div>
-                    </div>);
-                  })}
-                </div>
-              </Cd>
-            )}
-
-            {/* Section 5: Cruce 3 Canales (kept) */}
-            <Cd style={{marginBottom:22}}>
-              <Sec>Cruce 3 Canales</Sec>
-              {!crmCrossRef && (
-                <div style={{textAlign:"center",padding:20}}>
-                  <button onClick={loadCrmCrossReference} disabled={crmCrossLoading} style={{background:"linear-gradient(135deg, "+C.accent+", "+C.purple+")",color:"#fff",border:"none",borderRadius:12,padding:"12px 28px",fontSize:14,fontWeight:700,cursor:crmCrossLoading?"wait":"pointer",fontFamily:font,opacity:crmCrossLoading?0.6:1}}>{crmCrossLoading?"Calculando...":"Calcular Cruce 3 Canales"}</button>
-                  <div style={{fontSize:12,color:C.muted,marginTop:8}}>Cruza tel&eacute;fonos entre MeuGrupoVip, Yago y HubSpot</div>
-                </div>
-              )}
-              {crmCrossRef && (<>
-                {/* Totals row */}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14,marginBottom:16}}>
-                  <div style={{background:C.lBlue,borderRadius:12,padding:"16px 20px",textAlign:"center"}}>
-                    <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>En Grupos</div>
-                    <div style={{fontSize:28,fontWeight:900,fontFamily:mono,color:C.accent,marginTop:4}}>{crmCrossRef.grupoTotal.toLocaleString()}</div>
-                  </div>
-                  <div style={{background:C.lPurple,borderRadius:12,padding:"16px 20px",textAlign:"center"}}>
-                    <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Hablaron con Yago</div>
-                    <div style={{fontSize:28,fontWeight:900,fontFamily:mono,color:C.purple,marginTop:4}}>{crmCrossRef.yagoTotal.toLocaleString()}</div>
-                  </div>
-                  <div style={{background:C.lOrange,borderRadius:12,padding:"16px 20px",textAlign:"center"}}>
-                    <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>En HubSpot</div>
-                    <div style={{fontSize:28,fontWeight:900,fontFamily:mono,color:C.orange,marginTop:4}}>{crmCrossRef.hsTotal.toLocaleString()}</div>
-                  </div>
-                </div>
-                {/* Pairwise row */}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14,marginBottom:16}}>
-                  <div style={{background:C.rowBg,borderRadius:12,padding:"14px 16px",textAlign:"center",border:"1px solid "+C.border}}>
-                    <div style={{fontSize:11,color:C.muted,fontWeight:700}}>Grupos + Yago</div>
-                    <div style={{fontSize:24,fontWeight:900,fontFamily:mono,color:C.cyan,marginTop:4}}>{crmCrossRef.gruposYago}</div>
-                  </div>
-                  <div style={{background:C.rowBg,borderRadius:12,padding:"14px 16px",textAlign:"center",border:"1px solid "+C.border}}>
-                    <div style={{fontSize:11,color:C.muted,fontWeight:700}}>Grupos + HubSpot</div>
-                    <div style={{fontSize:24,fontWeight:900,fontFamily:mono,color:C.cyan,marginTop:4}}>{crmCrossRef.gruposHS}</div>
-                  </div>
-                  <div style={{background:C.rowBg,borderRadius:12,padding:"14px 16px",textAlign:"center",border:"1px solid "+C.border}}>
-                    <div style={{fontSize:11,color:C.muted,fontWeight:700}}>Yago + HubSpot</div>
-                    <div style={{fontSize:24,fontWeight:900,fontFamily:mono,color:C.cyan,marginTop:4}}>{crmCrossRef.yagoHS}</div>
-                  </div>
-                </div>
-                {/* Highlight card: all 3 */}
-                <div style={{background:"linear-gradient(135deg, "+C.accent+"12, "+C.purple+"12, "+C.green+"12)",borderRadius:14,padding:"24px 20px",textAlign:"center",border:"2px solid "+C.purple+"33"}}>
-                  <div style={{fontSize:13,color:C.purple,fontWeight:800,textTransform:"uppercase",letterSpacing:1.5}}>En Los 3 Canales</div>
-                  <div style={{fontSize:48,fontWeight:900,fontFamily:mono,background:"linear-gradient(135deg, "+C.accent+", "+C.purple+")",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",marginTop:8}}>{crmCrossRef.allThree}</div>
-                  <div style={{fontSize:13,color:C.muted,marginTop:6}}>presentes en Grupos + Yago + HubSpot</div>
-                </div>
-                <div style={{marginTop:12,textAlign:"center"}}>
-                  <button onClick={function(){setCrmCrossRef(null);}} style={{background:C.rowAlt,color:C.muted,border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Recalcular</button>
-                </div>
-              </>)}
-            </Cd>
+            {/* G. Performance por Vendedor */}
+            {Object.keys(dealsByOwner).length>0 && (<Cd style={{marginBottom:22}}>
+              <Sec>Performance por Vendedor / SDR</Sec>
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                  <thead><tr style={{borderBottom:"2px solid "+C.border}}>
+                    <th style={{textAlign:"left",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>SDR</th>
+                    <th style={{textAlign:"center",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Total</th>
+                    <th style={{textAlign:"center",padding:"8px 12px",color:C.green,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Won</th>
+                    <th style={{textAlign:"center",padding:"8px 12px",color:C.red,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Lost</th>
+                    <th style={{textAlign:"center",padding:"8px 12px",color:C.green,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Receita</th>
+                    <th style={{textAlign:"center",padding:"8px 12px",color:C.muted,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Ticket Medio</th>
+                    <th style={{textAlign:"center",padding:"8px 12px",color:C.purple,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>Win Rate</th>
+                    <th style={{textAlign:"center",padding:"8px 12px",color:C.cyan,fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:1}}>D{"í"}as Medio</th>
+                  </tr></thead>
+                  <tbody>
+                    {Object.keys(dealsByOwner).sort(function(a,b){return dealsByOwner[b].revenue-dealsByOwner[a].revenue;}).map(function(oid,idx){
+                      var row=dealsByOwner[oid];var ownerName=crmOwnerMap[oid]||oid;
+                      var oWR=(row.won+row.lost)>0?(row.won/(row.won+row.lost)*100).toFixed(1):"0";
+                      var oAvgT=row.won>0?row.revenue/row.won:0;
+                      var oAvgD=row.daysN>0?Math.round(row.days/row.daysN):0;
+                      return (<tr key={oid} style={{borderBottom:"1px solid "+C.border+"66",background:idx%2===0?C.rowBg:"transparent"}}>
+                        <td style={{padding:"10px 12px",fontWeight:700}}>{ownerName}</td>
+                        <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,fontWeight:800}}>{row.total}</td>
+                        <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,color:C.green,fontWeight:700}}>{row.won}</td>
+                        <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,color:C.red,fontWeight:700}}>{row.lost}</td>
+                        <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,color:C.green,fontWeight:700}}>${row.revenue.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                        <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,fontWeight:700}}>${oAvgT.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                        <td style={{padding:"10px 12px",textAlign:"center"}}><span style={{background:parseFloat(oWR)>=50?C.green+"18":parseFloat(oWR)>=30?C.yellow+"18":C.red+"18",color:parseFloat(oWR)>=50?C.green:parseFloat(oWR)>=30?C.yellow:C.red,padding:"4px 10px",borderRadius:8,fontWeight:800,fontFamily:mono,fontSize:13}}>{oWR}%</span></td>
+                        <td style={{padding:"10px 12px",textAlign:"center",fontFamily:mono,color:C.cyan,fontWeight:700}}>{oAvgD}</td>
+                      </tr>);
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Cd>)}
+            {/* H. Top Deals */}
+            {topDeals.length>0 && (<Cd style={{marginBottom:22}}>
+              <Sec>Top {topDeals.length} Deals por Valor</Sec>
+              <div style={{overflowX:"auto",maxHeight:500,overflowY:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <thead style={{position:"sticky",top:0,background:C.card,zIndex:2}}><tr style={{borderBottom:"2px solid "+C.border}}>
+                    <th style={{textAlign:"left",padding:"8px 10px",color:C.muted,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Deal</th>
+                    <th style={{textAlign:"left",padding:"8px 10px",color:C.muted,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Pipeline</th>
+                    <th style={{textAlign:"left",padding:"8px 10px",color:C.muted,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Stage</th>
+                    <th style={{textAlign:"right",padding:"8px 10px",color:C.muted,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Valor</th>
+                    <th style={{textAlign:"left",padding:"8px 10px",color:C.muted,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Owner</th>
+                    <th style={{textAlign:"left",padding:"8px 10px",color:C.muted,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Creado</th>
+                    <th style={{textAlign:"left",padding:"8px 10px",color:C.muted,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Cierre</th>
+                    <th style={{textAlign:"center",padding:"8px 10px",color:C.muted,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>D{"í"}as</th>
+                    <th style={{textAlign:"center",padding:"8px 10px",color:C.muted,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Status</th>
+                  </tr></thead>
+                  <tbody>
+                    {topDeals.map(function(deal,idx){
+                      var dp=deal.properties||{};var isWon=dp.hs_is_closed_won==="true";var isLost=dp.hs_is_closed_lost==="true";
+                      var statusColor=isWon?C.green:isLost?C.red:C.accent;var statusLabel=isWon?"Won":isLost?"Lost":"Open";
+                      var created=dp.createdate?new Date(dp.createdate).toLocaleDateString("es",{day:"2-digit",month:"short"}):"";
+                      var closed=dp.closedate?new Date(dp.closedate).toLocaleDateString("es",{day:"2-digit",month:"short"}):"";
+                      return (<tr key={deal.id} style={{borderBottom:"1px solid "+C.border+"66",background:idx%2===0?C.rowBg:"transparent"}}>
+                        <td style={{padding:"8px 10px",fontWeight:700,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{dp.dealname||"Sin nombre"}</td>
+                        <td style={{padding:"8px 10px",fontSize:11,color:C.sub}}>{TARGET_PIPELINES[dp.pipeline]||dp.pipeline}</td>
+                        <td style={{padding:"8px 10px",fontSize:11,color:C.sub}}>{stageMap[dp.dealstage]||dp.dealstage}</td>
+                        <td style={{padding:"8px 10px",textAlign:"right",fontFamily:mono,fontWeight:800,color:C.green}}>${(parseFloat(dp.amount)||0).toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                        <td style={{padding:"8px 10px",fontSize:11,color:C.sub}}>{crmOwnerMap[dp.hubspot_owner_id]||dp.hubspot_owner_id||"—"}</td>
+                        <td style={{padding:"8px 10px",fontSize:11,fontFamily:mono}}>{created}</td>
+                        <td style={{padding:"8px 10px",fontSize:11,fontFamily:mono}}>{closed}</td>
+                        <td style={{padding:"8px 10px",textAlign:"center",fontFamily:mono,fontWeight:700}}>{dp.days_to_close||"—"}</td>
+                        <td style={{padding:"8px 10px",textAlign:"center"}}><span style={{background:statusColor+"18",color:statusColor,padding:"2px 8px",borderRadius:6,fontWeight:700,fontSize:11}}>{statusLabel}</span></td>
+                      </tr>);
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Cd>)}
           </>)}
         </>);
       })()}
