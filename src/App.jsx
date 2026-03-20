@@ -21,7 +21,7 @@ var C=_CLight;
 var _isDark=false;
 
 // Filter default meetings to only those that received MSG1, and compute ml/igL/igA flags
-var DEFAULT_MEETINGS=_RAW_MEETINGS.filter(function(m){return m.tr.indexOf("MSG1")>=0;}).map(function(m){var hasMl=false,hasIgL=false,hasIgA=false;for(var i=0;i<m.c.length;i++){if(m.c[i][0]===2&&m.c[i][1]&&(m.c[i][1].indexOf("meetings.hubspot.com/")>=0||m.c[i][1].indexOf("yavendio.com/meetings")>=0))hasMl=true;if(m.c[i][0]===1&&m.c[i][1]){if(/instagram\.com/i.test(m.c[i][1]))hasIgL=true;if(/@\w+|ig\s*:/i.test(m.c[i][1]))hasIgA=true;}}return Object.assign({},m,{ml:hasMl,igL:hasIgL,igA:hasIgA});});
+var DEFAULT_MEETINGS=_RAW_MEETINGS.filter(function(m){return m.tr.indexOf("MSG1")>=0;}).map(function(m){var hasMl=false,hasIgL=false,hasIgA=false;for(var i=0;i<m.c.length;i++){if(m.c[i][0]===2&&m.c[i][1]&&(/https?:\/\/meetings\.hubspot\.com\/\S+/.test(m.c[i][1])||/https?:\/\/yavendio\.com\/meetings\S*/.test(m.c[i][1])))hasMl=true;if(m.c[i][0]===1&&m.c[i][1]){if(/instagram\.com/i.test(m.c[i][1]))hasIgL=true;if(/@\w+|ig\s*:/i.test(m.c[i][1]))hasIgA=true;}}return Object.assign({},m,{ml:hasMl,igL:hasIgL,igA:hasIgA});});
 var _dIgL=DEFAULT_MEETINGS.filter(function(m){return m.igL;}).length;
 var _dIgA=DEFAULT_MEETINGS.filter(function(m){return m.igA&&!m.igL;}).length;
 
@@ -94,6 +94,7 @@ function ConvView({lead,onBack,crmContacts}){
         <div style={{fontSize:12,color:C.muted,marginTop:2}}>
           {email && <span>{email} {"\u00B7"} </span>}
           {hsId && <span style={{color:C.accent,fontWeight:600}}>HS #{hsId} {"\u00B7"} </span>}
+          {!hsId && lead.hid && <span style={{color:C.accent,fontWeight:600}}>HS #{lead.hid} {"\u00B7"} </span>}
           <span style={{fontFamily:mono}}>{lead.p}</span> {"\u00B7"} {lead.ms} msgs humanas {"\u00B7"} {lead.w.toLocaleString()} palabras {"\u00B7"} Templates: {lead.tr.join(", ")} {"\u00B7"} 1a resp: <strong>{lead.fr||"N/A"}</strong>
         </div>
       </div>
@@ -223,6 +224,7 @@ function MeetModal({leads,onClose,mode,title,crmContacts}){
                 <div style={{fontSize:12,color:C.muted,marginTop:3,display:"flex",flexWrap:"wrap",gap:4}}>
                   {email && <span>{email} {"\u00B7"} </span>}
                   {hsId && <span style={{color:C.accent,fontWeight:600}}>HS #{hsId} {"\u00B7"} </span>}
+                  {!hsId && l.hid && <span style={{color:C.accent,fontWeight:600}}>HS #{l.hid} {"\u00B7"} </span>}
                   {!name && !email && <span style={{fontFamily:mono,fontSize:12}}>{l.p} {"\u00B7"} </span>}
                   {name && <span style={{fontFamily:mono,fontSize:12}}>{l.p} {"\u00B7"} </span>}
                   <span>{l.ms} msgs {"\u00B7"} {l.w.toLocaleString()} pal.</span>
@@ -373,6 +375,7 @@ function TplModal({tpl,leads,mode,onClose}){
                 <div style={{flex:1}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                     <span style={{fontFamily:mono,fontWeight:700,fontSize:16}}>{l.p}</span>
+                    {l.hid && <span style={{color:C.accent,fontWeight:600,fontSize:12,marginLeft:4}}>HS #{l.hid}</span>}
                     <Bd color={eC[l.e]||C.muted}>{l.e}</Bd>
                     <Bd color={ql.c}>{ql.t}</Bd>
                     {l.au && <Bd color={C.red}>AUTO</Bd>}
@@ -423,7 +426,7 @@ export default function Dashboard(){
 
   var _brevoIcon=<svg width="18" height="18" viewBox="0 0 24 24" fill="#0B996E"><path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zM7.2 4.8h5.747c2.34 0 3.895 1.406 3.895 3.516 0 1.022-.348 1.862-1.09 2.588C17.189 11.812 18 13.22 18 14.785c0 2.86-2.64 5.016-6.164 5.016H7.199v-15zm2.085 1.952v5.537h.07c.233-.432.858-.796 2.249-1.226 2.039-.659 3.037-1.52 3.037-2.655 0-.998-.766-1.656-1.924-1.656H9.285zm4.87 5.266c-.766.385-1.67.748-2.76 1.11-1.229.387-2.11 1.386-2.11 2.407v2.315h2.365c2.387 0 4.149-1.34 4.149-3.155 0-1.067-.625-2.087-1.645-2.677z"/></svg>;
   var _hubspotIcon=<svg width="18" height="18" viewBox="0 0 24 24" fill="#FF7A59"><path d="M18.164 7.93V5.084a2.198 2.198 0 001.267-1.978v-.067A2.2 2.2 0 0017.238.845h-.067a2.2 2.2 0 00-2.193 2.193v.067a2.196 2.196 0 001.252 1.973l.013.006v2.852a6.22 6.22 0 00-2.969 1.31l.012-.01-7.828-6.095A2.497 2.497 0 104.3 4.656l-.012.006 7.697 5.991a6.176 6.176 0 00-1.038 3.446c0 1.343.425 2.588 1.147 3.607l-.013-.02-2.342 2.343a1.968 1.968 0 00-.58-.095h-.002a2.033 2.033 0 102.033 2.033 1.978 1.978 0 00-.1-.595l.005.014 2.317-2.317a6.247 6.247 0 104.782-11.134l-.036-.005zm-.964 9.378a3.206 3.206 0 113.215-3.207v.002a3.206 3.206 0 01-3.207 3.207z"/></svg>;
-  const SECTIONS={resumen:{label:"Resumen",icon:"\uD83D\uDCCA",subTabs:[]},outbound:{label:"Outbound",icon:"\uD83C\uDFAF",subTabs:["resumen","engagement","templates"]},inbound:{label:"Inbound",icon:"\uD83D\uDCE5",subTabs:["resumen","engagement"]},canales:{label:"Canales",icon:"\uD83D\uDCE1",subTabs:["grupos"]},hubspot:{label:"HubSpot",icon:_hubspotIcon,subTabs:["analytics","reuniones"]},brevo:{label:"Brevo",icon:_brevoIcon,subTabs:[]},growth:{label:"Marketing",icon:"\uD83D\uDCC8",subTabs:["resumen","ads"]}};
+  const SECTIONS={resumen:{label:"Resumen",icon:"\uD83D\uDCCA",subTabs:[]},outbound:{label:"Outbound",icon:"\uD83C\uDFAF",subTabs:["resumen","engagement","templates"]},inbound:{label:"Inbound",icon:"\uD83D\uDCE5",subTabs:["resumen","engagement","ads"]},canales:{label:"Canales",icon:"\uD83D\uDCE1",subTabs:["grupos"]},hubspot:{label:"HubSpot",icon:_hubspotIcon,subTabs:["analytics","reuniones"]},brevo:{label:"Brevo",icon:_brevoIcon,subTabs:[]},growth:{label:"Marketing",icon:"\uD83D\uDCC8",subTabs:["resumen"]}};
   const [section,setSection]=useState("outbound");
   const [subTab,setSubTab]=useState("resumen");
   const [searchOpen,setSearchOpen]=useState(false);
@@ -557,7 +560,7 @@ export default function Dashboard(){
   // Auto-init Growth when selected for the first time
   useEffect(function(){
     if(section==="growth"&&subTab==="resumen"&&!growthInited&&!growthLoading&&!growthError){initGrowth();}
-    if(section==="growth"&&subTab==="ads"&&!adsInited&&!adsLoading&&!adsError){initAds();}
+    if(section==="inbound"&&subTab==="ads"&&!adsInited&&!adsLoading&&!adsError){initAds();}
   },[section,subTab]);
 
   // Auto-load inbound data when navigating to inbound or resumen section
@@ -1311,7 +1314,7 @@ export default function Dashboard(){
         msgDt=typeof ts==="number"?new Date(ts*1000).toISOString():String(ts);
       }
       if(msgType===1){humanMsgCount++;wordCount+=content.split(/\s+/).filter(Boolean).length;}
-      if(msg.type==="ai"&&content&&(content.indexOf("meetings.hubspot.com/")>=0||content.indexOf("yavendio.com/meetings")>=0))hasMeetingLink=true;
+      if(msg.type==="ai"&&content&&(/https?:\/\/meetings\.hubspot\.com\/\S+/.test(content)||/https?:\/\/yavendio\.com\/meetings\S*/.test(content)))hasMeetingLink=true;
       conversation.push([msgType,content,msgDt]);
     }
     var phone=t.phone_number||"";
@@ -1675,6 +1678,7 @@ export default function Dashboard(){
                   <div style={{flex:1}}>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                       <span style={{fontFamily:mono,fontWeight:700,fontSize:16}}>{l.p}</span>
+                      {l.hid && <span style={{color:C.accent,fontWeight:600,fontSize:12,marginLeft:4}}>HS #{l.hid}</span>}
                       <Bd color={eC2[l.e]||C.muted}>{l.e}</Bd>
                       <Bd color={ql.c}>{ql.t}</Bd>
                       {l.au && <Bd color={C.red}>AUTO</Bd>}
@@ -1844,7 +1848,7 @@ export default function Dashboard(){
           var ol=ofertaAllLeads[ofi];
           var oDay="";
           for(var oci=0;oci<ol.c.length;oci++){
-            if(ol.c[oci][0]===2&&ol.c[oci][1]&&(ol.c[oci][1].indexOf("meetings.hubspot.com/")>=0||ol.c[oci][1].indexOf("yavendio.com/meetings")>=0)){
+            if(ol.c[oci][0]===2&&ol.c[oci][1]&&(/https?:\/\/meetings\.hubspot\.com\/\S+/.test(ol.c[oci][1])||/https?:\/\/yavendio\.com\/meetings\S*/.test(ol.c[oci][1]))){
               if(ol.c[oci][2]){var opd=parseDatetime(ol.c[oci][2]);if(opd){oDay=String(opd.getDate()).padStart(2,"0")+"/"+String(opd.getMonth()+1).padStart(2,"0");}}
               break;
             }
@@ -2250,7 +2254,7 @@ export default function Dashboard(){
             if(lead.c){
               for(var ci2=0;ci2<lead.c.length;ci2++){
                 var msg=lead.c[ci2];
-                if(msg[0]===2&&msg[1]&&(msg[1].indexOf("meetings.hubspot.com/")>=0||msg[1].indexOf("yavendio.com/meetings")>=0)){
+                if(msg[0]===2&&msg[1]&&(/https?:\/\/meetings\.hubspot\.com\/\S+/.test(msg[1])||/https?:\/\/yavendio\.com\/meetings\S*/.test(msg[1]))){
                   if(msg[2])mlDate=parseDatetime(msg[2]);
                   break;
                 }
@@ -2398,8 +2402,23 @@ export default function Dashboard(){
               var inbOfertaLeads=meetings.filter(function(l){return l.ml;});
               var inbOfertaCount=inbOfertaLeads.length;
               var inbOfertaVsTotal=inbTc>0?((inbOfertaCount/inbTc)*100).toFixed(1):"0";
+              // Build phone index to tag _confirmed
+              var _phIdx=null;
+              if(crmMeetings.length>0&&crmContacts.length>0){
+                var _fromD=dateFrom?new Date(dateFrom+"T00:00:00"):null;var _toD=dateTo?new Date(dateTo+"T23:59:59"):null;
+                var _filtM=crmMeetings;
+                if(_fromD||_toD){_filtM=crmMeetings.filter(function(m){var st=m.properties&&m.properties.hs_createdate||m.createdAt;if(!st)return false;var md=new Date(st);if(_fromD&&md<_fromD)return false;if(_toD&&md>_toD)return false;return true;});}
+                var _pp=getMeetingContactPhones(_filtM,crmContacts);
+                if(_pp){_phIdx={};var _mpK=Object.keys(_pp);for(var _i=0;_i<_mpK.length;_i++){var _d=_mpK[_i];_phIdx[_d]=true;if(_d.length>11)_phIdx[_d.slice(-11)]=true;if(_d.length>10)_phIdx[_d.slice(-10)]=true;if(_d.length>9)_phIdx[_d.slice(-9)]=true;if(_d.length>8)_phIdx[_d.slice(-8)]=true;}}
+              }
+              var taggedLeads=inbOfertaLeads.map(function(l){
+                if(!_phIdx)return l;
+                var lp=(l.p||"").replace(/\D/g,"");if(!lp)return l;
+                var mc=!!(_phIdx[lp]||(lp.length>11&&_phIdx[lp.slice(-11)])||(lp.length>10&&_phIdx[lp.slice(-10)])||(lp.length>9&&_phIdx[lp.slice(-9)])||(lp.length>8&&_phIdx[lp.slice(-8)]));
+                return Object.assign({},l,{_confirmed:mc});
+              });
               return (
-                <Cd onClick={function(){if(inbOfertaCount>0){setChartDayModalData({title:"\u{1F4C5} Leads con Oferta de Reuni\u00F3n (Inbound)",leads:inbOfertaLeads});}}} style={{position:"relative",cursor:inbOfertaCount>0?"pointer":"default",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
+                <Cd onClick={function(){if(inbOfertaCount>0){setChartDayModalData({title:"\u{1F4C5} Leads con Oferta de Reuni\u00F3n (Inbound)",leads:taggedLeads});}}} style={{position:"relative",cursor:inbOfertaCount>0?"pointer":"default",border:"2px solid "+C.pink+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lRed+" 100%)"}}>
                   <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4C5}"}</div>
                   <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                     <div style={{width:32,height:32,borderRadius:10,background:C.pink+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4C5}"}</div>
@@ -2465,7 +2484,7 @@ export default function Dashboard(){
             for(var odi=0;odi<inbMlLeads.length;odi++){
               var lead=inbMlLeads[odi];var mlDate=null;
               if(lead.c){
-                for(var ci2=0;ci2<lead.c.length;ci2++){var msg=lead.c[ci2];if(msg[0]===2&&msg[1]&&(msg[1].indexOf("meetings.hubspot.com/")>=0||msg[1].indexOf("yavendio.com/meetings")>=0)){if(msg[2])mlDate=parseDatetime(msg[2]);break;}}
+                for(var ci2=0;ci2<lead.c.length;ci2++){var msg=lead.c[ci2];if(msg[0]===2&&msg[1]&&(/https?:\/\/meetings\.hubspot\.com\/\S+/.test(msg[1])||/https?:\/\/yavendio\.com\/meetings\S*/.test(msg[1]))){if(msg[2])mlDate=parseDatetime(msg[2]);break;}}
                 if(!mlDate&&lead.c[0]&&lead.c[0][2])mlDate=parseDatetime(lead.c[0][2]);
               }
               if(mlDate&&!isNaN(mlDate.getTime())){var dk=String(mlDate.getDate()).padStart(2,"0")+"/"+String(mlDate.getMonth()+1).padStart(2,"0");if(!ofertaByDay[dk])ofertaByDay[dk]=[];ofertaByDay[dk].push(lead);}
@@ -3298,7 +3317,7 @@ export default function Dashboard(){
               for(var hci=0;hci<hcMlLeads.length;hci++){
                 var hcLead=hcMlLeads[hci];var hcDate=null;
                 if(hcLead.c){
-                  for(var hcc=0;hcc<hcLead.c.length;hcc++){var hcMsg=hcLead.c[hcc];if(hcMsg[0]===2&&hcMsg[1]&&(hcMsg[1].indexOf("meetings.hubspot.com/")>=0||hcMsg[1].indexOf("yavendio.com/meetings")>=0)){if(hcMsg[2])hcDate=parseDatetime(hcMsg[2]);break;}}
+                  for(var hcc=0;hcc<hcLead.c.length;hcc++){var hcMsg=hcLead.c[hcc];if(hcMsg[0]===2&&hcMsg[1]&&(/https?:\/\/meetings\.hubspot\.com\/\S+/.test(hcMsg[1])||/https?:\/\/yavendio\.com\/meetings\S*/.test(hcMsg[1]))){if(hcMsg[2])hcDate=parseDatetime(hcMsg[2]);break;}}
                   if(!hcDate&&hcLead.c[0]&&hcLead.c[0][2])hcDate=parseDatetime(hcLead.c[0][2]);
                 }
                 if(hcDate&&!isNaN(hcDate.getTime())){var hdk=String(hcDate.getDate()).padStart(2,"0")+"/"+String(hcDate.getMonth()+1).padStart(2,"0");if(!hcOfertaByDay[hdk])hcOfertaByDay[hdk]=0;hcOfertaByDay[hdk]++;}
@@ -3437,7 +3456,7 @@ export default function Dashboard(){
                         var hsStart=hsProps.hs_meeting_start_time?new Date(hsProps.hs_meeting_start_time):null;
                         var eC2={alto:C.green,medio:C.accent,bajo:C.yellow,minimo:C.red,profunda:C.green,media:C.accent,corta:C.yellow,rebote:C.red};
                         return (<tr key={"m"+idx} style={{borderBottom:"1px solid "+C.border+"66",background:C.lGreen+"66"}}>
-                          <td style={{padding:"10px 12px",fontFamily:mono,fontWeight:700}}>{l.p}</td>
+                          <td style={{padding:"10px 12px",fontFamily:mono,fontWeight:700}}>{l.p} {l.hid && <span style={{color:C.accent,fontSize:11}}>HS #{l.hid}</span>}</td>
                           <td style={{padding:"10px 12px",fontSize:18}}>{l.co}</td>
                           <td style={{padding:"10px 12px"}}><Bd color={eC2[l.e]||C.muted}>{l.e}</Bd></td>
                           <td style={{padding:"10px 12px",fontSize:12,color:C.sub}}>{l.tr&&l.tr.length>0?l.tr.join(", "):"—"}</td>
@@ -3448,7 +3467,7 @@ export default function Dashboard(){
                       {unmatchedLeads.map(function(l,idx){
                         var eC2={alto:C.green,medio:C.accent,bajo:C.yellow,minimo:C.red,profunda:C.green,media:C.accent,corta:C.yellow,rebote:C.red};
                         return (<tr key={"u"+idx} style={{borderBottom:"1px solid "+C.border+"66"}}>
-                          <td style={{padding:"10px 12px",fontFamily:mono,fontWeight:700}}>{l.p}</td>
+                          <td style={{padding:"10px 12px",fontFamily:mono,fontWeight:700}}>{l.p} {l.hid && <span style={{color:C.accent,fontSize:11}}>HS #{l.hid}</span>}</td>
                           <td style={{padding:"10px 12px",fontSize:18}}>{l.co}</td>
                           <td style={{padding:"10px 12px"}}><Bd color={eC2[l.e]||C.muted}>{l.e}</Bd></td>
                           <td style={{padding:"10px 12px",fontSize:12,color:C.sub}}>{l.tr&&l.tr.length>0?l.tr.join(", "):"—"}</td>
@@ -3659,7 +3678,10 @@ export default function Dashboard(){
           var dKey=(dp.hs_meeting_start_time||"")+"||"+(dp.hs_meeting_title||"")+"||"+dContactId;
           var dOutcome=dp.hs_meeting_outcome||"UNKNOWN";
           var existing=dedupMap[dKey];
-          if(!existing||(outcomePriority[dOutcome]||0)>(outcomePriority[existing.properties&&existing.properties.hs_meeting_outcome||"UNKNOWN"]||0)){
+          var existOutcome=existing&&existing.properties&&existing.properties.hs_meeting_outcome||"UNKNOWN";
+          var newPri=outcomePriority[dOutcome]||0;
+          var exPri=outcomePriority[existOutcome]||0;
+          if(!existing||newPri>exPri||(newPri===exPri&&dp.hs_activity_type&&!(existing.properties&&existing.properties.hs_activity_type))){
             dedupMap[dKey]=dm;
           }
         }
@@ -4120,7 +4142,7 @@ export default function Dashboard(){
         </>);
       })()}
 
-      {section==="growth" && subTab==="ads" && (function(){
+      {section==="inbound" && subTab==="ads" && (function(){
         var ad=adsData||{};
         var adLeads=ad.leads||[];
         var adDaily=ad.daily||[];
