@@ -166,7 +166,7 @@ export async function fetchContactsByIds(contactIds) {
       var inputs = batch.map(function(id) { return { id: id }; });
       return callHubSpot("/crm/v3/objects/contacts/batch/read", null, {
         inputs: inputs,
-        properties: ["firstname", "lastname", "phone", "mobilephone", "hs_whatsapp_phone_number", "email", "createdate", "hs_lead_status", "lifecyclestage", "company"]
+        properties: ["firstname", "lastname", "phone", "mobilephone", "hs_whatsapp_phone_number", "email", "createdate", "hs_lead_status", "lifecyclestage", "company", "hs_analytics_source"]
       });
     });
     var results = await Promise.all(promises);
@@ -250,7 +250,7 @@ export async function fetchDealsSince(sinceIso) {
           { propertyName: "pipeline", operator: "EQ", value: "833703951" }
         ]
       }],
-      properties: ["dealname", "dealstage", "amount", "pipeline", "createdate", "closedate", "days_to_close", "hs_is_closed_won", "hs_is_closed_lost", "hubspot_owner_id"],
+      properties: ["dealname", "dealstage", "amount", "pipeline", "createdate", "closedate", "days_to_close", "hs_is_closed_won", "hs_is_closed_lost", "hubspot_owner_id", "hs_analytics_source", "hs_analytics_source_data_1"],
       limit: 100,
     };
     if (after) searchBody.after = after;
@@ -259,6 +259,51 @@ export async function fetchDealsSince(sinceIso) {
     if (!data.paging || !data.paging.next || !data.paging.next.after) break;
     after = data.paging.next.after;
   }
+  console.log("[HS] Found", all.length, "deals");
+
+  if (all.length === 0) return all;
+
+  // Step 2: Fetch contact associations using v4 batch API (100 per request, up to 3 in parallel)
+  console.log("[HS] Fetching associations for", all.length, "deals via batch API...");
+  var assocMap = {};
+  var BATCH = 100;
+  var CONCURRENCY = 3;
+  var chunks = [];
+  for (var i = 0; i < all.length; i += BATCH) {
+    chunks.push(all.slice(i, i + BATCH));
+  }
+  for (var ci = 0; ci < chunks.length; ci += CONCURRENCY) {
+    var group = chunks.slice(ci, ci + CONCURRENCY);
+    var promises = group.map(function(chunk) {
+      var inputs = chunk.map(function(deal) { return { id: deal.id }; });
+      return callHubSpot("/crm/v4/associations/deals/contacts/batch/read", null, { inputs: inputs }).catch(function(e) {
+        console.warn("[HS] Batch deal association error:", e.message);
+        return { results: [] };
+      });
+    });
+    var results = await Promise.all(promises);
+    for (var ri = 0; ri < results.length; ri++) {
+      var batchData = results[ri];
+      if (batchData.results) {
+        for (var r = 0; r < batchData.results.length; r++) {
+          var item = batchData.results[r];
+          var fromId = item.from && item.from.id;
+          if (fromId && item.to && item.to.length > 0) {
+            assocMap[fromId] = item.to.map(function(t) { return { id: String(t.toObjectId) }; });
+          }
+        }
+      }
+    }
+  }
+  console.log("[HS] Deal associations done, mapped", Object.keys(assocMap).length, "deals");
+
+  // Stitch associations onto deals
+  for (var k = 0; k < all.length; k++) {
+    if (assocMap[all[k].id]) {
+      all[k].associations = { contacts: { results: assocMap[all[k].id] } };
+    }
+  }
+
   return all;
 }
 

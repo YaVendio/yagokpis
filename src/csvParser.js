@@ -304,16 +304,33 @@ export function processInboundRows(rows, regionFilter, lifecyclePhones, hubspotP
     threads[tid].push(r);
   }
 
-  // Inbound = thread where the first message was sent by the lead (human)
-  // Use original row order (preserves LangGraph message order, no sort needed)
+  // Inbound = non-outbound thread with at least one human message.
+  // Previously required firstMessage=human, but some inbound flows (LangGraph)
+  // insert an AI greeting before the human's message, silently dropping those threads.
   var threadIds = [];
   var allTids = Object.keys(threads);
   for (var ti = 0; ti < allTids.length; ti++) {
     var tid0 = allTids[ti];
     var msgs0 = threads[tid0];
-    // First row's message_type reflects the first message in the conversation
-    var firstType = msgs0[0] ? msgs0[0].message_type : null;
-    if (firstType === "human") threadIds.push(tid0);
+    var hasHumanMsg = false;
+    for (var hi0 = 0; hi0 < msgs0.length; hi0++) {
+      if (msgs0[hi0].message_type === "human") { hasHumanMsg = true; break; }
+    }
+    if (hasHumanMsg) threadIds.push(tid0);
+  }
+
+  // Diagnostic: quantify threads gained by relaxing the first-message filter
+  var firstMsgHumanCount = 0;
+  for (var di0 = 0; di0 < threadIds.length; di0++) {
+    var dMsgs = threads[threadIds[di0]];
+    if (dMsgs[0] && dMsgs[0].message_type === "human") firstMsgHumanCount++;
+  }
+  var aiFirstGained = threadIds.length - firstMsgHumanCount;
+  if (aiFirstGained > 0) {
+    console.log("[inbound-diag] threads total=" + allTids.length +
+      " withHuman=" + threadIds.length +
+      " firstMsgHuman=" + firstMsgHumanCount +
+      " gained(AI-first)=" + aiFirstGained);
   }
 
   // Unique inbound phones

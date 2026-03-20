@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Legend, PieChart, Pie } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Legend, PieChart, Pie, Sankey } from "recharts";
 import { processCSVRows, processInboundRows, parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
 import { fetchThreads, expandThreadMessages, fetchInboundThreads, expandInboundThreadMessages, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats, fetchAdsThreads, fetchInboundCached, fetchLifecyclePhonesCached } from "./metabaseApi";
 import { DEFAULT_MEETINGS as _RAW_MEETINGS } from "./defaultData";
@@ -10,6 +10,7 @@ import { fetchCampaigns, fetchCampaignGroups, fetchCampaignLeads, formatDateForA
 import { fetchAllContacts, fetchAllContactsWithPhone, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones, getMeetingContactIds, fetchMeetingsSince, fetchContactsByIds, fetchDealsSince, fetchLeadsSince, fetchGrowthLeads, fetchOwnersByIds } from "./hubspotApi";
 import { fetchAutomationDiagnostic, aggregateWorkflowStats, calculateMetrics } from "./brevoApi.js";
 import { resetAuthGuard } from "./authGuard";
+import { fetchPostHogSources } from "./posthogApi";
 
 function getFirstOfMonth(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";}
 
@@ -546,6 +547,9 @@ export default function Dashboard(){
   const [growthMonth,setGrowthMonth]=useState(function(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");});
   const [showGoalsEditor,setShowGoalsEditor]=useState(false);
   const [growthModal,setGrowthModal]=useState(null);
+  const [posthogSources,setPosthogSources]=useState(null);
+  const [posthogSourcesLoading,setPosthogSourcesLoading]=useState(false);
+  const [posthogSourcesError,setPosthogSourcesError]=useState(null);
 
   // Ads tab state
   const [adsLoading,setAdsLoading]=useState(false);
@@ -576,10 +580,10 @@ export default function Dashboard(){
     if(section==="inbound"&&subTab==="ads"&&!adsInited&&!adsLoading&&!adsError){initAds();}
   },[section,subTab]);
 
-  // Auto-load inbound data when navigating to inbound or resumen section
+  // Auto-load inbound data when navigating to inbound, resumen, or hubspot analytics
   useEffect(function(){
-    if((section==="inbound"||section==="resumen")&&!inboundRawRows&&!inboundLoading) loadInboundData();
-  },[section]);
+    if((section==="inbound"||section==="resumen"||(section==="hubspot"&&subTab==="analytics"))&&!inboundRawRows&&!inboundLoading) loadInboundData();
+  },[section,subTab]);
 
   // Auto-load CRM data once authenticated (used by both overview and CRM tab)
   useEffect(function(){
@@ -980,11 +984,15 @@ export default function Dashboard(){
       var assoc=meetingsRes[i].associations&&meetingsRes[i].associations.contacts&&meetingsRes[i].associations.contacts.results;
       if(assoc){for(var j=0;j<assoc.length;j++){contactIdSet[assoc[j].id]=true;}}
     }
+    for(var di=0;di<dealsRes.length;di++){
+      var dAssoc=dealsRes[di].associations&&dealsRes[di].associations.contacts&&dealsRes[di].associations.contacts.results;
+      if(dAssoc){for(var dj=0;dj<dAssoc.length;dj++){contactIdSet[dAssoc[dj].id]=true;}}
+    }
     var contactIds=Object.keys(contactIdSet);
     var contactsRes=[];
     if(contactIds.length>0){
       contactsRes=await fetchContactsByIds(contactIds);
-      console.log("[CRM] Contacts (from meetings):",contactsRes.length);
+      console.log("[CRM] Contacts (from meetings+deals):",contactsRes.length);
     }
     var ownerIdSet={};
     for(var oi=0;oi<meetingsRes.length;oi++){
@@ -1173,12 +1181,23 @@ export default function Dashboard(){
       var currentDay=now.getFullYear()===year&&now.getMonth()===mo?now.getDate():lastDay.getDate();
       var totalDays=lastDay.getDate();
 
-      // Fetch goals + leads in parallel (independent calls)
-      console.log("[Growth] Fetching goals + leads since",firstDay.toISOString());
-      var parallelResults=await Promise.all([
+      // Fetch goals + leads + PostHog sources in parallel (independent calls)
+      console.log("[Growth] Fetching goals + leads + PostHog since",firstDay.toISOString());
+      setPosthogSourcesLoading(true);setPosthogSourcesError(null);
+      var nextMonth=new Date(year,mo+1,1);
+      var parallelResults=await Promise.allSettled([
         supabase.from("growth_goals").select("*").eq("month",selMonth),
-        fetchGrowthLeads(firstDay.toISOString(),"808581652")
+        fetchGrowthLeads(firstDay.toISOString(),"808581652"),
+        fetchPostHogSources(firstDay,nextMonth)
       ]);
+      // PostHog is non-blocking — handle separately
+      if(parallelResults[2].status==="fulfilled"){setPosthogSources(parallelResults[2].value);console.log("[Growth] PostHog sources loaded");}
+      else{console.warn("[Growth] PostHog sources failed:",parallelResults[2].reason);setPosthogSourcesError(parallelResults[2].reason&&parallelResults[2].reason.message||"Error al cargar PostHog");}
+      setPosthogSourcesLoading(false);
+      // Unwrap goals + leads (these are critical)
+      if(parallelResults[0].status==="rejected")throw parallelResults[0].reason;
+      if(parallelResults[1].status==="rejected")throw parallelResults[1].reason;
+      parallelResults=[parallelResults[0].value,parallelResults[1].value];
       var goalsResult=parallelResults[0];
       var leads=parallelResults[1];
       var goalsRows=goalsResult.data||[];
@@ -3298,6 +3317,130 @@ export default function Dashboard(){
         var topDeals=filteredDeals.slice().sort(function(a,b){return(parseFloat(b.properties&&b.properties.amount)||0)-(parseFloat(a.properties&&a.properties.amount)||0);}).slice(0,20);
         var donutData=[{name:"Won",value:wonDeals.length,fill:C.green},{name:"Lost",value:lostDeals.length,fill:C.red},{name:"Open",value:openDeals.length,fill:C.accent}].filter(function(dd){return dd.value>0;});
 
+        var sourceLabels={PAID_SOCIAL:"Paid Social",DIRECT_TRAFFIC:"Direct Traffic",OFFLINE:"Offline",ORGANIC_SEARCH:"Organic Search",OTHER_CAMPAIGNS:"Other Campaigns",PAID_SEARCH:"Paid Search",EMAIL_MARKETING:"Email Marketing",SOCIAL_MEDIA:"Organic Social",REFERRALS:"Referrals",AI_REFERRALS:"AI Referrals"};
+
+        // --- Phone matching helpers for Canal Yago ---
+        function buildPhoneSets(outRows,inRows){
+          var outSet={};var inSet={};
+          function addToSet(set,raw){
+            if(!raw)return;
+            var clean=raw.replace(/\D/g,"");
+            if(!clean)return;
+            set[clean]=true;
+            if(clean.length>11)set[clean.slice(-11)]=true;
+            if(clean.length>10)set[clean.slice(-10)]=true;
+            if(clean.length>9)set[clean.slice(-9)]=true;
+            if(clean.length>8)set[clean.slice(-8)]=true;
+          }
+          if(outRows){for(var i=0;i<outRows.length;i++){addToSet(outSet,outRows[i].phone_number);}}
+          if(inRows){for(var j=0;j<inRows.length;j++){addToSet(inSet,inRows[j].phone_number);}}
+          return{outbound:outSet,inbound:inSet};
+        }
+        function matchPhoneInSet(phoneSet,contact){
+          if(!contact||!contact.properties)return false;
+          var props=contact.properties;
+          var phones=[props.phone,props.mobilephone,props.hs_whatsapp_phone_number];
+          for(var i=0;i<phones.length;i++){
+            var raw=phones[i];if(!raw)continue;
+            var p=raw.replace(/\D/g,"");if(!p)continue;
+            if(phoneSet[p])return true;
+            if(p.length>11&&phoneSet[p.slice(-11)])return true;
+            if(p.length>10&&phoneSet[p.slice(-10)])return true;
+            if(p.length>9&&phoneSet[p.slice(-9)])return true;
+            if(p.length>8&&phoneSet[p.slice(-8)])return true;
+          }
+          return false;
+        }
+        function classifyCanal(contact,phoneSets){
+          var isOut=matchPhoneInSet(phoneSets.outbound,contact);
+          var isIn=matchPhoneInSet(phoneSets.inbound,contact);
+          if(isOut&&isIn)return"Ambos";
+          if(isOut)return"Outbound";
+          if(isIn)return"Inbound";
+          return"Directo";
+        }
+        var phoneSets=buildPhoneSets(rawRows,inboundRawRows);
+        var mtgContactMap={};
+        for(var cmi=0;cmi<crmContacts.length;cmi++){mtgContactMap[crmContacts[cmi].id]=crmContacts[cmi];}
+        var canalColors={"Outbound":C.green,"Inbound":C.cyan,"Ambos":C.purple,"Directo":C.muted};
+
+        function buildDealSankey(deals,contactMap,pSets){
+          var srcCanal={};
+          for(var i=0;i<deals.length;i++){
+            var p=deals[i].properties||{};
+            var src=p.hs_analytics_source||"UNKNOWN";
+            var outcome=p.hs_is_closed_won==="true"?"Won":p.hs_is_closed_lost==="true"?"Lost":"Open";
+            var canal="Directo";
+            var dAssoc=deals[i].associations&&deals[i].associations.contacts&&deals[i].associations.contacts.results;
+            if(dAssoc&&dAssoc.length>0){var ct=contactMap[dAssoc[0].id];if(ct)canal=classifyCanal(ct,pSets);}
+            if(!srcCanal[src])srcCanal[src]={};
+            if(!srcCanal[src][canal])srcCanal[src][canal]={};
+            srcCanal[src][canal][outcome]=(srcCanal[src][canal][outcome]||0)+1;
+          }
+          var nodeNames=[];var nodeIndex={};
+          var srcTotals={};
+          Object.keys(srcCanal).forEach(function(s){var t=0;Object.keys(srcCanal[s]).forEach(function(cn){Object.keys(srcCanal[s][cn]).forEach(function(o){t+=srcCanal[s][cn][o];});});srcTotals[s]=t;});
+          var srcKeys=Object.keys(srcTotals).sort(function(a,b){return srcTotals[b]-srcTotals[a];});
+          srcKeys.forEach(function(s){nodeIndex[s]=nodeNames.length;nodeNames.push(sourceLabels[s]||s);});
+          ["Outbound","Inbound","Ambos","Directo"].forEach(function(cn){nodeIndex["canal_"+cn]=nodeNames.length;nodeNames.push(cn);});
+          ["Won","Lost","Open"].forEach(function(o){nodeIndex["out_"+o]=nodeNames.length;nodeNames.push(o);});
+          var nodes=nodeNames.map(function(n){
+            var fill=C.accent;
+            if(canalColors[n])fill=canalColors[n];
+            if(n==="Won")fill=C.green;if(n==="Lost")fill=C.red;if(n==="Open")fill=C.accent;
+            return{name:n,fill:fill};
+          });
+          var links=[];
+          // Source → Canal
+          srcKeys.forEach(function(s){Object.keys(srcCanal[s]).forEach(function(cn){var total=0;Object.keys(srcCanal[s][cn]).forEach(function(o){total+=srcCanal[s][cn][o];});if(total>0)links.push({source:nodeIndex[s],target:nodeIndex["canal_"+cn],value:total});});});
+          // Canal → Outcome
+          var canalOutcome={};
+          srcKeys.forEach(function(s){Object.keys(srcCanal[s]).forEach(function(cn){if(!canalOutcome[cn])canalOutcome[cn]={};Object.keys(srcCanal[s][cn]).forEach(function(o){canalOutcome[cn][o]=(canalOutcome[cn][o]||0)+srcCanal[s][cn][o];});});});
+          Object.keys(canalOutcome).forEach(function(cn){Object.keys(canalOutcome[cn]).forEach(function(o){if(canalOutcome[cn][o]>0)links.push({source:nodeIndex["canal_"+cn],target:nodeIndex["out_"+o],value:canalOutcome[cn][o]});});});
+          return{nodes:nodes,links:links};
+        }
+        var dealSankeyData=buildDealSankey(filteredDeals,mtgContactMap,phoneSets);
+
+        function buildMeetingSankey(meetings,contactMap,pSets){
+          var srcCanal={};
+          for(var i=0;i<meetings.length;i++){
+            var mp=meetings[i].properties||{};
+            var outcome=mp.hs_meeting_outcome||"UNKNOWN";
+            var assoc=meetings[i].associations&&meetings[i].associations.contacts&&meetings[i].associations.contacts.results;
+            var src="UNKNOWN";var canal="Directo";
+            if(assoc&&assoc.length>0){var ct=contactMap[assoc[0].id];if(ct){if(ct.properties&&ct.properties.hs_analytics_source)src=ct.properties.hs_analytics_source;canal=classifyCanal(ct,pSets);}}
+            if(!srcCanal[src])srcCanal[src]={};
+            if(!srcCanal[src][canal])srcCanal[src][canal]={};
+            srcCanal[src][canal][outcome]=(srcCanal[src][canal][outcome]||0)+1;
+          }
+          var nodeNames=[];var nodeIndex={};
+          var srcTotals={};
+          Object.keys(srcCanal).forEach(function(s){var t=0;Object.keys(srcCanal[s]).forEach(function(cn){Object.keys(srcCanal[s][cn]).forEach(function(o){t+=srcCanal[s][cn][o];});});srcTotals[s]=t;});
+          var srcKeys=Object.keys(srcTotals).sort(function(a,b){return srcTotals[b]-srcTotals[a];});
+          srcKeys.forEach(function(s){nodeIndex[s]=nodeNames.length;nodeNames.push(sourceLabels[s]||s);});
+          ["Outbound","Inbound","Ambos","Directo"].forEach(function(cn){nodeIndex["canal_"+cn]=nodeNames.length;nodeNames.push(cn);});
+          var outcomeKeys=["COMPLETED","SCHEDULED","NO_SHOW","CANCELED","RESCHEDULED"];
+          outcomeKeys.forEach(function(o){var exists=false;srcKeys.forEach(function(s){Object.keys(srcCanal[s]).forEach(function(cn){if(srcCanal[s][cn][o])exists=true;});});if(exists){nodeIndex["out_"+o]=nodeNames.length;nodeNames.push(o);}});
+          srcKeys.forEach(function(s){Object.keys(srcCanal[s]).forEach(function(cn){Object.keys(srcCanal[s][cn]).forEach(function(o){if(nodeIndex["out_"+o]===undefined){nodeIndex["out_"+o]=nodeNames.length;nodeNames.push(o);}});});});
+          var nodes=nodeNames.map(function(n){
+            var fill=C.accent;
+            if(canalColors[n])fill=canalColors[n];
+            if(n==="COMPLETED")fill=C.green;if(n==="NO_SHOW")fill=C.red;
+            if(n==="CANCELED")fill=C.yellow;if(n==="RESCHEDULED")fill=C.orange;
+            if(n==="SCHEDULED")fill=C.accent;
+            return{name:n,fill:fill};
+          });
+          var links=[];
+          // Source → Canal
+          srcKeys.forEach(function(s){Object.keys(srcCanal[s]).forEach(function(cn){var total=0;Object.keys(srcCanal[s][cn]).forEach(function(o){total+=srcCanal[s][cn][o];});if(total>0)links.push({source:nodeIndex[s],target:nodeIndex["canal_"+cn],value:total});});});
+          // Canal → Outcome
+          var canalOutcome={};
+          srcKeys.forEach(function(s){Object.keys(srcCanal[s]).forEach(function(cn){if(!canalOutcome[cn])canalOutcome[cn]={};Object.keys(srcCanal[s][cn]).forEach(function(o){canalOutcome[cn][o]=(canalOutcome[cn][o]||0)+srcCanal[s][cn][o];});});});
+          Object.keys(canalOutcome).forEach(function(cn){Object.keys(canalOutcome[cn]).forEach(function(o){if(canalOutcome[cn][o]>0)links.push({source:nodeIndex["canal_"+cn],target:nodeIndex["out_"+o],value:canalOutcome[cn][o]});});});
+          return{nodes:nodes,links:links};
+        }
+        var meetingSankeyData=buildMeetingSankey(crmMeetings,mtgContactMap,phoneSets);
+
         return (<>
           {crmLoading && <div style={{textAlign:"center",padding:40,color:C.muted,fontSize:15}}><div style={{width:30,height:30,border:"3px solid "+C.border,borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto 12px"}}/>Cargando datos de HubSpot...</div>}
           {crmError && <div style={{color:C.red,fontSize:13,fontWeight:600,marginBottom:16,background:C.lRed,padding:"12px 18px",borderRadius:10,border:"1px solid "+C.redBorder}}>Error: {crmError} <button onClick={function(){setCrmError(null);setCrmInited(false);}} style={{marginLeft:12,background:C.accent,color:"#fff",border:"none",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Reintentar</button></div>}
@@ -3405,6 +3548,28 @@ export default function Dashboard(){
                 {donutData.length>0 && (<div style={{display:"flex",alignItems:"center",justifyContent:"center"}}><PieChart width={120} height={120}><Pie data={donutData} dataKey="value" cx={55} cy={55} innerRadius={30} outerRadius={52} paddingAngle={3}>{donutData.map(function(entry,i){return <Cell key={i} fill={entry.fill}/>;})}</Pie><Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:12,color:C.text}}/></PieChart></div>)}
               </div>
             </Cd>
+            {/* F2. Sankey: Origen de Negocios */}
+            {dealSankeyData.links.length>0 && (<Cd style={{marginBottom:22}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+C.border+"66"}}><span style={{fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700}}>Origen de Negocios (Sankey)</span>{!inboundRawRows && <span style={{fontSize:11,color:C.yellow,fontWeight:700,background:C.lYellow,padding:"2px 8px",borderRadius:6}}>(sin datos inbound)</span>}</div>
+              <div style={{height:400,width:"100%"}}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <Sankey data={dealSankeyData} nodePadding={30} nodeWidth={12} link={{stroke:C.accent+"44"}} margin={{top:10,right:160,bottom:10,left:10}}>
+                    <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}}/>
+                  </Sankey>
+                </ResponsiveContainer>
+              </div>
+            </Cd>)}
+            {/* F3. Sankey: Origen de Reuniones */}
+            {meetingSankeyData.links.length>0 && (<Cd style={{marginBottom:22}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+C.border+"66"}}><span style={{fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700}}>Origen de Reuniones (Sankey)</span>{!inboundRawRows && <span style={{fontSize:11,color:C.yellow,fontWeight:700,background:C.lYellow,padding:"2px 8px",borderRadius:6}}>(sin datos inbound)</span>}</div>
+              <div style={{height:350,width:"100%"}}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <Sankey data={meetingSankeyData} nodePadding={30} nodeWidth={12} link={{stroke:C.purple+"44"}} margin={{top:10,right:160,bottom:10,left:10}}>
+                    <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}}/>
+                  </Sankey>
+                </ResponsiveContainer>
+              </div>
+            </Cd>)}
             {/* G. Performance por Vendedor */}
             {Object.keys(dealsByOwner).length>0 && (<Cd style={{marginBottom:22}}>
               <Sec>Performance por Vendedor / SDR</Sec>
@@ -4199,11 +4364,60 @@ export default function Dashboard(){
               <pre style={{background:C.rowBg,borderRadius:10,padding:16,fontSize:12,fontFamily:mono,color:C.sub,whiteSpace:"pre-wrap",lineHeight:1.6,margin:0,border:"1px solid "+C.border}}>{gd.summary||""}</pre>
             </Cd>
 
-            {/* PostHog placeholder */}
-            <Cd style={{marginBottom:22,opacity:0.5}}>
-              <Sec>Eventos de Producto (PostHog)</Sec>
-              <div style={{textAlign:"center",padding:30,color:C.muted,fontSize:13}}>Pr{"\u00F3"}ximamente: eventos de producto en tiempo real desde PostHog</div>
-            </Cd>
+            {/* PostHog sources comparison */}
+            <Sec>Fuentes de Leads — PostHog vs HubSpot</Sec>
+            {posthogSourcesLoading && <div style={{textAlign:"center",padding:20,color:C.muted,fontSize:13}}>Cargando datos de PostHog...</div>}
+            {posthogSourcesError && <div style={{color:C.red,fontSize:12,marginBottom:12,background:C.lRed,padding:"8px 14px",borderRadius:8,border:"1px solid "+C.redBorder}}>PostHog: {posthogSourcesError}</div>}
+            {posthogSources && (function(){
+              var phDom=posthogSources.byDomain||[];
+              var phUtm=posthogSources.byUtmSource||[];
+              var allHs=[].concat(latS,braS);
+              var hsMap={};
+              for(var hi=0;hi<allHs.length;hi++){var hk=allHs[hi].source;hsMap[hk]=(hsMap[hk]||0)+allHs[hi].count;}
+              var hsCombined=Object.keys(hsMap).map(function(k){return{source:k,count:hsMap[k]};}).sort(function(a,b){return b.count-a.count;});
+
+              function phBar(items,label){
+                var max=items.length>0?items[0].count:1;
+                return <Cd style={{flex:1,minWidth:280}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.sub,marginBottom:12}}>{label}</div>
+                  {items.map(function(s){
+                    var pct=max>0?(s.count/max*100):0;
+                    return <div key={s.source} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                      <div style={{width:150,fontSize:11,fontWeight:600,color:C.sub,textAlign:"right",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={s.source}>{s.source}</div>
+                      <div style={{flex:1,background:C.barTrack,borderRadius:6,height:20,overflow:"hidden"}}>
+                        <div style={{height:"100%",borderRadius:6,background:C.cyan,width:pct+"%",transition:"width 0.3s ease"}}/>
+                      </div>
+                      <div style={{width:45,fontSize:12,fontWeight:800,fontFamily:mono,color:C.text}}>{s.count}</div>
+                    </div>;
+                  })}
+                  {items.length===0 && <div style={{color:C.muted,fontSize:12,textAlign:"center",padding:16}}>Sin datos</div>}
+                </Cd>;
+              }
+
+              function hsBar(items,label){
+                var max=items.length>0?items[0].count:1;
+                return <Cd style={{flex:1,minWidth:280}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.sub,marginBottom:12}}>{label}</div>
+                  {items.map(function(s){
+                    var pct=max>0?(s.count/max*100):0;
+                    var clr=SOURCE_COLORS[s.source]||C.muted;
+                    return <div key={s.source} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                      <div style={{width:150,fontSize:11,fontWeight:600,color:C.sub,textAlign:"right",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.source}</div>
+                      <div style={{flex:1,background:C.barTrack,borderRadius:6,height:20,overflow:"hidden"}}>
+                        <div style={{height:"100%",borderRadius:6,background:clr,width:pct+"%",transition:"width 0.3s ease"}}/>
+                      </div>
+                      <div style={{width:45,fontSize:12,fontWeight:800,fontFamily:mono,color:C.text}}>{s.count}</div>
+                    </div>;
+                  })}
+                </Cd>;
+              }
+
+              return <div style={{display:"flex",gap:16,marginBottom:22,flexWrap:"wrap"}}>
+                {phBar(phDom,"PostHog — Referring Domain")}
+                {phBar(phUtm,"PostHog — UTM Source")}
+                {hsBar(hsCombined,"HubSpot — Analytics Source (Total)")}
+              </div>;
+            })()}
           </>)}
 
           {/* Goals editor modal */}

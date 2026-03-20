@@ -34,3 +34,26 @@ function _invokePostHog(endpoint, params, body, password) {
 export async function fetchPostHogInsight(insightId) {
   return await callPostHog("/api/projects/@current/insights/" + insightId);
 }
+
+export async function fetchPostHogSources(startDate, endDate) {
+  var start = startDate.toISOString().slice(0, 10);
+  var end = endDate.toISOString().slice(0, 10);
+
+  var domainQuery = "SELECT properties.$initial_referring_domain as source, count() as total FROM persons WHERE created_at >= '" + start + "' AND created_at < '" + end + "' GROUP BY source ORDER BY total DESC LIMIT 30";
+  var utmQuery = "SELECT properties.$initial_utm_source as source, count() as total FROM persons WHERE created_at >= '" + start + "' AND created_at < '" + end + "' GROUP BY source ORDER BY total DESC LIMIT 30";
+
+  var results = await Promise.all([
+    callPostHog("/api/projects/@current/query/", null, { query: { kind: "HogQLQuery", query: domainQuery } }),
+    callPostHog("/api/projects/@current/query/", null, { query: { kind: "HogQLQuery", query: utmQuery } }),
+  ]);
+
+  function parseRows(res) {
+    var rows = res && res.results || [];
+    return rows.filter(function (r) { return r[0] && r[0] !== "" && r[0] !== "null"; }).map(function (r) { return { source: r[0], count: r[1] }; });
+  }
+
+  return {
+    byDomain: parseRows(results[0]),
+    byUtmSource: parseRows(results[1]),
+  };
+}
