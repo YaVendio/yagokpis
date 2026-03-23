@@ -583,7 +583,7 @@ export default function Dashboard(){
   // Auto-load inbound data when navigating to inbound, resumen, or hubspot analytics
   useEffect(function(){
     if((section==="inbound"||section==="resumen"||(section==="hubspot"&&subTab==="analytics"))&&!inboundRawRows&&!inboundLoading) loadInboundData();
-  },[section,subTab]);
+  },[section,subTab,dateFrom,dateTo]);
 
   // Auto-load CRM data once authenticated (used by both overview and CRM tab)
   useEffect(function(){
@@ -608,7 +608,7 @@ export default function Dashboard(){
         if(section!=="resumen") applyResult(result);
       }
     }
-  },[crmContacts]);
+  },[crmContacts,dateFrom,dateTo]);
 
   // Merge HubSpot lead-pipeline deals per day into daily chart data
   const [dailyWithHs,setDailyWithHs]=useState([]);

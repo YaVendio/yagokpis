@@ -52,6 +52,7 @@ export async function fetchAllContacts() {
 export async function fetchAllContactsWithPhone() {
   var all = [];
   var after = undefined;
+  var hit10k = false;
   while (true) {
     var searchBody = {
       filterGroups: [
@@ -68,11 +69,45 @@ export async function fetchAllContactsWithPhone() {
       if (data.results) all = all.concat(data.results);
       if (!data.paging || !data.paging.next || !data.paging.next.after) break;
       after = data.paging.next.after;
+      if (all.length >= 10000) {
+        console.warn("[HS] Search API 10K limit reached for contacts. Falling back to List API.");
+        hit10k = true;
+        break;
+      }
     } catch (e) {
-      console.warn("[HS] Contacts page failed, returning partial:", all.length, "contacts so far. Error:", e.message);
+      console.error("[HS] Contacts page failed after retries. Collected:", all.length, "Error:", e.message);
+      if (all.length === 0) throw e;
+      console.warn("[HS] Returning", all.length, "contacts collected before failure");
       break;
     }
   }
+
+  // If search hit 10K cap, fall back to List API (no 10K limit)
+  if (hit10k) {
+    console.log("[HS] Switching to List API for complete contact fetch...");
+    all = [];
+    after = undefined;
+    while (true) {
+      var params = {
+        limit: "100",
+        properties: "firstname,lastname,phone,mobilephone,hs_whatsapp_phone_number,email,createdate,hs_lead_status,lifecyclestage,company",
+      };
+      if (after) params.after = after;
+      var listData = await callHubSpot("/crm/v3/objects/contacts", params);
+      if (listData.results) {
+        for (var i = 0; i < listData.results.length; i++) {
+          var props = listData.results[i].properties || {};
+          if (props.phone || props.mobilephone || props.hs_whatsapp_phone_number) {
+            all.push(listData.results[i]);
+          }
+        }
+      }
+      if (!listData.paging || !listData.paging.next || !listData.paging.next.after) break;
+      after = listData.paging.next.after;
+    }
+    console.log("[HS] List API fallback complete:", all.length, "contacts with phone");
+  }
+
   console.log("[HS] Contacts with phone:", all.length);
   return all;
 }
@@ -200,6 +235,10 @@ export async function fetchLeadsSince(sinceIso, pipelineId) {
       if (data.results) all = all.concat(data.results);
       if (!data.paging || !data.paging.next || !data.paging.next.after) break;
       after = data.paging.next.after;
+      if (all.length >= 10000) {
+        console.warn("[HS] Search API 10K limit reached for leads. Results may be incomplete.");
+        break;
+      }
     }
     console.log("[HS] Leads via search API:", all.length);
     return all;
@@ -258,6 +297,10 @@ export async function fetchDealsSince(sinceIso) {
     if (data.results) all = all.concat(data.results);
     if (!data.paging || !data.paging.next || !data.paging.next.after) break;
     after = data.paging.next.after;
+    if (all.length >= 10000) {
+      console.warn("[HS] Search API 10K limit reached for deals. Results may be incomplete.");
+      break;
+    }
   }
   console.log("[HS] Found", all.length, "deals");
 
@@ -404,6 +447,10 @@ export async function fetchGrowthLeads(sinceIso, pipelineId) {
       if (data.results) all = all.concat(data.results);
       if (!data.paging || !data.paging.next || !data.paging.next.after) break;
       after = data.paging.next.after;
+      if (all.length >= 10000) {
+        console.warn("[HS] Search API 10K limit reached for growth leads. Results may be incomplete.");
+        break;
+      }
     }
     console.log("[HS Growth] Leads via search API:", all.length);
     filtered = all;
