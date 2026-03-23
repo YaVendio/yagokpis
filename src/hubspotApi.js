@@ -201,7 +201,7 @@ export async function fetchContactsByIds(contactIds) {
       var inputs = batch.map(function(id) { return { id: id }; });
       return callHubSpot("/crm/v3/objects/contacts/batch/read", null, {
         inputs: inputs,
-        properties: ["firstname", "lastname", "phone", "mobilephone", "hs_whatsapp_phone_number", "email", "createdate", "hs_lead_status", "lifecyclestage", "company", "hs_analytics_source"]
+        properties: ["firstname", "lastname", "phone", "mobilephone", "hs_whatsapp_phone_number", "email", "createdate", "hs_lead_status", "lifecyclestage", "company", "hs_analytics_source", "prioridad_plg", "registro_plg"]
       });
     });
     var results = await Promise.all(promises);

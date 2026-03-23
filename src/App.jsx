@@ -438,9 +438,11 @@ export default function Dashboard(){
 
   var _brevoIcon=<svg width="18" height="18" viewBox="0 0 24 24" fill="#0B996E"><path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zM7.2 4.8h5.747c2.34 0 3.895 1.406 3.895 3.516 0 1.022-.348 1.862-1.09 2.588C17.189 11.812 18 13.22 18 14.785c0 2.86-2.64 5.016-6.164 5.016H7.199v-15zm2.085 1.952v5.537h.07c.233-.432.858-.796 2.249-1.226 2.039-.659 3.037-1.52 3.037-2.655 0-.998-.766-1.656-1.924-1.656H9.285zm4.87 5.266c-.766.385-1.67.748-2.76 1.11-1.229.387-2.11 1.386-2.11 2.407v2.315h2.365c2.387 0 4.149-1.34 4.149-3.155 0-1.067-.625-2.087-1.645-2.677z"/></svg>;
   var _hubspotIcon=<svg width="18" height="18" viewBox="0 0 24 24" fill="#FF7A59"><path d="M18.164 7.93V5.084a2.198 2.198 0 001.267-1.978v-.067A2.2 2.2 0 0017.238.845h-.067a2.2 2.2 0 00-2.193 2.193v.067a2.196 2.196 0 001.252 1.973l.013.006v2.852a6.22 6.22 0 00-2.969 1.31l.012-.01-7.828-6.095A2.497 2.497 0 104.3 4.656l-.012.006 7.697 5.991a6.176 6.176 0 00-1.038 3.446c0 1.343.425 2.588 1.147 3.607l-.013-.02-2.342 2.343a1.968 1.968 0 00-.58-.095h-.002a2.033 2.033 0 102.033 2.033 1.978 1.978 0 00-.1-.595l.005.014 2.317-2.317a6.247 6.247 0 104.782-11.134l-.036-.005zm-.964 9.378a3.206 3.206 0 113.215-3.207v.002a3.206 3.206 0 01-3.207 3.207z"/></svg>;
-  const SECTIONS={resumen:{label:"Resumen",icon:"\uD83D\uDCCA",subTabs:[]},outbound:{label:"Outbound",icon:"\uD83C\uDFAF",subTabs:["resumen","engagement","templates"]},inbound:{label:"Inbound",icon:"\uD83D\uDCE5",subTabs:["resumen","engagement","ads"]},canales:{label:"Canales",icon:"\uD83D\uDCE1",subTabs:["grupos"]},hubspot:{label:"HubSpot",icon:_hubspotIcon,subTabs:["analytics","reuniones"]},brevo:{label:"Brevo",icon:_brevoIcon,subTabs:[]},growth:{label:"Marketing",icon:"\uD83D\uDCC8",subTabs:["resumen"]}};
-  const [section,setSection]=useState("outbound");
-  const [subTab,setSubTab]=useState("resumen");
+  const SECTIONS={resumen:{label:"Resumen",icon:"\uD83D\uDCCA",subTabs:[]},outbound:{label:"Outbound",icon:"\uD83C\uDFAF",subTabs:["resumen","engagement","templates"]},inbound:{label:"Inbound",icon:"\uD83D\uDCE5",subTabs:["resumen","engagement"]},ads:{label:"Ads",icon:"\uD83D\uDCE2",subTabs:[]},canales:{label:"Canales",icon:"\uD83D\uDCE1",subTabs:["grupos"]},hubspot:{label:"HubSpot",icon:_hubspotIcon,subTabs:["analytics","reuniones"]},brevo:{label:"Brevo",icon:_brevoIcon,subTabs:[]},growth:{label:"Marketing",icon:"\uD83D\uDCC8",subTabs:["resumen"]}};
+  function parseRoute(){var parts=window.location.pathname.replace(/^\/+|\/+$/g,"").split("/");var sec=parts[0]||"resumen";var sub=parts[1]||"";if(!SECTIONS[sec])return{section:"resumen",subTab:""};var info=SECTIONS[sec];if(info.subTabs.length>0&&!sub)sub=info.subTabs[0];if(sub&&info.subTabs.indexOf(sub)<0)sub=info.subTabs[0]||"";return{section:sec,subTab:sub};}
+  var _initRoute=parseRoute();
+  const [section,setSection]=useState(_initRoute.section);
+  const [subTab,setSubTab]=useState(_initRoute.subTab);
   const [searchOpen,setSearchOpen]=useState(false);
   const [mode,setMode]=useState(0);
   const [showM,setShowM]=useState(false);
@@ -523,10 +525,14 @@ export default function Dashboard(){
   const [crmLeads,setCrmLeads]=useState([]);
   const [crmOwnerMap,setCrmOwnerMap]=useState({});
   const [hsReunionOwnerFilter,setHsReunionOwnerFilter]=useState([]);
-  const [hsReunionDateFrom,setHsReunionDateFrom]=useState("");
-  const [hsReunionDateTo,setHsReunionDateTo]=useState("");
+  const [hsReunionDateFrom,setHsReunionDateFrom]=useState(function(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";});
+  const [hsReunionDateTo,setHsReunionDateTo]=useState(function(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");});
+  const [hsReunionDatePreset,setHsReunionDatePreset]=useState("este_mes");
   const [hsReunionTypeFilter,setHsReunionTypeFilter]=useState([]);
-  const [hsReunionOutcomeFilter,setHsReunionOutcomeFilter]=useState("");
+  const [hsReunionOutcomeFilter,setHsReunionOutcomeFilter]=useState([]);
+  const [hsReunionPrioridadFilter,setHsReunionPrioridadFilter]=useState([]);
+  const [hsReunionRegistroPlgFilter,setHsReunionRegistroPlgFilter]=useState(false);
+  const [hsReunionDropOpen,setHsReunionDropOpen]=useState("");
   const [hsDetailDay,setHsDetailDay]=useState(null);
   const [hsDealPipelineFilter,setHsDealPipelineFilter]=useState("all");
   const [hsDealOwnerFilter,setHsDealOwnerFilter]=useState([]);
@@ -564,6 +570,10 @@ export default function Dashboard(){
     return function(){window.removeEventListener("auth-required",onAuthRequired);};
   },[]);
 
+  useEffect(function(){function onPop(){var r=parseRoute();setSection(r.section);setSubTab(r.subTab);}window.addEventListener("popstate",onPop);return function(){window.removeEventListener("popstate",onPop);};},[]);
+
+  useEffect(function(){if(!hsReunionDropOpen)return;function close(){setHsReunionDropOpen("");}window.addEventListener("click",close);return function(){window.removeEventListener("click",close);};},[hsReunionDropOpen]);
+
   // Auto-init Grupos when selected for the first time
   useEffect(function(){
     if(section==="canales"&&subTab==="grupos"&&gruposCampaigns.length===0&&!gruposLoading&&!gruposError){initGrupos();}
@@ -577,7 +587,7 @@ export default function Dashboard(){
   // Auto-init Growth when selected for the first time
   useEffect(function(){
     if(section==="growth"&&subTab==="resumen"&&!growthInited&&!growthLoading&&!growthError){initGrowth();}
-    if(section==="inbound"&&subTab==="ads"&&!adsInited&&!adsLoading&&!adsError){initAds();}
+    if(section==="ads"&&!adsInited&&!adsLoading&&!adsError){initAds();}
   },[section,subTab]);
 
   // Auto-load inbound data when navigating to inbound, resumen, or hubspot analytics
@@ -1526,8 +1536,13 @@ export default function Dashboard(){
   function navigateTo(sec,sub){
     var info=SECTIONS[sec];
     var defaultSub=info&&info.subTabs.length>0?info.subTabs[0]:null;
+    var actualSub=sub||defaultSub||"";
     setSection(sec);
-    setSubTab(sub||defaultSub||"");
+    setSubTab(actualSub);
+    var path="/"+sec;
+    if(actualSub&&info&&info.subTabs.length>0&&actualSub!==info.subTabs[0])path+="/"+actualSub;
+    if(sec==="resumen")path="/";
+    history.pushState(null,"",path);
     if(sec==="resumen"){ loadInboundData(); }
     else if(sec==="inbound") loadInboundData();
     else if(sec==="outbound"&&rawRows){
@@ -1677,7 +1692,7 @@ export default function Dashboard(){
 
   var _curSec=SECTIONS[section]||{};
   var _subTabs=_curSec.subTabs||[];
-  var _subTabLabels={resumen:"Resumen",engagement:"Engagement",templates:"Templates",grupos:"Grupos",ads:"Ads",analytics:"Analytics",reuniones:"Reuniones"};
+  var _subTabLabels={resumen:"Resumen",engagement:"Engagement",templates:"Templates",grupos:"Grupos",analytics:"Analytics",reuniones:"Reuniones"};
 
   return (<div style={{display:"flex",background:C.bg,minHeight:"100vh",color:C.text,fontFamily:font,fontSize:15}}>
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
@@ -1758,7 +1773,7 @@ export default function Dashboard(){
     {/* Sidebar */}
     <nav style={{width:56,minHeight:"100vh",background:C.card,borderRight:"1px solid "+C.border,display:"flex",flexDirection:"column",alignItems:"center",position:"sticky",top:0,height:"100vh",flexShrink:0,paddingTop:12,gap:4,zIndex:10}}>
       <div style={{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg, #2563EB, #7C3AED)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:900,fontSize:16,marginBottom:12,flexShrink:0}}>Y</div>
-      {["resumen","outbound","inbound","canales","growth"].map(function(sk){var s=SECTIONS[sk];var a=section===sk;return <SideBtn key={sk} label={s.label} onClick={function(){navigateTo(sk);}} active={a}>{a&&<div style={{position:"absolute",left:0,top:8,bottom:8,width:3,borderRadius:"0 3px 3px 0",background:C.accent}}/>}{s.icon}</SideBtn>;})}
+      {["resumen","outbound","inbound","ads","canales","growth"].map(function(sk){var s=SECTIONS[sk];var a=section===sk;return <SideBtn key={sk} label={s.label} onClick={function(){navigateTo(sk);}} active={a}>{a&&<div style={{position:"absolute",left:0,top:8,bottom:8,width:3,borderRadius:"0 3px 3px 0",background:C.accent}}/>}{s.icon}</SideBtn>;})}
       <div style={{width:28,height:1,background:C.border,margin:"6px 0",flexShrink:0}}/>
       {["hubspot","brevo"].map(function(sk){var s=SECTIONS[sk];var a=section===sk;return <SideBtn key={sk} label={s.label} onClick={function(){navigateTo(sk);}} active={a}>{a&&<div style={{position:"absolute",left:0,top:8,bottom:8,width:3,borderRadius:"0 3px 3px 0",background:C.accent}}/>}{s.icon}</SideBtn>;})}
       <div style={{flex:1}}/>
@@ -1778,7 +1793,7 @@ export default function Dashboard(){
 
       {/* Sub-tab bar */}
       {_subTabs.length>0 && (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"8px 28px",display:"flex",gap:4}}>
-        {_subTabs.map(function(st){var a=subTab===st;return <button key={st} onClick={function(){setSubTab(st);}} style={{background:a?C.accent:"transparent",color:a?"#fff":C.muted,border:"none",borderRadius:8,padding:"6px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font,transition:"all 0.15s ease"}}>{_subTabLabels[st]||st}</button>;})}
+        {_subTabs.map(function(st){var a=subTab===st;return <button key={st} onClick={function(){setSubTab(st);var p="/"+section;if(st!==_subTabs[0])p+="/"+st;history.pushState(null,"",p);}} style={{background:a?C.accent:"transparent",color:a?"#fff":C.muted,border:"none",borderRadius:8,padding:"6px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font,transition:"all 0.15s ease"}}>{_subTabLabels[st]||st}</button>;})}
       </div>)}
 
       {/* Filter bar */}
@@ -3651,7 +3666,7 @@ export default function Dashboard(){
       {section==="hubspot" && subTab==="reuniones" && (function(){
         var outcomeColor={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:C.yellow,RESCHEDULED:C.orange,"NO CALIFICADA":C.pink,UNKNOWN:C.muted};
         var outcomeLabels={COMPLETED:"Completadas",SCHEDULED:"Agendadas",NO_SHOW:"No Show",CANCELED:"Canceladas",RESCHEDULED:"Reagendadas","NO CALIFICADA":"No Calificada"};
-        var outcomeKeys=["COMPLETED","SCHEDULED","NO_SHOW","CANCELED","RESCHEDULED","NO CALIFICADA"];
+        var outcomeKeys=["SCHEDULED","CANCELED","RESCHEDULED","NO CALIFICADA","NO_SHOW","COMPLETED"];
         var outcomePriority={COMPLETED:6,SCHEDULED:5,RESCHEDULED:4,NO_SHOW:3,CANCELED:2,"NO CALIFICADA":1,UNKNOWN:0};
 
         // Deduplicate meetings: group by start_time + title + first associated contact id, keep best outcome
@@ -3687,6 +3702,16 @@ export default function Dashboard(){
           if(tval)typeIds[tval]=true;
         }
         var typeList=Object.keys(typeIds).sort();
+
+        // Build contact map for associated contact info
+        var contactMap={};
+        for(var cmi=0;cmi<crmContacts.length;cmi++){contactMap[crmContacts[cmi].id]=crmContacts[cmi];}
+
+        function getContactForMeeting(m){
+          var assoc=m.associations&&m.associations.contacts&&m.associations.contacts.results;
+          if(!assoc||assoc.length===0)return null;
+          return contactMap[assoc[0].id]||null;
+        }
 
         // Filter meetings by selected owners
         var filteredMeetings=dedupMeetings;
@@ -3725,11 +3750,31 @@ export default function Dashboard(){
           });
         }
 
-        // Filter meetings by outcome
-        if(hsReunionOutcomeFilter){
+        // Filter meetings by outcome (multi-select)
+        if(hsReunionOutcomeFilter.length>0){
+          var outcomeSet={};for(var ofi=0;ofi<hsReunionOutcomeFilter.length;ofi++)outcomeSet[hsReunionOutcomeFilter[ofi]]=true;
           filteredMeetings=filteredMeetings.filter(function(m){
             var mo=m.properties&&m.properties.hs_meeting_outcome||"UNKNOWN";
-            return mo===hsReunionOutcomeFilter;
+            return outcomeSet[mo];
+          });
+        }
+
+        // Filter by Prioridad PLG (from associated contact, multi-select)
+        if(hsReunionPrioridadFilter.length>0){
+          var prioSet={};for(var pfi=0;pfi<hsReunionPrioridadFilter.length;pfi++)prioSet[hsReunionPrioridadFilter[pfi]]=true;
+          filteredMeetings=filteredMeetings.filter(function(m){
+            var c=getContactForMeeting(m);
+            var prio=c&&c.properties&&c.properties.prioridad_plg||"";
+            return prioSet[prio];
+          });
+        }
+
+        // Filter by Registro PLG = "PLG" (from associated contact)
+        if(hsReunionRegistroPlgFilter){
+          filteredMeetings=filteredMeetings.filter(function(m){
+            var c=getContactForMeeting(m);
+            var reg=c&&c.properties&&c.properties.registro_plg||"";
+            return reg==="PLG";
           });
         }
 
@@ -3777,55 +3822,141 @@ export default function Dashboard(){
           });
         }
 
-        // Build contact map for associated contact info
-        var contactMap={};
-        for(var cmi=0;cmi<crmContacts.length;cmi++){contactMap[crmContacts[cmi].id]=crmContacts[cmi];}
-
-        function getContactForMeeting(m){
-          var assoc=m.associations&&m.associations.contacts&&m.associations.contacts.results;
-          if(!assoc||assoc.length===0)return null;
-          return contactMap[assoc[0].id]||null;
-        }
-
         return (<>
           {crmLoading && <div style={{textAlign:"center",padding:40,color:C.muted,fontSize:15}}><div style={{width:30,height:30,border:"3px solid "+C.border,borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto 12px"}}/>Cargando datos de HubSpot...</div>}
           {crmError && <div style={{color:C.red,fontSize:13,fontWeight:600,marginBottom:16,background:C.lRed,padding:"12px 18px",borderRadius:10,border:"1px solid "+C.redBorder}}>Error: {crmError}</div>}
 
           {!crmLoading && crmInited && (<>
-            {/* Date filter + Owner filter */}
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
-              <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Fecha:</span>
-              <input type="date" value={hsReunionDateFrom} onChange={function(e){setHsReunionDateFrom(e.target.value);}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
-              <span style={{fontSize:12,color:C.muted}}>a</span>
-              <input type="date" value={hsReunionDateTo} onChange={function(e){setHsReunionDateTo(e.target.value);}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
-              {(hsReunionDateFrom||hsReunionDateTo)&&<button onClick={function(){setHsReunionDateFrom("");setHsReunionDateTo("");}} style={{background:C.rowAlt,color:C.muted,border:"1px solid "+C.border,borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Limpiar</button>}
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18,flexWrap:"wrap"}}>
-              <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Propietarios:</span>
-              <button onClick={function(){setHsReunionOwnerFilter([]);}} style={{background:hsReunionOwnerFilter.length===0?C.accent:C.rowAlt,color:hsReunionOwnerFilter.length===0?"#fff":C.muted,border:"1px solid "+(hsReunionOwnerFilter.length===0?C.accent:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Todos</button>
-              {ownerList.map(function(o){
-                var active=hsReunionOwnerFilter.indexOf(o.id)>=0;
-                return <button key={o.id} onClick={function(){toggleOwner(o.id);}} style={{background:active?C.purple:C.rowAlt,color:active?"#fff":C.sub,border:"1px solid "+(active?C.purple:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,transition:"all 0.15s ease"}}>{o.name}</button>;
-              })}
+            {/* Date filter with presets */}
+            {(function(){
+              function fmt(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+              function applyPreset(key){
+                var today=new Date();var from="";var to=fmt(today);
+                if(key==="hoy"){from=fmt(today);}
+                else if(key==="ayer"){var y=new Date(today);y.setDate(y.getDate()-1);from=fmt(y);to=fmt(y);}
+                else if(key==="esta_semana"){var ws=new Date(today);var dow=ws.getDay()||7;ws.setDate(ws.getDate()-(dow-1));from=fmt(ws);}
+                else if(key==="semana_pasada"){var ws2=new Date(today);var dow2=ws2.getDay()||7;ws2.setDate(ws2.getDate()-(dow2-1)-7);var we=new Date(ws2);we.setDate(we.getDate()+6);from=fmt(ws2);to=fmt(we);}
+                else if(key==="este_mes"){from=today.getFullYear()+"-"+String(today.getMonth()+1).padStart(2,"0")+"-01";}
+                else if(key==="mes_pasado"){var pm=new Date(today.getFullYear(),today.getMonth()-1,1);var pmEnd=new Date(today.getFullYear(),today.getMonth(),0);from=fmt(pm);to=fmt(pmEnd);}
+                else if(key==="todo"){from="";to="";setHsReunionDatePreset("todo");setHsReunionDateFrom("");setHsReunionDateTo("");return;}
+                else if(key==="custom"){setHsReunionDatePreset("custom");return;}
+                setHsReunionDatePreset(key);setHsReunionDateFrom(from);setHsReunionDateTo(to);
+              }
+              var presets=[{k:"hoy",l:"Hoy"},{k:"ayer",l:"Ayer"},{k:"esta_semana",l:"Esta semana"},{k:"semana_pasada",l:"Semana pasada"},{k:"este_mes",l:"Este mes"},{k:"mes_pasado",l:"Mes pasado"},{k:"todo",l:"Todo"},{k:"custom",l:"Personalizado"}];
+              return <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+                <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Fecha:</span>
+                <div style={{position:"relative"}}>
+                  <button onClick={function(e){e.stopPropagation();setHsReunionDropOpen(hsReunionDropOpen==="date"?"":"date");}} style={{background:hsReunionDatePreset!=="todo"?C.accent:C.rowAlt,color:hsReunionDatePreset!=="todo"?"#fff":C.sub,border:"1px solid "+(hsReunionDatePreset!=="todo"?C.accent:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,minWidth:110,textAlign:"left"}}>{(presets.find(function(p){return p.k===hsReunionDatePreset;})||{}).l||"Todo"} &#9662;</button>
+                  {hsReunionDropOpen==="date" && <div onClick={function(e){e.stopPropagation();}} style={{position:"absolute",top:"100%",left:0,marginTop:4,background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:6,zIndex:999,minWidth:170,boxShadow:"0 4px 16px rgba(0,0,0,0.15)"}}>
+                    {presets.map(function(p){
+                      var active=hsReunionDatePreset===p.k;
+                      return <label key={p.k} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",cursor:"pointer",borderRadius:6,fontSize:12,fontWeight:600,color:active?C.accent:C.text,background:active?C.rowAlt:"transparent"}} onClick={function(){applyPreset(p.k);if(p.k!=="custom")setHsReunionDropOpen("");}}>
+                        {active&&<span style={{fontSize:10,fontWeight:900}}>&#10003;</span>}{p.l}
+                      </label>;
+                    })}
+                  </div>}
+                </div>
+                {hsReunionDatePreset==="custom" && <>
+                  <input type="date" value={hsReunionDateFrom} onChange={function(e){setHsReunionDateFrom(e.target.value);}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:12,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+                  <span style={{fontSize:12,color:C.muted}}>a</span>
+                  <input type="date" value={hsReunionDateTo} onChange={function(e){setHsReunionDateTo(e.target.value);}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:12,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+                </>}
+                {hsReunionDatePreset!=="custom"&&hsReunionDatePreset!=="todo"&&hsReunionDateFrom && <span style={{fontSize:11,color:C.muted,background:C.rowAlt,padding:"3px 8px",borderRadius:6,fontFamily:mono}}>{hsReunionDateFrom}{hsReunionDateTo&&hsReunionDateTo!==hsReunionDateFrom?" → "+hsReunionDateTo:""}</span>}
+              </div>;
+            })()}
+            <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:14,flexWrap:"wrap"}}>
+              {/* Propietarios dropdown */}
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Propietario:</span>
+                <div style={{position:"relative"}}>
+                  <button onClick={function(e){e.stopPropagation();setHsReunionDropOpen(hsReunionDropOpen==="owner"?"":"owner");}} style={{background:hsReunionOwnerFilter.length>0?C.purple:C.rowAlt,color:hsReunionOwnerFilter.length>0?"#fff":C.sub,border:"1px solid "+(hsReunionOwnerFilter.length>0?C.purple:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,minWidth:90,textAlign:"left"}}>{hsReunionOwnerFilter.length===0?"Todos":hsReunionOwnerFilter.length===1?(crmOwnerMap[hsReunionOwnerFilter[0]]||hsReunionOwnerFilter[0]):hsReunionOwnerFilter.length+" selec."} &#9662;</button>
+                  {hsReunionDropOpen==="owner" && <div onClick={function(e){e.stopPropagation();}} style={{position:"absolute",top:"100%",left:0,marginTop:4,background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:6,zIndex:999,minWidth:180,boxShadow:"0 4px 16px rgba(0,0,0,0.15)"}}>
+                    {ownerList.map(function(o){
+                      var active=hsReunionOwnerFilter.indexOf(o.id)>=0;
+                      return <label key={o.id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",cursor:"pointer",borderRadius:6,fontSize:12,fontWeight:600,color:C.text,background:active?C.rowAlt:"transparent"}} onClick={function(e){e.stopPropagation();toggleOwner(o.id);}}>
+                        <span style={{width:16,height:16,borderRadius:4,border:"2px solid "+(active?C.purple:C.border),background:active?C.purple:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{active&&<span style={{color:"#fff",fontSize:10,fontWeight:900}}>&#10003;</span>}</span>
+                        {o.name}
+                      </label>;
+                    })}
+                    <div style={{borderTop:"1px solid "+C.border,marginTop:4,paddingTop:4}}>
+                      <button onClick={function(){setHsReunionOwnerFilter([]);setHsReunionDropOpen("");}} style={{background:"transparent",border:"none",color:C.muted,fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 8px",fontFamily:font,width:"100%",textAlign:"left"}}>Limpiar</button>
+                    </div>
+                  </div>}
+                </div>
+              </div>
+              <div style={{width:1,height:20,background:C.border}}/>
+              {/* Tipo dropdown */}
+              {typeList.length>0 && <>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Tipo:</span>
+                <div style={{position:"relative"}}>
+                  <button onClick={function(e){e.stopPropagation();setHsReunionDropOpen(hsReunionDropOpen==="type"?"":"type");}} style={{background:hsReunionTypeFilter.length>0?C.cyan:C.rowAlt,color:hsReunionTypeFilter.length>0?"#fff":C.sub,border:"1px solid "+(hsReunionTypeFilter.length>0?C.cyan:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,minWidth:90,textAlign:"left"}}>{hsReunionTypeFilter.length===0?"Todos":hsReunionTypeFilter.length===1?hsReunionTypeFilter[0]:hsReunionTypeFilter.length+" selec."} &#9662;</button>
+                  {hsReunionDropOpen==="type" && <div onClick={function(e){e.stopPropagation();}} style={{position:"absolute",top:"100%",left:0,marginTop:4,background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:6,zIndex:999,minWidth:180,boxShadow:"0 4px 16px rgba(0,0,0,0.15)"}}>
+                    {typeList.map(function(tv){
+                      var active=hsReunionTypeFilter.indexOf(tv)>=0;
+                      return <label key={tv} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",cursor:"pointer",borderRadius:6,fontSize:12,fontWeight:600,color:C.text,background:active?C.rowAlt:"transparent"}} onClick={function(e){e.stopPropagation();toggleType(tv);}}>
+                        <span style={{width:16,height:16,borderRadius:4,border:"2px solid "+(active?C.cyan:C.border),background:active?C.cyan:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{active&&<span style={{color:"#fff",fontSize:10,fontWeight:900}}>&#10003;</span>}</span>
+                        {tv}
+                      </label>;
+                    })}
+                    <div style={{borderTop:"1px solid "+C.border,marginTop:4,paddingTop:4}}>
+                      <button onClick={function(){setHsReunionTypeFilter([]);setHsReunionDropOpen("");}} style={{background:"transparent",border:"none",color:C.muted,fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 8px",fontFamily:font,width:"100%",textAlign:"left"}}>Limpiar</button>
+                    </div>
+                  </div>}
+                </div>
+              </div>
+              <div style={{width:1,height:20,background:C.border}}/>
+              </>}
+              {/* Outcome dropdown */}
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Outcome:</span>
+                <div style={{position:"relative"}}>
+                  <button onClick={function(e){e.stopPropagation();setHsReunionDropOpen(hsReunionDropOpen==="outcome"?"":"outcome");}} style={{background:hsReunionOutcomeFilter.length>0?C.accent:C.rowAlt,color:hsReunionOutcomeFilter.length>0?"#fff":C.sub,border:"1px solid "+(hsReunionOutcomeFilter.length>0?C.accent:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,minWidth:90,textAlign:"left"}}>{hsReunionOutcomeFilter.length===0?"Todos":hsReunionOutcomeFilter.length===1?(outcomeLabels[hsReunionOutcomeFilter[0]]||hsReunionOutcomeFilter[0]):hsReunionOutcomeFilter.length+" selec."} &#9662;</button>
+                  {hsReunionDropOpen==="outcome" && <div onClick={function(e){e.stopPropagation();}} style={{position:"absolute",top:"100%",left:0,marginTop:4,background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:6,zIndex:999,minWidth:180,boxShadow:"0 4px 16px rgba(0,0,0,0.15)"}}>
+                    {outcomeKeys.map(function(oc){
+                      var active=hsReunionOutcomeFilter.indexOf(oc)>=0;
+                      var clr=outcomeColor[oc]||C.muted;
+                      return <label key={oc} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",cursor:"pointer",borderRadius:6,fontSize:12,fontWeight:600,color:C.text,background:active?C.rowAlt:"transparent"}} onClick={function(e){e.stopPropagation();setHsReunionOutcomeFilter(function(prev){var idx=prev.indexOf(oc);if(idx>=0){var n=prev.slice();n.splice(idx,1);return n;}return prev.concat([oc]);});}}>
+                        <span style={{width:16,height:16,borderRadius:4,border:"2px solid "+(active?clr:C.border),background:active?clr:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{active&&<span style={{color:"#fff",fontSize:10,fontWeight:900}}>&#10003;</span>}</span>
+                        <span style={{width:8,height:8,borderRadius:"50%",background:clr,flexShrink:0}}/>
+                        {outcomeLabels[oc]||oc}
+                      </label>;
+                    })}
+                    <div style={{borderTop:"1px solid "+C.border,marginTop:4,paddingTop:4}}>
+                      <button onClick={function(){setHsReunionOutcomeFilter([]);setHsReunionDropOpen("");}} style={{background:"transparent",border:"none",color:C.muted,fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 8px",fontFamily:font,width:"100%",textAlign:"left"}}>Limpiar</button>
+                    </div>
+                  </div>}
+                </div>
+              </div>
+              <div style={{width:1,height:20,background:C.border}}/>
+              {/* Prioridad PLG dropdown */}
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Prioridad:</span>
+                <div style={{position:"relative"}}>
+                  <button onClick={function(e){e.stopPropagation();setHsReunionDropOpen(hsReunionDropOpen==="prio"?"":"prio");}} style={{background:hsReunionPrioridadFilter.length>0?C.purple:C.rowAlt,color:hsReunionPrioridadFilter.length>0?"#fff":C.sub,border:"1px solid "+(hsReunionPrioridadFilter.length>0?C.purple:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,minWidth:90,textAlign:"left"}}>{hsReunionPrioridadFilter.length===0?"Todos":hsReunionPrioridadFilter.length===1?hsReunionPrioridadFilter[0]:hsReunionPrioridadFilter.length+" selec."} &#9662;</button>
+                  {hsReunionDropOpen==="prio" && <div onClick={function(e){e.stopPropagation();}} style={{position:"absolute",top:"100%",left:0,marginTop:4,background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:6,zIndex:999,minWidth:160,boxShadow:"0 4px 16px rgba(0,0,0,0.15)"}}>
+                    {["ALTA","MEDIA","BAJA","SIN DATOS","No es ICP","No vende a\u00FAn"].map(function(pv){
+                      var active=hsReunionPrioridadFilter.indexOf(pv)>=0;
+                      return <label key={pv} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",cursor:"pointer",borderRadius:6,fontSize:12,fontWeight:600,color:C.text,background:active?C.rowAlt:"transparent"}} onClick={function(e){e.stopPropagation();setHsReunionPrioridadFilter(function(prev){var idx=prev.indexOf(pv);if(idx>=0){var n=prev.slice();n.splice(idx,1);return n;}return prev.concat([pv]);});}}>
+                        <span style={{width:16,height:16,borderRadius:4,border:"2px solid "+(active?C.purple:C.border),background:active?C.purple:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{active&&<span style={{color:"#fff",fontSize:10,fontWeight:900}}>&#10003;</span>}</span>
+                        {pv}
+                      </label>;
+                    })}
+                    <div style={{borderTop:"1px solid "+C.border,marginTop:4,paddingTop:4}}>
+                      <button onClick={function(){setHsReunionPrioridadFilter([]);setHsReunionDropOpen("");}} style={{background:"transparent",border:"none",color:C.muted,fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 8px",fontFamily:font,width:"100%",textAlign:"left"}}>Limpiar</button>
+                    </div>
+                  </div>}
+                </div>
+              </div>
+              <div style={{width:1,height:20,background:C.border}}/>
+              {/* Registro PLG toggle */}
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <button onClick={function(){setHsReunionRegistroPlgFilter(!hsReunionRegistroPlgFilter);}} style={{background:hsReunionRegistroPlgFilter?C.green:C.rowAlt,color:hsReunionRegistroPlgFilter?"#fff":C.sub,border:"1px solid "+(hsReunionRegistroPlgFilter?C.green:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,transition:"all 0.15s ease"}}>{hsReunionRegistroPlgFilter?"PLG ✓":"Solo PLG"}</button>
+              </div>
+              <div style={{width:1,height:20,background:C.border}}/>
+              {/* Count badge + refresh */}
               <span style={{fontSize:12,color:C.purple,fontWeight:700,background:C.lPurple,padding:"4px 10px",borderRadius:6}}>{sorted.length} reuniones</span>
-              {crmRefreshing && <span style={{fontSize:12,color:C.orange,fontWeight:600,display:"flex",alignItems:"center",gap:6}}><span style={{width:12,height:12,border:"2px solid "+C.orange,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>Actualizando datos de HubSpot...</span>}
-            </div>
-            {typeList.length>0 && <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18,flexWrap:"wrap"}}>
-              <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Tipo:</span>
-              <button onClick={function(){setHsReunionTypeFilter([]);}} style={{background:hsReunionTypeFilter.length===0?C.accent:C.rowAlt,color:hsReunionTypeFilter.length===0?"#fff":C.muted,border:"1px solid "+(hsReunionTypeFilter.length===0?C.accent:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Todos</button>
-              {typeList.map(function(tv){
-                var active=hsReunionTypeFilter.indexOf(tv)>=0;
-                return <button key={tv} onClick={function(){toggleType(tv);}} style={{background:active?C.cyan:C.rowAlt,color:active?"#fff":C.sub,border:"1px solid "+(active?C.cyan:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,transition:"all 0.15s ease"}}>{tv}</button>;
-              })}
-            </div>}
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18,flexWrap:"wrap"}}>
-              <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Outcome:</span>
-              <button onClick={function(){setHsReunionOutcomeFilter("");}} style={{background:!hsReunionOutcomeFilter?C.accent:C.rowAlt,color:!hsReunionOutcomeFilter?"#fff":C.muted,border:"1px solid "+(!hsReunionOutcomeFilter?C.accent:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Todos</button>
-              {outcomeKeys.map(function(oc){
-                var active=hsReunionOutcomeFilter===oc;
-                var clr=outcomeColor[oc]||C.muted;
-                return <button key={oc} onClick={function(){setHsReunionOutcomeFilter(active?"":oc);}} style={{background:active?clr:C.rowAlt,color:active?"#fff":C.sub,border:"1px solid "+(active?clr:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,transition:"all 0.15s ease"}}>{outcomeLabels[oc]||oc}</button>;
-              })}
+              {crmRefreshing && <span style={{fontSize:12,color:C.orange,fontWeight:600,display:"flex",alignItems:"center",gap:6}}><span style={{width:12,height:12,border:"2px solid "+C.orange,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>Actualizando...</span>}
             </div>
 
             {/* Outcome KPI cards */}
@@ -4127,7 +4258,7 @@ export default function Dashboard(){
         </>);
       })()}
 
-      {section==="inbound" && subTab==="ads" && (function(){
+      {section==="ads" && (function(){
         var ad=adsData||{};
         var adLeads=ad.leads||[];
         var adDaily=ad.daily||[];
