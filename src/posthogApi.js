@@ -57,3 +57,61 @@ export async function fetchPostHogSources(startDate, endDate) {
     byUtmSource: parseRows(results[1]),
   };
 }
+
+export async function fetchPostHogOrganizations(startDate, endDate) {
+  var start = startDate.toISOString().slice(0, 10);
+  var end = endDate.toISOString().slice(0, 10);
+
+  var totalQuery = "SELECT count() as total FROM groups WHERE index = 0 AND created_at >= '" + start + "' AND created_at < '" + end + "'";
+  var dailyQuery = "SELECT toDate(created_at) as day, count() as total FROM groups WHERE index = 0 AND created_at >= '" + start + "' AND created_at < '" + end + "' GROUP BY day ORDER BY day";
+  var listQuery = "SELECT properties.name as name, properties.$group_key as key, created_at FROM groups WHERE index = 0 AND created_at >= '" + start + "' AND created_at < '" + end + "' ORDER BY created_at DESC LIMIT 200";
+
+  var results = await Promise.all([
+    callPostHog("/api/projects/@current/query/", null, { query: { kind: "HogQLQuery", query: totalQuery } }),
+    callPostHog("/api/projects/@current/query/", null, { query: { kind: "HogQLQuery", query: dailyQuery } }),
+    callPostHog("/api/projects/@current/query/", null, { query: { kind: "HogQLQuery", query: listQuery } }),
+  ]);
+
+  var totalRows = results[0] && results[0].results || [];
+  var total = totalRows.length > 0 ? totalRows[0][0] : 0;
+
+  var dailyRows = results[1] && results[1].results || [];
+  var daily = dailyRows.map(function (r) { return { date: r[0], count: r[1] }; });
+
+  var listRows = results[2] && results[2].results || [];
+  var orgs = listRows.map(function (r) { return { name: r[0] || r[1] || "Sin nombre", key: r[1], createdAt: r[2] }; });
+
+  return { total: total, daily: daily, orgs: orgs };
+}
+
+export async function fetchPostHogPersonsByEmail(emails) {
+  if (!emails || emails.length === 0) return {};
+  // Batch in groups of 200 to avoid HogQL query size limits
+  var BATCH = 200;
+  var batches = [];
+  for (var i = 0; i < emails.length; i += BATCH) {
+    batches.push(emails.slice(i, i + BATCH));
+  }
+  var map = {};
+  var results = await Promise.all(batches.map(function (batch) {
+    var escaped = batch.map(function (e) { return "'" + e.replace(/'/g, "\\'") + "'"; }).join(",");
+    var query = "SELECT properties.email, properties.$initial_utm_source, properties.$initial_utm_medium, properties.$initial_utm_campaign, properties.$initial_referring_domain FROM persons WHERE properties.email IN (" + escaped + ")";
+    return callPostHog("/api/projects/@current/query/", null, { query: { kind: "HogQLQuery", query: query } });
+  }));
+  for (var r = 0; r < results.length; r++) {
+    var rows = results[r] && results[r].results || [];
+    for (var j = 0; j < rows.length; j++) {
+      var email = rows[j][0];
+      if (email) {
+        map[email.toLowerCase()] = {
+          utm_source: rows[j][1] || "",
+          utm_medium: rows[j][2] || "",
+          utm_campaign: rows[j][3] || "",
+          ref_domain: rows[j][4] || "",
+        };
+      }
+    }
+  }
+  console.log("[PostHog] Persons fetched:", Object.keys(map).length, "of", emails.length, "emails");
+  return map;
+}

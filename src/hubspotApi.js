@@ -479,12 +479,90 @@ export async function fetchGrowthLeads(sinceIso, pipelineId) {
     console.log("[HS Growth] Leads after filter (fallback):", filtered.length);
   }
 
+  // Step 2: Fetch lead→contact associations using v4 batch API
+  if (filtered.length > 0) {
+    console.log("[HS Growth] Fetching contact associations for", filtered.length, "leads...");
+    var assocMap = {};
+    var BATCH = 100;
+    var CONCURRENCY = 3;
+    var chunks = [];
+    for (var ci = 0; ci < filtered.length; ci += BATCH) {
+      chunks.push(filtered.slice(ci, ci + BATCH));
+    }
+    for (var gi = 0; gi < chunks.length; gi += CONCURRENCY) {
+      var group = chunks.slice(gi, gi + CONCURRENCY);
+      var promises = group.map(function(chunk) {
+        var inputs = chunk.map(function(lead) { return { id: lead.id }; });
+        return callHubSpot("/crm/v4/associations/0-136/0-1/batch/read", null, { inputs: inputs }).catch(function(e) {
+          console.warn("[HS Growth] Lead→Contact association batch error:", e.message);
+          return { results: [] };
+        });
+      });
+      var results = await Promise.all(promises);
+      for (var ri = 0; ri < results.length; ri++) {
+        var batchData = results[ri];
+        if (batchData.results) {
+          for (var r = 0; r < batchData.results.length; r++) {
+            var item = batchData.results[r];
+            var fromId = item.from && item.from.id;
+            if (fromId && item.to && item.to.length > 0) {
+              assocMap[fromId] = String(item.to[0].toObjectId);
+            }
+          }
+        }
+      }
+    }
+    var contactIds = [];
+    var seen = {};
+    for (var ai in assocMap) {
+      if (!seen[assocMap[ai]]) { contactIds.push(assocMap[ai]); seen[assocMap[ai]] = true; }
+    }
+    console.log("[HS Growth] Found", contactIds.length, "unique associated contacts");
+
+    // Step 3: Batch-read contacts to get prioridad_plg
+    var contactMap = {};
+    if (contactIds.length > 0) {
+      var cChunks = [];
+      for (var j = 0; j < contactIds.length; j += BATCH) {
+        cChunks.push(contactIds.slice(j, j + BATCH));
+      }
+      for (var cci = 0; cci < cChunks.length; cci += CONCURRENCY) {
+        var cGroup = cChunks.slice(cci, cci + CONCURRENCY);
+        var cPromises = cGroup.map(function(batch) {
+          var inputs = batch.map(function(id) { return { id: id }; });
+          return callHubSpot("/crm/v3/objects/contacts/batch/read", null, {
+            inputs: inputs,
+            properties: ["prioridad_plg"]
+          }).catch(function(e) {
+            console.warn("[HS Growth] Contact batch read error:", e.message);
+            return { results: [] };
+          });
+        });
+        var cResults = await Promise.all(cPromises);
+        for (var cri = 0; cri < cResults.length; cri++) {
+          if (cResults[cri].results) {
+            for (var cr = 0; cr < cResults[cri].results.length; cr++) {
+              var contact = cResults[cri].results[cr];
+              contactMap[contact.id] = (contact.properties && contact.properties.prioridad_plg) || "";
+            }
+          }
+        }
+      }
+      console.log("[HS Growth] Fetched prioridad_plg for", Object.keys(contactMap).length, "contacts");
+      var emptyCount=0;var filledCount=0;
+      for(var ck in contactMap){if(contactMap[ck])filledCount++;else emptyCount++;}
+      console.log("[HS Growth] prioridad_plg stats — con valor:", filledCount, "| vacío:", emptyCount);
+    }
+  }
+
   // Map lead properties into _contactProps for compatibility with UI code
   for (var i = 0; i < filtered.length; i++) {
     var lp = filtered[i].properties || {};
+    var assocContactId = assocMap && assocMap[filtered[i].id];
+    var contactPrio = assocContactId && contactMap && contactMap[assocContactId];
     filtered[i]._contactProps = {
       hubspot_owner_id: lp.hubspot_owner_id || "",
-      prioridad_plg: lp.prioridad_plg || "",
+      prioridad_plg: contactMap[assocMap[filtered[i].id]] || "",
       hs_analytics_source: lp.hs_contact_analytics_source || lp.fuente_original_de_trafico || "",
       hs_analytics_source_data_1: lp.hs_contact_analytics_source_data_1 || "",
       initial_utm_campaign: lp.fuente_yavendio || "",

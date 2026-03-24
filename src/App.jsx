@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Legend, PieChart, Pie, Sankey } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Legend, PieChart, Pie, Sankey, LabelList } from "recharts";
 import { processCSVRows, processInboundRows, parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
 import { fetchThreads, expandThreadMessages, fetchInboundThreads, expandInboundThreadMessages, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats, fetchAdsThreads, fetchInboundCached, fetchLifecyclePhonesCached } from "./metabaseApi";
 import { DEFAULT_MEETINGS as _RAW_MEETINGS } from "./defaultData";
@@ -10,9 +10,12 @@ import { fetchCampaigns, fetchCampaignGroups, fetchCampaignLeads, formatDateForA
 import { fetchAllContacts, fetchAllContactsWithPhone, fetchAllMeetings, fetchAllDeals, fetchDealPipelines, extractHubSpotPhones, getMeetingContactPhones, getMeetingContactIds, fetchMeetingsSince, fetchContactsByIds, fetchDealsSince, fetchLeadsSince, fetchGrowthLeads, fetchOwnersByIds } from "./hubspotApi";
 import { fetchAutomationDiagnostic, aggregateWorkflowStats, calculateMetrics } from "./brevoApi.js";
 import { resetAuthGuard } from "./authGuard";
-import { fetchPostHogSources } from "./posthogApi";
+import { fetchPostHogSources, fetchPostHogOrganizations, fetchPostHogPersonsByEmail } from "./posthogApi";
 
 function getFirstOfMonth(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";}
+function getCrmSinceDate(){var d=new Date();d.setMonth(d.getMonth()-3);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";}
+
+function toGMT5(date){var d=new Date(date);d.setTime(d.getTime()+(d.getTimezoneOffset()*60000)-(5*3600000));return d;}
 
 var font="'Source Sans 3', sans-serif";
 var mono="'JetBrains Mono', monospace";
@@ -272,7 +275,7 @@ function GrowthContactsModal({contacts,onClose,title}){
   });
 
   return (<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#00000044",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:20,animation:"fadeInModal 0.2s ease-out"}} onClick={onClose}>
-    <div style={{background:C.card,borderRadius:20,padding:28,maxWidth:1060,width:"100%",maxHeight:"92vh",boxShadow:"0 25px 60px #00000025",animation:"scaleInModal 0.2s ease-out"}} onClick={function(e){e.stopPropagation();}}>
+    <div style={{background:C.card,borderRadius:20,padding:28,maxWidth:1340,width:"100%",maxHeight:"92vh",boxShadow:"0 25px 60px #00000025",animation:"scaleInModal 0.2s ease-out"}} onClick={function(e){e.stopPropagation();}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
         <div>
           <div style={{fontSize:19,fontWeight:900}}>{title}</div>
@@ -284,7 +287,7 @@ function GrowthContactsModal({contacts,onClose,title}){
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,fontFamily:font}}>
           <thead>
             <tr style={{borderBottom:"2px solid "+C.border,position:"sticky",top:0,background:C.card,zIndex:1}}>
-              {["Lead","Stage","Email","Tel\u00E9fono","Prioridad","Fuente","Detalle fuente","Campa\u00F1a UTM","Industria","Fecha"].map(function(h){
+              {["Lead","Stage","Email","Prioridad","Fuente HS","PH UTM Source","PH UTM Medium","PH Ref Domain","Fuente Unificada","Industria","Fecha"].map(function(h){
                 return <th key={h} style={{textAlign:"left",padding:"10px 8px",fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{h}</th>;
               })}
             </tr>
@@ -300,37 +303,44 @@ function GrowthContactsModal({contacts,onClose,title}){
               var cd=lp.createdate||lp.hs_createdate||lead.createdAt;
               var dt=cd?new Date(cd):null;
               var dateStr=dt?String(dt.getDate()).padStart(2,"0")+"/"+String(dt.getMonth()+1).padStart(2,"0")+" "+String(dt.getHours()).padStart(2,"0")+":"+String(dt.getMinutes()).padStart(2,"0"):"";
+              var uniSrc=cp._source||"";var uniColor=srcColors[uniSrc]||C.muted;
               return <tr key={lead.id||idx} style={{borderBottom:"1px solid "+C.border,background:idx%2===0?"transparent":C.rowAlt}}>
                 <td style={{padding:"10px 8px",fontWeight:600,maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lp.hs_lead_name||"Lead #"+lead.id}</td>
                 <td style={{padding:"10px 8px",fontSize:12,color:C.sub}}>{lp.hs_pipeline_stage||"-"}</td>
                 <td style={{padding:"10px 8px",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cp.email||"-"}</td>
-                <td style={{padding:"10px 8px",fontFamily:mono,fontSize:12}}>{cp.phone||"-"}</td>
                 <td style={{padding:"10px 8px"}}>{prio?<span style={{background:prioColor+"15",color:prioColor,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,border:"1px solid "+prioColor+"30"}}>{prio}</span>:<span style={{color:C.muted}}>-</span>}</td>
                 <td style={{padding:"10px 8px"}}><span style={{background:srcColor+"15",color:srcColor,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,border:"1px solid "+srcColor+"30"}}>{src||"-"}</span></td>
-                <td style={{padding:"10px 8px",fontSize:12,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:C.sub}}>{cp.hs_analytics_source_data_1||"-"}</td>
-                <td style={{padding:"10px 8px",fontSize:12,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:C.sub}}>{cp.initial_utm_campaign||"-"}</td>
+                <td style={{padding:"10px 8px",fontSize:12,maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:C.sub}}>{cp.ph_utm_source||"-"}</td>
+                <td style={{padding:"10px 8px",fontSize:12,maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:C.sub}}>{cp.ph_utm_medium||"-"}</td>
+                <td style={{padding:"10px 8px",fontSize:12,maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:C.sub}}>{cp.ph_ref_domain||"-"}</td>
+                <td style={{padding:"10px 8px"}}><span style={{background:uniColor+"15",color:uniColor,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,border:"1px solid "+uniColor+"30"}}>{uniSrc||"-"}</span></td>
                 <td style={{padding:"10px 8px",fontSize:12,color:C.sub}}>{cp.industria||"-"}</td>
                 <td style={{padding:"10px 8px",fontSize:12,fontFamily:mono,color:C.muted,whiteSpace:"nowrap"}}>{dateStr}</td>
               </tr>;
             })}
-            {sorted.length===0 && <tr><td colSpan={10} style={{textAlign:"center",padding:30,color:C.muted}}>No hay leads para mostrar</td></tr>}
+            {sorted.length===0 && <tr><td colSpan={11} style={{textAlign:"center",padding:30,color:C.muted}}>No hay leads para mostrar</td></tr>}
           </tbody>
         </table>
       </div>
       {/* Summary stats at bottom */}
       <div style={{display:"flex",gap:12,marginTop:16,flexWrap:"wrap"}}>
         {(function(){
-          var pqlCount=0;var srcMap={};
+          var pqlCount=0;var srcMap={};var phSrcMap={};
           for(var i=0;i<sorted.length;i++){
             var pr=(sorted[i]._contactProps&&sorted[i]._contactProps.prioridad_plg||"").toLowerCase();
             if(pr==="alta"||pr==="media"||pr==="m\u00E9dia")pqlCount++;
             var sr=sorted[i]._contactProps&&sorted[i]._contactProps.hs_analytics_source||"UNKNOWN";
             if(!srcMap[sr])srcMap[sr]=0;srcMap[sr]++;
+            var phSr=sorted[i]._contactProps&&sorted[i]._contactProps._source||"UNKNOWN";
+            if(!phSrcMap[phSr])phSrcMap[phSr]=0;phSrcMap[phSr]++;
           }
           var topSources=Object.keys(srcMap).map(function(k){return{s:k,n:srcMap[k]};}).sort(function(a,b){return b.n-a.n;}).slice(0,4);
+          var topPhSources=Object.keys(phSrcMap).map(function(k){return{s:k,n:phSrcMap[k]};}).sort(function(a,b){return b.n-a.n;}).slice(0,4);
           return <>
             <div style={{background:C.lPurple,borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,color:C.purple}}>PQLs: {pqlCount} ({sorted.length>0?(pqlCount/sorted.length*100).toFixed(1):0}%)</div>
-            {topSources.map(function(ts){return <div key={ts.s} style={{background:C.rowAlt,borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:C.sub}}>{ts.s}: {ts.n}</div>;})}
+            {topSources.map(function(ts){return <div key={"hs-"+ts.s} style={{background:C.rowAlt,borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:C.sub}}>HS: {ts.s}: {ts.n}</div>;})}
+            <div style={{width:1,height:20,background:C.border}}/>
+            {topPhSources.map(function(ts){var clr=srcColors[ts.s]||C.muted;return <div key={"uni-"+ts.s} style={{background:clr+"12",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:clr,border:"1px solid "+clr+"25"}}>Unif: {ts.s}: {ts.n}</div>;})}
           </>;
         })()}
       </div>
@@ -553,9 +563,18 @@ export default function Dashboard(){
   const [growthMonth,setGrowthMonth]=useState(function(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");});
   const [showGoalsEditor,setShowGoalsEditor]=useState(false);
   const [growthModal,setGrowthModal]=useState(null);
+  const [growthChartDateFrom,setGrowthChartDateFrom]=useState("");
+  const [growthChartDateTo,setGrowthChartDateTo]=useState("");
+  const [growthChartDatePreset,setGrowthChartDatePreset]=useState("todo");
+  const [growthChartGranularity,setGrowthChartGranularity]=useState("daily");
+  const [growthChartDropOpen,setGrowthChartDropOpen]=useState("");
+  const [growthChartRegion,setGrowthChartRegion]=useState("all");
+  const [growthChartPrioFilter,setGrowthChartPrioFilter]=useState([]);
+  const [growthChartSourceFilter,setGrowthChartSourceFilter]=useState([]);
   const [posthogSources,setPosthogSources]=useState(null);
   const [posthogSourcesLoading,setPosthogSourcesLoading]=useState(false);
   const [posthogSourcesError,setPosthogSourcesError]=useState(null);
+  const [posthogOrgs,setPosthogOrgs]=useState(null);
 
   // Ads tab state
   const [adsLoading,setAdsLoading]=useState(false);
@@ -979,7 +998,7 @@ export default function Dashboard(){
   }
 
   // --- CRM (HubSpot) tab functions ---
-  var CRM_SINCE=getFirstOfMonth();
+  var CRM_SINCE=getCrmSinceDate();
   async function fetchHubSpotFresh(){
     console.log("[CRM] Fetching HubSpot since",CRM_SINCE,"...");
     var [meetingsRes,dealsRes,leadsRes,pipelines]=await Promise.all([
@@ -1187,7 +1206,7 @@ export default function Dashboard(){
       var year=parseInt(parts[0]);var mo=parseInt(parts[1])-1;
       var firstDay=new Date(year,mo,1);
       var lastDay=new Date(year,mo+1,0);
-      var now=new Date();
+      var now=toGMT5(new Date());
       var currentDay=now.getFullYear()===year&&now.getMonth()===mo?now.getDate():lastDay.getDate();
       var totalDays=lastDay.getDate();
 
@@ -1198,11 +1217,14 @@ export default function Dashboard(){
       var parallelResults=await Promise.allSettled([
         supabase.from("growth_goals").select("*").eq("month",selMonth),
         fetchGrowthLeads(firstDay.toISOString(),"808581652"),
-        fetchPostHogSources(firstDay,nextMonth)
+        fetchPostHogSources(firstDay,nextMonth),
+        fetchPostHogOrganizations(firstDay,nextMonth)
       ]);
       // PostHog is non-blocking — handle separately
       if(parallelResults[2].status==="fulfilled"){setPosthogSources(parallelResults[2].value);console.log("[Growth] PostHog sources loaded");}
       else{console.warn("[Growth] PostHog sources failed:",parallelResults[2].reason);setPosthogSourcesError(parallelResults[2].reason&&parallelResults[2].reason.message||"Error al cargar PostHog");}
+      if(parallelResults[3].status==="fulfilled"){setPosthogOrgs(parallelResults[3].value);console.log("[Growth] PostHog orgs loaded:",parallelResults[3].value.total);}
+      else{console.warn("[Growth] PostHog orgs failed:",parallelResults[3].reason);setPosthogOrgs(null);}
       setPosthogSourcesLoading(false);
       // Unwrap goals + leads (these are critical)
       if(parallelResults[0].status==="rejected")throw parallelResults[0].reason;
@@ -1219,16 +1241,45 @@ export default function Dashboard(){
       }
       setGrowthGoals(goals);
 
-      // Filter to selected month only (leads already filtered by date, but double-check month boundary)
+      // Filter to selected month only (leads already filtered by date, but double-check month boundary) — use GMT-5
       var monthEnd=new Date(year,mo+1,0,23,59,59,999);
       var filtered=leads.filter(function(l){
         var props=l.properties||{};
         var cd=props.createdate||props.hs_createdate||l.createdAt;
         if(!cd)return false;
-        var d=new Date(cd);
+        var d=toGMT5(new Date(cd));
         return d>=firstDay&&d<=monthEnd;
       });
       console.log("[Growth] Leads in month:",filtered.length);
+
+      // Enrich leads with PostHog person data (non-blocking)
+      var phPersons={};
+      try{
+        var emailSet={};
+        for(var ei=0;ei<filtered.length;ei++){
+          var em=filtered[ei]._contactProps&&filtered[ei]._contactProps.email;
+          if(em)emailSet[em.toLowerCase()]=true;
+        }
+        var uniqueEmails=Object.keys(emailSet);
+        if(uniqueEmails.length>0){
+          phPersons=await fetchPostHogPersonsByEmail(uniqueEmails);
+        }
+      }catch(phErr){console.warn("[Growth] PostHog persons enrichment failed:",phErr);}
+      // Always merge PostHog data + compute unified _source for every lead
+      for(var pi=0;pi<filtered.length;pi++){
+        if(!filtered[pi]._contactProps)continue;
+        var pEmail=(filtered[pi]._contactProps.email||"").toLowerCase();
+        var phData=phPersons[pEmail];
+        if(phData){
+          filtered[pi]._contactProps.ph_utm_source=phData.utm_source;
+          filtered[pi]._contactProps.ph_utm_medium=phData.utm_medium;
+          filtered[pi]._contactProps.ph_utm_campaign=phData.utm_campaign;
+          filtered[pi]._contactProps.ph_ref_domain=phData.ref_domain;
+        }
+        var phSrc=filtered[pi]._contactProps.ph_utm_source||"";
+        var hsSrc=filtered[pi]._contactProps.hs_analytics_source||"";
+        filtered[pi]._contactProps._source=phSrc||hsSrc||"UNKNOWN";
+      }
 
       // Split by region using associated contact's hubspot_owner_id
       var latamContacts=[];var brasilContacts=[];
@@ -3961,6 +4012,11 @@ export default function Dashboard(){
 
             {/* Outcome KPI cards */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:12,marginBottom:22}}>
+              <Cd style={{textAlign:"center",padding:"14px 10px",border:"2px solid "+C.accent+"55",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
+                <div style={{fontSize:11,fontWeight:700,color:C.accent,textTransform:"uppercase",letterSpacing:0.5}}>Total</div>
+                <div style={{fontSize:28,fontWeight:900,fontFamily:mono,color:C.accent,marginTop:4}}>{sorted.length}</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:2}}>reuniones</div>
+              </Cd>
               {outcomeKeys.map(function(oc){
                 var cnt=outcomeStats[oc]||0;if(cnt===0&&oc!=="COMPLETED"&&oc!=="SCHEDULED")return null;
                 var clr=outcomeColor[oc]||C.muted;
@@ -4479,6 +4535,190 @@ export default function Dashboard(){
               </Cd>
             </div>
 
+            {/* Total KPIs */}
+            {(function(){
+              var tSignups=(lat.signups||0)+(bra.signups||0);
+              var tPqls=(lat.pqls||0)+(bra.pqls||0);
+              var tSignupsGoal=(lat.signupsGoal||0)+(bra.signupsGoal||0);
+              var tPqlsGoal=(lat.pqlsGoal||0)+(bra.pqlsGoal||0);
+              var tAvanceSignups=tSignupsGoal>0?(tSignups/tSignupsGoal*100):0;
+              var tAvancePqls=tPqlsGoal>0?(tPqls/tPqlsGoal*100):0;
+              var tMetaSignups=(lat.metaToDateSignups||0)+(bra.metaToDateSignups||0);
+              var tMetaPqls=(lat.metaToDatePqls||0)+(bra.metaToDatePqls||0);
+              var tAvanceTDSignups=tMetaSignups>0?(tSignups/tMetaSignups*100):0;
+              var tAvanceTDPqls=tMetaPqls>0?(tPqls/tMetaPqls*100):0;
+              var allC=latC.concat(braC);
+              return <>
+                <Sec>Total (LATAM + Brasil)</Sec>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:22}}>
+                  {kpiCard("Signups",tSignups,tSignupsGoal,tAvanceSignups,C.accent,tMetaSignups,tAvanceTDSignups,function(){openModal("Total — Todos los Signups ("+allC.length+")",allC);})}
+                  {kpiCard("PQLs",tPqls,tPqlsGoal,tAvancePqls,C.purple,tMetaPqls,tAvanceTDPqls,function(){openModal("Total — PQLs ("+tPqls+")",filterPqls(allC));})}
+                  <Cd onClick={function(){openModal("Total — Todos los Signups ("+allC.length+")",allC);}} style={{cursor:"pointer"}}>
+                    <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Meta to Date (Signups)</div>
+                    <div style={{fontSize:32,fontWeight:900,color:C.cyan,fontFamily:mono,marginTop:6}}>{Math.round(tMetaSignups).toLocaleString()}</div>
+                    <div style={{fontSize:12,color:C.muted,marginTop:2}}>Pro-rata d{"\u00ED"}a {gd.currentDay||0} / {gd.totalDays||0}</div>
+                    <div style={{fontSize:11,color:C.accent,marginTop:8,fontWeight:600}}>Click para ver contactos {"\u2192"}</div>
+                  </Cd>
+                  <Cd onClick={function(){openModal("Total — Todos los Signups ("+allC.length+")",allC);}} style={{cursor:"pointer"}}>
+                    <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Avance to Date</div>
+                    <div style={{fontSize:32,fontWeight:900,color:tAvanceTDSignups>=100?C.green:C.red,fontFamily:mono,marginTop:6}}>{tAvanceTDSignups.toFixed(1)}%</div>
+                    <div style={{fontSize:12,color:C.muted,marginTop:2}}>{tAvanceTDSignups>=100?"Por encima de la meta":"Por debajo de la meta"}</div>
+                    <div style={{fontSize:11,color:C.accent,marginTop:8,fontWeight:600}}>Click para ver contactos {"\u2192"}</div>
+                  </Cd>
+                </div>
+              </>;
+            })()}
+
+            {/* Chart: Signups por Prioridad */}
+            {(function(){
+              var BRASIL_OID="79360573";
+              var allContacts=growthChartRegion==="latam"?latC:growthChartRegion==="brasil"?braC:latC.concat(braC);
+              function fmtD(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+              function applyChartPreset(key){
+                var today=new Date();var from="";var to=fmtD(today);
+                if(key==="hoy"){from=fmtD(today);}
+                else if(key==="ayer"){var y=new Date(today);y.setDate(y.getDate()-1);from=fmtD(y);to=fmtD(y);}
+                else if(key==="esta_semana"){var ws=new Date(today);var dow=ws.getDay()||7;ws.setDate(ws.getDate()-(dow-1));from=fmtD(ws);}
+                else if(key==="semana_pasada"){var ws2=new Date(today);var dow2=ws2.getDay()||7;ws2.setDate(ws2.getDate()-(dow2-1)-7);var we=new Date(ws2);we.setDate(we.getDate()+6);from=fmtD(ws2);to=fmtD(we);}
+                else if(key==="este_mes"){from=today.getFullYear()+"-"+String(today.getMonth()+1).padStart(2,"0")+"-01";}
+                else if(key==="mes_pasado"){var pm=new Date(today.getFullYear(),today.getMonth()-1,1);var pmEnd=new Date(today.getFullYear(),today.getMonth(),0);from=fmtD(pm);to=fmtD(pmEnd);}
+                else if(key==="todo"){from="";to="";setGrowthChartDatePreset("todo");setGrowthChartDateFrom("");setGrowthChartDateTo("");return;}
+                else if(key==="custom"){setGrowthChartDatePreset("custom");return;}
+                setGrowthChartDatePreset(key);setGrowthChartDateFrom(from);setGrowthChartDateTo(to);
+              }
+              var filtered=allContacts;
+              if(growthChartDateFrom){var dfrom=new Date(growthChartDateFrom+"T00:00:00");filtered=filtered.filter(function(c){var cd=c.properties&&(c.properties.createdate||c.properties.hs_createdate)||c.createdAt;return cd&&toGMT5(new Date(cd))>=dfrom;});}
+              if(growthChartDateTo){var dto=new Date(growthChartDateTo+"T23:59:59");filtered=filtered.filter(function(c){var cd=c.properties&&(c.properties.createdate||c.properties.hs_createdate)||c.createdAt;return cd&&toGMT5(new Date(cd))<=dto;});}
+              // Source filter
+              var allSourceKeys={};for(var si=0;si<allContacts.length;si++){var _s=allContacts[si]._contactProps&&allContacts[si]._contactProps._source||"UNKNOWN";if(!allSourceKeys[_s])allSourceKeys[_s]=true;}
+              var allSourceList=Object.keys(allSourceKeys).sort();
+              if(growthChartSourceFilter.length>0){filtered=filtered.filter(function(c){var s=c._contactProps&&c._contactProps._source||"UNKNOWN";return growthChartSourceFilter.indexOf(s)>=0;});}
+              function getKey(dateStr){
+                var d=toGMT5(new Date(dateStr));
+                if(growthChartGranularity==="daily") return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+                if(growthChartGranularity==="weekly"){var day=d.getDay()||7;var mon=new Date(d);mon.setDate(mon.getDate()-(day-1));return mon.getFullYear()+"-"+String(mon.getMonth()+1).padStart(2,"0")+"-"+String(mon.getDate()).padStart(2,"0");}
+                return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+              }
+              var allPrioKeys=["ALTA","MEDIA","BAJA","SIN DATOS","No es ICP","No vende aún"];
+              var prioColors={"ALTA":C.green,"MEDIA":C.yellow,"BAJA":C.red,"SIN DATOS":C.cyan,"No es ICP":"#4B5563","No vende aún":"#9CA3AF"};
+              function normPrio(raw){var lo=(raw||"").trim().toLowerCase();if(lo==="alta")return "ALTA";if(lo==="media"||lo==="média")return "MEDIA";if(lo==="baja"||lo==="baixa")return "BAJA";if(lo==="sin datos")return "SIN DATOS";if(lo==="no es icp")return "No es ICP";if(lo==="no vende aún"||lo==="no vende aun")return "No vende aún";return "SIN DATOS";}
+              var visiblePrio=growthChartPrioFilter.length>0?growthChartPrioFilter:allPrioKeys;
+              var buckets={};var contactsByPeriod={};
+              for(var i=0;i<filtered.length;i++){
+                var cd=filtered[i].properties&&(filtered[i].properties.createdate||filtered[i].properties.hs_createdate)||filtered[i].createdAt;
+                if(!cd)continue;
+                var pri=normPrio(filtered[i]._contactProps&&filtered[i]._contactProps.prioridad_plg||"");
+                if(visiblePrio.indexOf(pri)<0)continue;
+                var key=getKey(cd);
+                if(!buckets[key]){buckets[key]={};for(var pi=0;pi<allPrioKeys.length;pi++)buckets[key][allPrioKeys[pi]]=0;}
+                buckets[key][pri]++;
+                var cbpKey=key+"|"+pri;if(!contactsByPeriod[cbpKey])contactsByPeriod[cbpKey]=[];contactsByPeriod[cbpKey].push(filtered[i]);
+              }
+              var chartData=Object.keys(buckets).sort().map(function(k){var row={period:k};var t=0;for(var pi=0;pi<allPrioKeys.length;pi++){var v=buckets[k][allPrioKeys[pi]]||0;row[allPrioKeys[pi]]=v;if(visiblePrio.indexOf(allPrioKeys[pi])>=0)t+=v;}row._total=t;return row;});
+              function formatLabel(v){if(growthChartGranularity==="monthly"){var pp=v.split("-");return pp[1]+"/"+pp[0];}var pp=v.split("-");return pp[2]+"/"+pp[1];}
+              var presets=[{k:"hoy",l:"Hoy"},{k:"ayer",l:"Ayer"},{k:"esta_semana",l:"Esta semana"},{k:"semana_pasada",l:"Semana pasada"},{k:"este_mes",l:"Este mes"},{k:"mes_pasado",l:"Mes pasado"},{k:"todo",l:"Todo"},{k:"custom",l:"Personalizado"}];
+              var granOpts=[{k:"daily",l:"Diario"},{k:"weekly",l:"Semanal"},{k:"monthly",l:"Mensual"}];
+              var regionOpts=[{k:"all",l:"Todos"},{k:"latam",l:"LATAM"},{k:"brasil",l:"Brasil"}];
+              var totalFiltered=0;for(var ci=0;ci<chartData.length;ci++)for(var pi=0;pi<visiblePrio.length;pi++)totalFiltered+=chartData[ci][visiblePrio[pi]]||0;
+              return <Cd style={{marginBottom:22}}>
+                <Sec>Signups por Prioridad — Evoluci{"\u00F3"}n</Sec>
+                {/* Filters row */}
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+                  {/* Date preset */}
+                  <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Fecha:</span>
+                  <div style={{position:"relative"}}>
+                    <button onClick={function(e){e.stopPropagation();setGrowthChartDropOpen(growthChartDropOpen==="date"?"":"date");}} style={{background:growthChartDatePreset!=="todo"?C.accent:C.rowAlt,color:growthChartDatePreset!=="todo"?"#fff":C.sub,border:"1px solid "+(growthChartDatePreset!=="todo"?C.accent:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,minWidth:110,textAlign:"left"}}>{(presets.find(function(p){return p.k===growthChartDatePreset;})||{}).l||"Todo"} &#9662;</button>
+                    {growthChartDropOpen==="date" && <div onClick={function(e){e.stopPropagation();}} style={{position:"absolute",top:"100%",left:0,marginTop:4,background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:6,zIndex:999,minWidth:170,boxShadow:"0 4px 16px rgba(0,0,0,0.15)"}}>
+                      {presets.map(function(p){
+                        var active=growthChartDatePreset===p.k;
+                        return <label key={p.k} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",cursor:"pointer",borderRadius:6,fontSize:12,fontWeight:600,color:active?C.accent:C.text,background:active?C.rowAlt:"transparent"}} onClick={function(){applyChartPreset(p.k);if(p.k!=="custom")setGrowthChartDropOpen("");}}>
+                          {active&&<span style={{fontSize:10,fontWeight:900}}>&#10003;</span>}{p.l}
+                        </label>;
+                      })}
+                    </div>}
+                  </div>
+                  {growthChartDatePreset==="custom" && <>
+                    <input type="date" value={growthChartDateFrom} onChange={function(e){setGrowthChartDateFrom(e.target.value);}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:12,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+                    <span style={{fontSize:12,color:C.muted}}>a</span>
+                    <input type="date" value={growthChartDateTo} onChange={function(e){setGrowthChartDateTo(e.target.value);}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:12,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+                  </>}
+                  {growthChartDatePreset!=="custom"&&growthChartDatePreset!=="todo"&&growthChartDateFrom && <span style={{fontSize:11,color:C.muted,background:C.rowAlt,padding:"3px 8px",borderRadius:6,fontFamily:mono}}>{growthChartDateFrom}{growthChartDateTo&&growthChartDateTo!==growthChartDateFrom?" \u2192 "+growthChartDateTo:""}</span>}
+                  <div style={{width:1,height:20,background:C.border}}/>
+                  {/* Granularity */}
+                  <div style={{display:"flex",gap:4}}>
+                    {granOpts.map(function(g){
+                      var active=growthChartGranularity===g.k;
+                      return <button key={g.k} onClick={function(){setGrowthChartGranularity(g.k);}} style={{background:active?C.accent:C.rowAlt,color:active?"#fff":C.sub,border:"1px solid "+(active?C.accent:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>{g.l}</button>;
+                    })}
+                  </div>
+                  <div style={{width:1,height:20,background:C.border}}/>
+                  {/* Region filter */}
+                  <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Regi{"\u00F3"}n:</span>
+                  <div style={{display:"flex",gap:4}}>
+                    {regionOpts.map(function(r){
+                      var active=growthChartRegion===r.k;
+                      return <button key={r.k} onClick={function(){setGrowthChartRegion(r.k);}} style={{background:active?C.cyan:C.rowAlt,color:active?"#fff":C.sub,border:"1px solid "+(active?C.cyan:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>{r.l}</button>;
+                    })}
+                  </div>
+                  <div style={{width:1,height:20,background:C.border}}/>
+                  {/* Prioridad filter */}
+                  <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Prioridad:</span>
+                  <div style={{position:"relative"}}>
+                    <button onClick={function(e){e.stopPropagation();setGrowthChartDropOpen(growthChartDropOpen==="prio"?"":"prio");}} style={{background:growthChartPrioFilter.length>0?C.purple:C.rowAlt,color:growthChartPrioFilter.length>0?"#fff":C.sub,border:"1px solid "+(growthChartPrioFilter.length>0?C.purple:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,minWidth:90,textAlign:"left"}}>{growthChartPrioFilter.length===0?"Todas":growthChartPrioFilter.length===1?growthChartPrioFilter[0]:growthChartPrioFilter.length+" selec."} &#9662;</button>
+                    {growthChartDropOpen==="prio" && <div onClick={function(e){e.stopPropagation();}} style={{position:"absolute",top:"100%",left:0,marginTop:4,background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:6,zIndex:999,minWidth:170,boxShadow:"0 4px 16px rgba(0,0,0,0.15)"}}>
+                      {allPrioKeys.map(function(pv){
+                        var active=growthChartPrioFilter.indexOf(pv)>=0;
+                        var clr=prioColors[pv];
+                        return <label key={pv} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",cursor:"pointer",borderRadius:6,fontSize:12,fontWeight:600,color:C.text,background:active?C.rowAlt:"transparent"}} onClick={function(e){e.stopPropagation();setGrowthChartPrioFilter(function(prev){var idx=prev.indexOf(pv);if(idx>=0){var n=prev.slice();n.splice(idx,1);return n;}return prev.concat([pv]);});}}>
+                          <span style={{width:16,height:16,borderRadius:4,border:"2px solid "+(active?clr:C.border),background:active?clr:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{active&&<span style={{color:"#fff",fontSize:10,fontWeight:900}}>&#10003;</span>}</span>
+                          <span style={{width:8,height:8,borderRadius:"50%",background:clr,flexShrink:0}}/>
+                          {pv}
+                        </label>;
+                      })}
+                      <div style={{borderTop:"1px solid "+C.border,marginTop:4,paddingTop:4}}>
+                        <button onClick={function(){setGrowthChartPrioFilter([]);setGrowthChartDropOpen("");}} style={{background:"transparent",border:"none",color:C.muted,fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 8px",fontFamily:font,width:"100%",textAlign:"left"}}>Limpiar</button>
+                      </div>
+                    </div>}
+                  </div>
+                  <div style={{width:1,height:20,background:C.border}}/>
+                  {/* Source filter */}
+                  <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Fuente:</span>
+                  <div style={{position:"relative"}}>
+                    <button onClick={function(e){e.stopPropagation();setGrowthChartDropOpen(growthChartDropOpen==="source"?"":"source");}} style={{background:growthChartSourceFilter.length>0?C.green:C.rowAlt,color:growthChartSourceFilter.length>0?"#fff":C.sub,border:"1px solid "+(growthChartSourceFilter.length>0?C.green:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,minWidth:90,textAlign:"left"}}>{growthChartSourceFilter.length===0?"Todas":growthChartSourceFilter.length===1?growthChartSourceFilter[0]:growthChartSourceFilter.length+" selec."} &#9662;</button>
+                    {growthChartDropOpen==="source" && <div onClick={function(e){e.stopPropagation();}} style={{position:"absolute",top:"100%",left:0,marginTop:4,background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:6,zIndex:999,minWidth:200,maxHeight:280,overflowY:"auto",boxShadow:"0 4px 16px rgba(0,0,0,0.15)"}}>
+                      {allSourceList.map(function(sv){
+                        var active=growthChartSourceFilter.indexOf(sv)>=0;
+                        var clr=SOURCE_COLORS[sv]||C.muted;
+                        return <label key={sv} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",cursor:"pointer",borderRadius:6,fontSize:12,fontWeight:600,color:C.text,background:active?C.rowAlt:"transparent"}} onClick={function(e){e.stopPropagation();setGrowthChartSourceFilter(function(prev){var idx=prev.indexOf(sv);if(idx>=0){var n=prev.slice();n.splice(idx,1);return n;}return prev.concat([sv]);});}}>
+                          <span style={{width:16,height:16,borderRadius:4,border:"2px solid "+(active?clr:C.border),background:active?clr:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{active&&<span style={{color:"#fff",fontSize:10,fontWeight:900}}>&#10003;</span>}</span>
+                          <span style={{width:8,height:8,borderRadius:"50%",background:clr,flexShrink:0}}/>
+                          {sv}
+                        </label>;
+                      })}
+                      <div style={{borderTop:"1px solid "+C.border,marginTop:4,paddingTop:4}}>
+                        <button onClick={function(){setGrowthChartSourceFilter([]);setGrowthChartDropOpen("");}} style={{background:"transparent",border:"none",color:C.muted,fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 8px",fontFamily:font,width:"100%",textAlign:"left"}}>Limpiar</button>
+                      </div>
+                    </div>}
+                  </div>
+                  {/* Total badge */}
+                  <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6,marginLeft:4}}>{totalFiltered} signups</span>
+                </div>
+                {/* Chart */}
+                {chartData.length>0 ? <div style={{height:300}}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData} margin={{left:-15,right:5,top:22,bottom:0}} style={{cursor:"pointer"}}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                      <XAxis dataKey="period" tick={{fontSize:11,fill:C.muted}} tickFormatter={formatLabel}/>
+                      <YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
+                      <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}} labelFormatter={formatLabel}/>
+                      <Legend wrapperStyle={{fontSize:12}}/>
+                      {visiblePrio.map(function(pk,idx){var isLast=idx===visiblePrio.length-1;return <Bar key={pk} dataKey={pk} stackId="prio" fill={prioColors[pk]} radius={isLast?[4,4,0,0]:0} cursor="pointer" onClick={function(data){if(data&&data.period){var cbpKey=data.period+"|"+pk;var leads=contactsByPeriod[cbpKey]||[];openModal(formatLabel(data.period)+" \u2014 "+pk+" ("+leads.length+" leads)",leads);}}}>{isLast && <LabelList dataKey="_total" position="top" style={{fontSize:11,fontWeight:700,fill:C.sub,fontFamily:mono}}/>}</Bar>;})}
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div> : <div style={{fontSize:13,color:C.muted,padding:20,textAlign:"center"}}>Sin datos para el per{"\u00ED"}odo seleccionado</div>}
+              </Cd>;
+            })()}
+
             {/* Sources breakdown */}
             <Sec>Breakdown por Fuente</Sec>
             <div style={{display:"flex",gap:16,marginBottom:22,flexWrap:"wrap"}}>
@@ -4486,28 +4726,26 @@ export default function Dashboard(){
               {sourceChart(braS,"Brasil Sources",braC,"Brasil")}
             </div>
 
-            {/* Resumen para compartir */}
-            <Cd style={{marginBottom:22}}>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-                <Sec>Resumen para Compartir</Sec>
-                <button onClick={function(){navigator.clipboard.writeText(gd.summary||"");}} style={{background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"6px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font}}>Copiar</button>
-              </div>
-              <pre style={{background:C.rowBg,borderRadius:10,padding:16,fontSize:12,fontFamily:mono,color:C.sub,whiteSpace:"pre-wrap",lineHeight:1.6,margin:0,border:"1px solid "+C.border}}>{gd.summary||""}</pre>
-            </Cd>
-
-            {/* PostHog sources comparison */}
-            <Sec>Fuentes de Leads — PostHog vs HubSpot</Sec>
+            {/* PostHog sources comparison — split by region */}
+            <Sec>Fuentes de Leads — PostHog (por regi{"\u00F3"}n)</Sec>
             {posthogSourcesLoading && <div style={{textAlign:"center",padding:20,color:C.muted,fontSize:13}}>Cargando datos de PostHog...</div>}
             {posthogSourcesError && <div style={{color:C.red,fontSize:12,marginBottom:12,background:C.lRed,padding:"8px 14px",borderRadius:8,border:"1px solid "+C.redBorder}}>PostHog: {posthogSourcesError}</div>}
-            {posthogSources && (function(){
-              var phDom=posthogSources.byDomain||[];
-              var phUtm=posthogSources.byUtmSource||[];
-              var allHs=[].concat(latS,braS);
-              var hsMap={};
-              for(var hi=0;hi<allHs.length;hi++){var hk=allHs[hi].source;hsMap[hk]=(hsMap[hk]||0)+allHs[hi].count;}
-              var hsCombined=Object.keys(hsMap).map(function(k){return{source:k,count:hsMap[k]};}).sort(function(a,b){return b.count-a.count;});
+            {(function(){
+              function phBreakdown(arr,field){
+                var map={};
+                for(var bi=0;bi<arr.length;bi++){
+                  var v=arr[bi]._contactProps&&arr[bi]._contactProps[field]||"";
+                  if(!v)continue;
+                  if(!map[v])map[v]=0;map[v]++;
+                }
+                return Object.keys(map).map(function(k){return{source:k,count:map[k]};}).sort(function(a,b){return b.count-a.count;}).slice(0,20);
+              }
+              var latUtm=phBreakdown(latC,"ph_utm_source");
+              var braUtm=phBreakdown(braC,"ph_utm_source");
+              var latDom=phBreakdown(latC,"ph_ref_domain");
+              var braDom=phBreakdown(braC,"ph_ref_domain");
 
-              function phBar(items,label){
+              function phBar(items,label,color){
                 var max=items.length>0?items[0].count:1;
                 return <Cd style={{flex:1,minWidth:280}}>
                   <div style={{fontSize:13,fontWeight:700,color:C.sub,marginBottom:12}}>{label}</div>
@@ -4516,38 +4754,124 @@ export default function Dashboard(){
                     return <div key={s.source} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
                       <div style={{width:150,fontSize:11,fontWeight:600,color:C.sub,textAlign:"right",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={s.source}>{s.source}</div>
                       <div style={{flex:1,background:C.barTrack,borderRadius:6,height:20,overflow:"hidden"}}>
-                        <div style={{height:"100%",borderRadius:6,background:C.cyan,width:pct+"%",transition:"width 0.3s ease"}}/>
+                        <div style={{height:"100%",borderRadius:6,background:color,width:pct+"%",transition:"width 0.3s ease"}}/>
                       </div>
                       <div style={{width:45,fontSize:12,fontWeight:800,fontFamily:mono,color:C.text}}>{s.count}</div>
                     </div>;
                   })}
-                  {items.length===0 && <div style={{color:C.muted,fontSize:12,textAlign:"center",padding:16}}>Sin datos</div>}
+                  {items.length===0 && <div style={{color:C.muted,fontSize:12,textAlign:"center",padding:16}}>Sin datos de PostHog</div>}
                 </Cd>;
               }
 
-              function hsBar(items,label){
-                var max=items.length>0?items[0].count:1;
-                return <Cd style={{flex:1,minWidth:280}}>
-                  <div style={{fontSize:13,fontWeight:700,color:C.sub,marginBottom:12}}>{label}</div>
-                  {items.map(function(s){
-                    var pct=max>0?(s.count/max*100):0;
-                    var clr=SOURCE_COLORS[s.source]||C.muted;
-                    return <div key={s.source} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
-                      <div style={{width:150,fontSize:11,fontWeight:600,color:C.sub,textAlign:"right",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.source}</div>
-                      <div style={{flex:1,background:C.barTrack,borderRadius:6,height:20,overflow:"hidden"}}>
-                        <div style={{height:"100%",borderRadius:6,background:clr,width:pct+"%",transition:"width 0.3s ease"}}/>
-                      </div>
-                      <div style={{width:45,fontSize:12,fontWeight:800,fontFamily:mono,color:C.text}}>{s.count}</div>
-                    </div>;
-                  })}
-                </Cd>;
-              }
+              return <>
+                <div style={{display:"flex",gap:16,marginBottom:16,flexWrap:"wrap"}}>
+                  {phBar(latUtm,"LATAM — PH UTM Source",C.cyan)}
+                  {phBar(braUtm,"Brasil — PH UTM Source",C.green)}
+                </div>
+                <div style={{display:"flex",gap:16,marginBottom:22,flexWrap:"wrap"}}>
+                  {phBar(latDom,"LATAM — PH Referring Domain",C.purple)}
+                  {phBar(braDom,"Brasil — PH Referring Domain",C.orange)}
+                </div>
+              </>;
+            })()}
 
-              return <div style={{display:"flex",gap:16,marginBottom:22,flexWrap:"wrap"}}>
-                {phBar(phDom,"PostHog — Referring Domain")}
-                {phBar(phUtm,"PostHog — UTM Source")}
-                {hsBar(hsCombined,"HubSpot — Analytics Source (Total)")}
-              </div>;
+            {/* PostHog Organizations */}
+            <Sec>Organizaciones Creadas — PostHog vs HubSpot Signups</Sec>
+            {posthogSourcesLoading && <div style={{textAlign:"center",padding:20,color:C.muted,fontSize:13}}>Cargando organizaciones...</div>}
+            {posthogOrgs && (function(){
+              var tSignups=(lat.signups||0)+(bra.signups||0);
+              var convRate=posthogOrgs.total>0?((tSignups/posthogOrgs.total)*100).toFixed(1):"0";
+
+              // Build daily comparison: PostHog orgs vs HubSpot signups per day
+              var allC=latC.concat(braC);
+              var hsDailyMap={};
+              for(var hdi=0;hdi<allC.length;hdi++){
+                var cDate=allC[hdi]._contactProps&&allC[hdi]._contactProps.createdate;
+                if(!cDate)continue;
+                var dk=new Date(cDate).toISOString().slice(0,10);
+                hsDailyMap[dk]=(hsDailyMap[dk]||0)+1;
+              }
+              var phDailyMap={};
+              for(var pdi=0;pdi<posthogOrgs.daily.length;pdi++){
+                var pd=posthogOrgs.daily[pdi];
+                phDailyMap[pd.date]=pd.count;
+              }
+              var allDays={};
+              var pdKeys=Object.keys(phDailyMap);for(var ki=0;ki<pdKeys.length;ki++)allDays[pdKeys[ki]]=true;
+              var hdKeys=Object.keys(hsDailyMap);for(var ki2=0;ki2<hdKeys.length;ki2++)allDays[hdKeys[ki2]]=true;
+              var dailyCompare=Object.keys(allDays).sort().map(function(d){return{date:d,posthog:phDailyMap[d]||0,hubspot:hsDailyMap[d]||0};});
+
+              return <>
+                {/* KPI cards */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:22}}>
+                  <Cd style={{textAlign:"center",border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.cyan,textTransform:"uppercase",letterSpacing:0.5}}>Orgs PostHog</div>
+                    <div style={{fontSize:32,fontWeight:900,fontFamily:mono,color:C.cyan,marginTop:6}}>{posthogOrgs.total}</div>
+                    <div style={{fontSize:11,color:C.muted,marginTop:2}}>organizaciones creadas</div>
+                  </Cd>
+                  <Cd style={{textAlign:"center",border:"2px solid "+C.accent+"44"}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.accent,textTransform:"uppercase",letterSpacing:0.5}}>Signups HubSpot</div>
+                    <div style={{fontSize:32,fontWeight:900,fontFamily:mono,color:C.accent,marginTop:6}}>{tSignups}</div>
+                    <div style={{fontSize:11,color:C.muted,marginTop:2}}>contactos creados</div>
+                  </Cd>
+                  <Cd style={{textAlign:"center",border:"2px solid "+C.purple+"44"}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.purple,textTransform:"uppercase",letterSpacing:0.5}}>Conversi{"\u00F3"}n</div>
+                    <div style={{fontSize:32,fontWeight:900,fontFamily:mono,color:C.purple,marginTop:6}}>{convRate}%</div>
+                    <div style={{fontSize:11,color:C.muted,marginTop:2}}>signups / orgs</div>
+                  </Cd>
+                  <Cd style={{textAlign:"center",border:"2px solid "+C.orange+"44"}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.orange,textTransform:"uppercase",letterSpacing:0.5}}>Diferencia</div>
+                    <div style={{fontSize:32,fontWeight:900,fontFamily:mono,color:C.orange,marginTop:6}}>{posthogOrgs.total-tSignups}</div>
+                    <div style={{fontSize:11,color:C.muted,marginTop:2}}>orgs sin signup en HS</div>
+                  </Cd>
+                </div>
+
+                {/* Daily comparison chart */}
+                {dailyCompare.length>1 && <Cd style={{marginBottom:22}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.sub,marginBottom:12}}>Orgs PostHog vs Signups HubSpot por D{"\u00ED"}a</div>
+                  <div style={{height:280}}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={dailyCompare} margin={{left:-15,right:5,top:5,bottom:0}}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                        <XAxis dataKey="date" tick={{fontSize:11,fill:C.muted}} tickFormatter={function(v){var pp=v.split("-");return pp[2]+"/"+pp[1];}}/>
+                        <YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
+                        <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}} labelFormatter={function(v){var pp=v.split("-");return pp[2]+"/"+pp[1]+"/"+pp[0];}}/>
+                        <Legend wrapperStyle={{fontSize:12}}/>
+                        <Bar dataKey="posthog" name="Orgs PostHog" fill={C.cyan} radius={[4,4,0,0]}/>
+                        <Bar dataKey="hubspot" name="Signups HubSpot" fill={C.accent} radius={[4,4,0,0]}/>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </Cd>}
+
+                {/* Organizations list */}
+                {posthogOrgs.orgs.length>0 && <Cd style={{marginBottom:22}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+                    <div style={{fontSize:13,fontWeight:700,color:C.sub}}>Organizaciones Recientes ({posthogOrgs.orgs.length})</div>
+                  </div>
+                  <div style={{maxHeight:400,overflowY:"auto",borderRadius:10,border:"1px solid "+C.border}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,fontFamily:font}}>
+                      <thead>
+                        <tr style={{background:C.rowAlt,position:"sticky",top:0,zIndex:1}}>
+                          <th style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>Organizaci{"\u00F3"}n</th>
+                          <th style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>Key</th>
+                          <th style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>Fecha</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {posthogOrgs.orgs.map(function(o,idx){
+                          var cd=o.createdAt?new Date(o.createdAt):null;
+                          return <tr key={o.key+"-"+idx} style={{background:idx%2===0?C.card:C.rowBg,borderBottom:"1px solid "+C.border+"44"}}>
+                            <td style={{padding:"8px 12px",fontWeight:600,color:C.text}}>{o.name}</td>
+                            <td style={{padding:"8px 12px",fontSize:12,color:C.muted,fontFamily:mono}}>{o.key||"\u2014"}</td>
+                            <td style={{padding:"8px 12px",fontSize:12,color:C.sub,fontFamily:mono}}>{cd?cd.toLocaleDateString("es",{day:"2-digit",month:"2-digit",year:"numeric"})+" "+cd.toLocaleTimeString("es",{hour:"2-digit",minute:"2-digit"}):"\u2014"}</td>
+                          </tr>;
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </Cd>}
+              </>;
             })()}
           </>)}
 
