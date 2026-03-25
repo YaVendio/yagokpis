@@ -1,13 +1,15 @@
-import { supabase } from "./supabase";
+import { supabase, retryQuery } from "./supabase";
 
 var PAGE_SIZE = 1000;
 
-// Generic paginated fetch — works around PostgREST max-rows (1000)
+// Generic paginated fetch with retry — works around PostgREST max-rows (1000)
 async function fetchAllRows(queryBuilder) {
   var all = [];
   var from = 0;
   while (true) {
-    var { data, error } = await queryBuilder.range(from, from + PAGE_SIZE - 1);
+    var { data, error } = await retryQuery(function() {
+      return queryBuilder.range(from, from + PAGE_SIZE - 1);
+    });
     if (error) { return { rows: all, error: error }; }
     if (!data || data.length === 0) break;
     for (var i = 0; i < data.length; i++) all.push(data[i]);

@@ -4,7 +4,7 @@ import { processCSVRows, processInboundRows, parseDatetime, TOPIC_KEYWORDS } fro
 import { fetchThreads, expandThreadMessages, fetchInboundThreads, expandInboundThreadMessages, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats, fetchResponseStatsCached, fetchAdsThreads, fetchInboundCached, fetchLifecyclePhonesCached } from "./metabaseApi";
 import { loadOutboundThreads, loadInboundThreads, loadLifecyclePhones } from "./metabaseSync";
 import { DEFAULT_MEETINGS as _RAW_MEETINGS } from "./defaultData";
-import { supabase } from "./supabase";
+import { supabase, retryQuery } from "./supabase";
 import InfoTip from "./components/InfoTip";
 import TIPS from "./tooltips";
 import { fetchCampaigns, fetchCampaignGroups, fetchCampaignLeads, formatDateForApi, formatEndDateForApi } from "./gruposApi";
@@ -799,7 +799,7 @@ export default function Dashboard(){
 
   // Load config from Supabase on mount
   useEffect(function(){
-    supabase.from("template_config").select("template_name,category,region,ab_group,sort_order,hidden,qualification")
+    retryQuery(function(){ return supabase.from("template_config").select("template_name,category,region,ab_group,sort_order,hidden,qualification"); })
       .then(function(res){
         if(res.data){
           var cfg={};
@@ -1322,7 +1322,7 @@ export default function Dashboard(){
       setPosthogSourcesLoading(true);setPosthogSourcesError(null);
       var nextMonth=new Date(year,mo+1,1);
       var parallelResults=await Promise.allSettled([
-        supabase.from("growth_goals").select("*").eq("month",selMonth),
+        retryQuery(function(){ return supabase.from("growth_goals").select("*").eq("month",selMonth); }),
         fetchGrowthLeads(firstDay.toISOString(),"808581652"),
         fetchPostHogSources(firstDay,nextMonth),
         fetchPostHogOrganizations(firstDay,nextMonth)

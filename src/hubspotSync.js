@@ -1,13 +1,15 @@
-import { supabase } from "./supabase";
+import { supabase, retryQuery } from "./supabase";
 
 var PAGE_SIZE = 1000;
 
-// Generic paginated fetch — works around PostgREST max-rows (1000)
+// Generic paginated fetch with retry — works around PostgREST max-rows (1000)
 async function fetchAllRows(queryBuilder) {
   var all = [];
   var from = 0;
   while (true) {
-    var { data, error } = await queryBuilder.range(from, from + PAGE_SIZE - 1);
+    var { data, error } = await retryQuery(function() {
+      return queryBuilder.range(from, from + PAGE_SIZE - 1);
+    });
     if (error) { return { rows: all, error: error }; }
     if (!data || data.length === 0) break;
     for (var i = 0; i < data.length; i++) all.push(data[i]);
@@ -32,9 +34,9 @@ export async function loadContactsFromDb(contactIds) {
   var all = [];
   for (var i = 0; i < contactIds.length; i += 300) {
     var chunk = contactIds.slice(i, i + 300);
-    var { data, error } = await supabase.from("hs_contacts")
-      .select("data")
-      .in("id", chunk);
+    var { data, error } = await retryQuery(function() {
+      return supabase.from("hs_contacts").select("data").in("id", chunk);
+    });
     if (error) { console.error("[sync] contacts error:", error.message); continue; }
     if (data) for (var j = 0; j < data.length; j++) all.push(data[j]);
   }
@@ -60,7 +62,9 @@ export async function loadLeadsFromDb(sinceIso, pipelineId) {
 
 // Load owners from Supabase hs_owners table → returns { id: name } map
 export async function loadOwnersFromDb() {
-  var { data, error } = await supabase.from("hs_owners").select("id, name");
+  var { data, error } = await retryQuery(function() {
+    return supabase.from("hs_owners").select("id, name");
+  });
   if (error) { console.error("[sync] owners error:", error.message); return {}; }
   var map = {};
   for (var i = 0; i < (data || []).length; i++) {
@@ -71,10 +75,9 @@ export async function loadOwnersFromDb() {
 
 // Load pipelines from Supabase hs_pipelines table
 export async function loadPipelinesFromDb() {
-  var { data, error } = await supabase.from("hs_pipelines")
-    .select("data")
-    .eq("id", "deals")
-    .single();
+  var { data, error } = await retryQuery(function() {
+    return supabase.from("hs_pipelines").select("data").eq("id", "deals").single();
+  });
   if (error) { console.error("[sync] pipelines error:", error.message); return null; }
   return data ? data.data : null;
 }
@@ -85,9 +88,9 @@ export async function loadContactsByEmail(emails) {
   var all = [];
   for (var i = 0; i < emails.length; i += 50) {
     var chunk = emails.slice(i, i + 50);
-    var { data, error } = await supabase.from("hs_contacts")
-      .select("data")
-      .in("data->properties->>email", chunk);
+    var { data, error } = await retryQuery(function() {
+      return supabase.from("hs_contacts").select("data").in("data->properties->>email", chunk);
+    });
     if (error) { console.error("[sync] email contacts error:", error.message); continue; }
     if (data) for (var j = 0; j < data.length; j++) all.push(data[j]);
   }
