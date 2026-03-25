@@ -826,6 +826,40 @@ export function expandThreadMessages(threads) {
   return rows;
 }
 
+var STATS_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+
+export async function fetchResponseStatsCached(since) {
+  var cacheKey = "response_stats_" + since;
+  try {
+    var cacheRes = await supabase
+      .from("hubspot_cache")
+      .select("data, updated_at")
+      .eq("key", cacheKey)
+      .single();
+    if (cacheRes.data && cacheRes.data.data) {
+      var age = Date.now() - new Date(cacheRes.data.updated_at).getTime();
+      if (age < STATS_CACHE_TTL) {
+        console.log("[ResponseStats] Using cache (" + Math.round(age / 1000) + "s old)");
+        return cacheRes.data.data;
+      }
+    }
+  } catch (e) { /* cache miss */ }
+
+  console.log("[ResponseStats] Cache miss, fetching from Metabase...");
+  var stats = await fetchResponseStats(since);
+
+  try {
+    await supabase
+      .from("hubspot_cache")
+      .upsert({ key: cacheKey, data: stats, updated_at: new Date().toISOString() });
+    console.log("[ResponseStats] Cached");
+  } catch (e) {
+    console.warn("[ResponseStats] Cache save failed:", e);
+  }
+
+  return stats;
+}
+
 export async function fetchAdsThreads(since, until) {
   var query =
     "WITH first_human AS (\n" +

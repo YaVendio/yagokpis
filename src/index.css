@@ -55,6 +55,10 @@ body {
   background: #555B6E;
 }
 
+.recharts-surface, .recharts-surface:focus, .recharts-wrapper:focus, .recharts-wrapper svg:focus {
+  outline: none !important;
+}
+
 button {
   transition: all 0.15s ease;
 }

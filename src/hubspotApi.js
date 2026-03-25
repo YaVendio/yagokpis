@@ -60,7 +60,7 @@ export async function fetchAllContactsWithPhone() {
         { filters: [{ propertyName: "mobilephone", operator: "HAS_PROPERTY" }] },
         { filters: [{ propertyName: "hs_whatsapp_phone_number", operator: "HAS_PROPERTY" }] },
       ],
-      properties: ["firstname", "lastname", "phone", "mobilephone", "hs_whatsapp_phone_number", "email", "createdate", "hs_lead_status", "lifecyclestage", "company"],
+      properties: ["firstname", "lastname", "phone", "mobilephone", "hs_whatsapp_phone_number", "email", "hs_additional_emails", "createdate", "hs_lead_status", "lifecyclestage", "company"],
       limit: 100,
     };
     if (after) searchBody.after = after;
@@ -90,7 +90,7 @@ export async function fetchAllContactsWithPhone() {
     while (true) {
       var params = {
         limit: "100",
-        properties: "firstname,lastname,phone,mobilephone,hs_whatsapp_phone_number,email,createdate,hs_lead_status,lifecyclestage,company",
+        properties: "firstname,lastname,phone,mobilephone,hs_whatsapp_phone_number,email,hs_additional_emails,createdate,hs_lead_status,lifecyclestage,company",
       };
       if (after) params.after = after;
       var listData = await callHubSpot("/crm/v3/objects/contacts", params);
@@ -201,7 +201,7 @@ export async function fetchContactsByIds(contactIds) {
       var inputs = batch.map(function(id) { return { id: id }; });
       return callHubSpot("/crm/v3/objects/contacts/batch/read", null, {
         inputs: inputs,
-        properties: ["firstname", "lastname", "phone", "mobilephone", "hs_whatsapp_phone_number", "email", "createdate", "hs_lead_status", "lifecyclestage", "company", "hs_analytics_source", "prioridad_plg", "registro_plg"]
+        properties: ["firstname", "lastname", "phone", "mobilephone", "hs_whatsapp_phone_number", "email", "hs_additional_emails", "createdate", "hs_lead_status", "lifecyclestage", "company", "hs_analytics_source", "prioridad_plg", "registro_plg"]
       });
     });
     var results = await Promise.all(promises);
@@ -369,17 +369,37 @@ export async function fetchAllMeetings() {
 }
 
 export function getMeetingContactPhones(meetings, contacts) {
+  // Map contactId → contact for fast lookup
+  var contactById = {};
   // Map contactId → array of ALL clean phone numbers (phone + mobilephone)
   var contactPhonesMap = {};
+  // Map email (lowercase) → array of clean phone numbers (from ALL contacts, using primary + additional emails)
+  var emailToPhonesMap = {};
   for (var i = 0; i < contacts.length; i++) {
     var c = contacts[i];
+    contactById[c.id] = c;
     var phones = [];
     if (c.properties) {
       if (c.properties.phone) { var p1 = c.properties.phone.replace(/\D/g, ""); if (p1) phones.push(p1); }
       if (c.properties.mobilephone) { var p2 = c.properties.mobilephone.replace(/\D/g, ""); if (p2 && phones.indexOf(p2) < 0) phones.push(p2); }
       if (c.properties.hs_whatsapp_phone_number) { var p3 = c.properties.hs_whatsapp_phone_number.replace(/\D/g, ""); if (p3 && phones.indexOf(p3) < 0) phones.push(p3); }
     }
-    if (phones.length > 0) contactPhonesMap[c.id] = phones;
+    if (phones.length > 0) {
+      contactPhonesMap[c.id] = phones;
+      // Index phones by all emails (primary + hs_additional_emails) so we can cross-reference
+      if (c.properties) {
+        var emails = [];
+        if (c.properties.email) emails.push(c.properties.email.toLowerCase().trim());
+        if (c.properties.hs_additional_emails) {
+          var addl = c.properties.hs_additional_emails.split(";");
+          for (var ei = 0; ei < addl.length; ei++) { var ae = addl[ei].toLowerCase().trim(); if (ae && emails.indexOf(ae) < 0) emails.push(ae); }
+        }
+        for (var ei2 = 0; ei2 < emails.length; ei2++) {
+          if (!emailToPhonesMap[emails[ei2]]) emailToPhonesMap[emails[ei2]] = [];
+          for (var pi2 = 0; pi2 < phones.length; pi2++) { if (emailToPhonesMap[emails[ei2]].indexOf(phones[pi2]) < 0) emailToPhonesMap[emails[ei2]].push(phones[pi2]); }
+        }
+      }
+    }
   }
   var meetingPhones = {};
   for (var j = 0; j < meetings.length; j++) {
@@ -388,8 +408,24 @@ export function getMeetingContactPhones(meetings, contacts) {
     if (!assoc) continue;
     for (var k = 0; k < assoc.length; k++) {
       var contactId = assoc[k].id;
+      // Direct phone match (existing logic)
       var cPhones = contactPhonesMap[contactId];
       if (cPhones) { for (var pi = 0; pi < cPhones.length; pi++) meetingPhones[cPhones[pi]] = true; }
+      // Email cross-reference: if this contact used a different email to book,
+      // find the "real" contact whose additional_emails contain that email
+      var contact = contactById[contactId];
+      if (contact && contact.properties) {
+        var cEmails = [];
+        if (contact.properties.email) cEmails.push(contact.properties.email.toLowerCase().trim());
+        if (contact.properties.hs_additional_emails) {
+          var addl2 = contact.properties.hs_additional_emails.split(";");
+          for (var ai = 0; ai < addl2.length; ai++) { var ae2 = addl2[ai].toLowerCase().trim(); if (ae2 && cEmails.indexOf(ae2) < 0) cEmails.push(ae2); }
+        }
+        for (var ei3 = 0; ei3 < cEmails.length; ei3++) {
+          var ePhones = emailToPhonesMap[cEmails[ei3]];
+          if (ePhones) { for (var epi = 0; epi < ePhones.length; epi++) meetingPhones[ePhones[epi]] = true; }
+        }
+      }
     }
   }
   return meetingPhones;
@@ -532,7 +568,7 @@ export async function fetchGrowthLeads(sinceIso, pipelineId) {
           var inputs = batch.map(function(id) { return { id: id }; });
           return callHubSpot("/crm/v3/objects/contacts/batch/read", null, {
             inputs: inputs,
-            properties: ["prioridad_plg"]
+            properties: ["prioridad_plg", "email"]
           }).catch(function(e) {
             console.warn("[HS Growth] Contact batch read error:", e.message);
             return { results: [] };
@@ -543,15 +579,15 @@ export async function fetchGrowthLeads(sinceIso, pipelineId) {
           if (cResults[cri].results) {
             for (var cr = 0; cr < cResults[cri].results.length; cr++) {
               var contact = cResults[cri].results[cr];
-              contactMap[contact.id] = (contact.properties && contact.properties.prioridad_plg) || "";
+              contactMap[contact.id] = { prioridad_plg: (contact.properties && contact.properties.prioridad_plg) || "", email: (contact.properties && contact.properties.email) || "" };
             }
           }
         }
       }
-      console.log("[HS Growth] Fetched prioridad_plg for", Object.keys(contactMap).length, "contacts");
-      var emptyCount=0;var filledCount=0;
-      for(var ck in contactMap){if(contactMap[ck])filledCount++;else emptyCount++;}
-      console.log("[HS Growth] prioridad_plg stats — con valor:", filledCount, "| vacío:", emptyCount);
+      console.log("[HS Growth] Fetched prioridad_plg+email for", Object.keys(contactMap).length, "contacts");
+      var emptyCount=0;var filledCount=0;var emailCount=0;
+      for(var ck in contactMap){if(contactMap[ck].prioridad_plg)filledCount++;else emptyCount++;if(contactMap[ck].email)emailCount++;}
+      console.log("[HS Growth] prioridad_plg stats — con valor:", filledCount, "| vacío:", emptyCount, "| emails:", emailCount);
     }
   }
 
@@ -559,14 +595,15 @@ export async function fetchGrowthLeads(sinceIso, pipelineId) {
   for (var i = 0; i < filtered.length; i++) {
     var lp = filtered[i].properties || {};
     var assocContactId = assocMap && assocMap[filtered[i].id];
-    var contactPrio = assocContactId && contactMap && contactMap[assocContactId];
+    var contactData = assocContactId && contactMap && contactMap[assocContactId];
     filtered[i]._contactProps = {
       hubspot_owner_id: lp.hubspot_owner_id || "",
-      prioridad_plg: contactMap[assocMap[filtered[i].id]] || "",
+      prioridad_plg: (contactData && contactData.prioridad_plg) || "",
       hs_analytics_source: lp.hs_contact_analytics_source || lp.fuente_original_de_trafico || "",
       hs_analytics_source_data_1: lp.hs_contact_analytics_source_data_1 || "",
       initial_utm_campaign: lp.fuente_yavendio || "",
-      email: lp.email || "",
+      email: lp.email || (contactData && contactData.email) || "",
+      createdate: lp.createdate || lp.hs_createdate || "",
       phone: lp.numero_de_telefono || "",
       industria: lp.industria || "",
     };
