@@ -9,7 +9,7 @@ import InfoTip from "./components/InfoTip";
 import TIPS from "./tooltips";
 import { fetchCampaigns, fetchCampaignGroups, fetchCampaignLeads, formatDateForApi, formatEndDateForApi } from "./gruposApi";
 import { fetchAllContactsWithPhone, extractHubSpotPhones, getMeetingContactPhones, getMeetingContactIds, fetchGrowthLeads } from "./hubspotApi";
-import { loadMeetingsFromDb, loadContactsFromDb, loadContactsByEmail, loadDealsFromDb, loadLeadsFromDb, loadOwnersFromDb, loadPipelinesFromDb, triggerIncrementalSync } from "./hubspotSync";
+import { loadMeetingsFromDb, loadContactsFromDb, loadContactsByEmail, loadDealsFromDb, loadLeadsFromDb, loadOwnersFromDb, loadPipelinesFromDb, triggerIncrementalSync, loadContactPhoneMatches } from "./hubspotSync";
 import { fetchAutomationDiagnostic, aggregateWorkflowStats, calculateMetrics } from "./brevoApi.js";
 import { resetAuthGuard } from "./authGuard";
 import { fetchPostHogSources, fetchPostHogOrganizations, fetchPostHogPersonsByEmail } from "./posthogApi";
@@ -479,12 +479,16 @@ export default function Dashboard(){
   const [qualModalTitle,setQualModalTitle]=useState("");
   const [confirmedLeads,setConfirmedLeads]=useState([]);
   const [chartDayModalData,setChartDayModalData]=useState(null);
+  const [realizadasModalData,setRealizadasModalData]=useState(null);
   const [chartHiddenBars,setChartHiddenBars]=useState({});
   const [dbLoading,setDbLoading]=useState(true);
   const [loadError,setLoadError]=useState(null);
   const [inboundLoading,setInboundLoading]=useState(false);
+  const [inboundLoadStep,setInboundLoadStep]=useState(0);
   const [inboundRawRows,setInboundRawRows]=useState(null);
   const [lifecyclePhonesData,setLifecyclePhonesData]=useState(null);
+  const outboundSinceRef=useRef(getFirstOfMonth());
+  const inboundSinceRef=useRef(getFirstOfMonth());
 
   const [meetings,setMeetings]=useState([]);
   const [totalContactadosByQual,setTotalContactadosByQual]=useState({});
@@ -518,6 +522,7 @@ export default function Dashboard(){
   const [topicModal,setTopicModal]=useState(null);
   const [regionFilter,setRegionFilter]=useState("all");
   const [resumenPreset,setResumenPreset]=useState("este_mes");
+  const [resumenRegionFilter,setResumenRegionFilter]=useState("all");
   const [abSelectMode,setAbSelectMode]=useState(false);
   const [abSelected,setAbSelected]=useState([]);
   const [showTplConfig,setShowTplConfig]=useState(false);
@@ -641,8 +646,9 @@ export default function Dashboard(){
 
   // Auto-load inbound data when navigating to inbound, resumen, or hubspot analytics
   useEffect(function(){
+    if(!crmInited) return;
     if((section==="inbound"||section==="resumen"||(section==="hubspot"&&subTab==="analytics"))&&!inboundRawRows&&!inboundLoading) loadInboundData();
-  },[section,subTab,dateFrom,dateTo]);
+  },[section,subTab,dateFrom,dateTo,crmInited]);
 
   // Auto-load CRM data once authenticated (used by both overview and CRM tab)
   useEffect(function(){
@@ -724,11 +730,32 @@ export default function Dashboard(){
       if(inboundRawRows){var fi=filterRowsByDate(inboundRawRows,prev.from,prev.to);var ri=processInboundRows(fi,"all",lifecyclePhonesData,inboundHsPhones);inbLeads=ri.MEETINGS||[];}
       var prevTotalLeads=outLeads.length+inbLeads.length;
       var prevTotalOferta=outLeads.filter(function(l){return l.ml;}).length+inbLeads.filter(function(l){return l.ml;}).length;
-      // CRM meetings in prev period for confirmed count
+      // CRM meetings in prev period for confirmed count (filtered by SDR owners + region)
       var prevConfirmed=0;var prevRealizadas=0;
       if(crmMeetings.length>0&&crmContacts.length>0){
+        var _prevSdrNames=["pablo","martin","gabriel","rafaela","sebastian"];
+        var _prevBrNames=["rafaela"];
+        var _prevSdrIds={};var _prevBrIds={};var _prevLatamIds={};
+        var _prevOwKeys=Object.keys(crmOwnerMap);
+        for(var _poi=0;_poi<_prevOwKeys.length;_poi++){
+          var _poN=(crmOwnerMap[_prevOwKeys[_poi]]||"").toLowerCase();
+          for(var _psi=0;_psi<_prevSdrNames.length;_psi++){
+            if(_poN.indexOf(_prevSdrNames[_psi])>=0){
+              _prevSdrIds[_prevOwKeys[_poi]]=true;
+              if(_prevBrNames.indexOf(_prevSdrNames[_psi])>=0)_prevBrIds[_prevOwKeys[_poi]]=true;
+              else _prevLatamIds[_prevOwKeys[_poi]]=true;
+              break;
+            }
+          }
+        }
         var prFD=new Date(prev.from+"T00:00:00");var prTD=new Date(prev.to+"T23:59:59");
-        var prFiltM=crmMeetings.filter(function(m){var st=m.properties&&m.properties.hs_createdate||m.createdAt;if(!st)return false;var md=new Date(st);return md>=prFD&&md<=prTD;});
+        var prFiltM=crmMeetings.filter(function(m){
+          var oid=m.properties&&m.properties.hubspot_owner_id;
+          if(!oid||!_prevSdrIds[oid])return false;
+          if(resumenRegionFilter==="br"&&!_prevBrIds[oid])return false;
+          if(resumenRegionFilter==="latam"&&!_prevLatamIds[oid])return false;
+          var st=m.properties&&m.properties.hs_createdate||m.createdAt;if(!st)return false;var md=new Date(st);return md>=prFD&&md<=prTD;
+        });
         prevRealizadas=prFiltM.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED";}).length;
         if(prFiltM.length>0){
           var prPh=getMeetingContactPhones(prFiltM,crmContacts);
@@ -741,7 +768,7 @@ export default function Dashboard(){
       }
       setPrevResumenData({totalLeads:prevTotalLeads,totalOferta:prevTotalOferta,confirmed:prevConfirmed,realizadas:prevRealizadas,outTc:outLeads.length,inbTc:inbLeads.length});
     }
-  },[compareEnabled,dateFrom,dateTo,rawRows,inboundRawRows,regionFilter,templateConfig,lifecyclePhonesData,inboundHsPhones,crmMeetings,crmContacts]);
+  },[compareEnabled,dateFrom,dateTo,rawRows,inboundRawRows,regionFilter,resumenRegionFilter,templateConfig,lifecyclePhonesData,inboundHsPhones,crmMeetings,crmContacts,crmOwnerMap]);
 
   // Compute comparison data for Ads
   useEffect(function(){
@@ -820,10 +847,12 @@ export default function Dashboard(){
       setLoadError(null);
       try{
         var since=getFirstOfMonth();
-        var [threads,stats]=await Promise.all([loadOutboundThreads(since),fetchResponseStatsCached(since)]);
+        var threads=await loadOutboundThreads(since);
+        var stats=await fetchResponseStatsCached(since);
         setResponseStats(stats);
         var csvRows=expandThreadMessages(threads);
         setRawRows(csvRows);
+        outboundSinceRef.current=since;
         var filtered=filterRowsByDate(csvRows,since,new Date().toISOString().slice(0,10));
         var result=processCSVRows(filtered,templateConfig,regionFilter);
         applyResult(result);
@@ -854,6 +883,47 @@ export default function Dashboard(){
     }
     loadThreads();
   },[configLoaded]);
+
+  // Lazy range extender: re-fetch when date filters need data older than what's loaded
+  useEffect(function(){
+    if(!configLoaded) return;
+    var neededSince=dateFrom||getFirstOfMonth();
+    if(compareEnabled&&dateFrom&&dateTo){
+      var prev=computePrevPeriod(dateFrom,dateTo);
+      if(prev&&prev.from<neededSince) neededSince=prev.from;
+    }
+    // Extend outbound if needed
+    if(rawRows&&outboundSinceRef.current&&neededSince<outboundSinceRef.current){
+      setDbLoading(true);setLoadError(null);
+      loadOutboundThreads(neededSince).then(function(threads){
+        return fetchResponseStatsCached(neededSince).then(function(stats){return [threads,stats];});
+      }).then(function(res){
+        outboundSinceRef.current=neededSince;
+        setResponseStats(res[1]);
+        var csvRows=expandThreadMessages(res[0]);
+        setRawRows(csvRows);
+        var filtered=filterRowsByDate(csvRows,dateFrom,dateTo);
+        var result=processCSVRows(filtered,templateConfig,regionFilter);
+        applyResult(result);
+      }).catch(function(e){setLoadError(e.message||"Error");})
+      .finally(function(){setDbLoading(false);});
+    }
+    // Extend inbound if needed
+    if(inboundRawRows&&inboundSinceRef.current&&neededSince<inboundSinceRef.current){
+      setInboundLoading(true);
+      loadInboundThreads(neededSince).then(function(threads){
+        inboundSinceRef.current=neededSince;
+        var csvRows=expandInboundThreadMessages(threads);
+        setInboundRawRows(csvRows);
+        var hp=Object.assign({},inboundHsPhones||{});
+        if(crmContacts.length>0) Object.assign(hp,extractHubSpotPhones(crmContacts));
+        var filtered=filterRowsByDate(csvRows,dateFrom,dateTo);
+        var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData,Object.keys(hp).length>0?hp:null);
+        if(section!=="resumen") applyResult(result);
+      }).catch(function(e){console.error("Inbound reload error:",e);})
+      .finally(function(){setInboundLoading(false);});
+    }
+  },[dateFrom,dateTo,compareEnabled,configLoaded]);
 
   // Reprocess when templateConfig changes (only if rawRows already loaded)
   const templateConfigRef=useRef(templateConfig);
@@ -1136,14 +1206,12 @@ export default function Dashboard(){
   // --- CRM (HubSpot) tab functions ---
   var CRM_SINCE=getCrmSinceDate();
   async function fetchHubSpotFresh(){
-    console.log("[CRM] Loading from Supabase since",CRM_SINCE,"...");
-    var [meetingsRes,dealsRes,leadsRes,pipelines,ownerMap]=await Promise.all([
-      loadMeetingsFromDb(CRM_SINCE),
-      loadDealsFromDb(CRM_SINCE),
-      loadLeadsFromDb(CRM_SINCE,"808581652"),
-      loadPipelinesFromDb(),
-      loadOwnersFromDb()
-    ]);
+    console.log("[CRM] Loading from Supabase since",CRM_SINCE,"(sequential)...");
+    var meetingsRes=await loadMeetingsFromDb(CRM_SINCE);
+    var dealsRes=await loadDealsFromDb(CRM_SINCE);
+    var leadsRes=await loadLeadsFromDb(CRM_SINCE,"808581652");
+    var pipelines=await loadPipelinesFromDb();
+    var ownerMap=await loadOwnersFromDb();
     console.log("[CRM] DB load done. Meetings:",meetingsRes.length,"Deals:",dealsRes.length,"Leads:",leadsRes.length);
     var contactIdSet={};
     for(var i=0;i<meetingsRes.length;i++){
@@ -1196,7 +1264,7 @@ export default function Dashboard(){
       applyCrmData(fresh);setCrmInited(true);
       console.log("[CRM] Done. Meetings:",fresh.meetings.length,"Contacts:",fresh.contacts.length,"Deals:",fresh.deals.length,"Leads:",fresh.leads.length);
       // Trigger incremental sync in background (server-side)
-      triggerIncrementalSync();
+      setTimeout(triggerIncrementalSync, 10000);
     }catch(e){console.error("[CRM] Error:",e);setCrmError(e.message);}
     finally{setCrmLoading(false);}
   }
@@ -1657,11 +1725,15 @@ export default function Dashboard(){
         applyResult(result);
       }
     }else{
-      setInboundLoading(true);
-      var spPromise=loadLifecyclePhones().catch(function(e){console.warn("Lifecycle phones query failed:",e);return {};});
-      Promise.all([loadInboundThreads(getFirstOfMonth()),spPromise]).then(function(all){
+      setInboundLoading(true);setInboundLoadStep(1);
+      loadInboundThreads(getFirstOfMonth()).then(function(threads){
+        setInboundLoadStep(2);
+        return loadLifecyclePhones().catch(function(e){console.warn("Lifecycle phones query failed:",e);return {};}).then(function(sp){return [threads,sp];});
+      }).then(function(all){
+        setInboundLoadStep(3);
         var csvRows=expandInboundThreadMessages(all[0]);var sp=all[1];
         setInboundRawRows(csvRows);
+        inboundSinceRef.current=getFirstOfMonth();
         setLifecyclePhonesData(sp);
         if(!isResumen){
           var hp=mergePhones(inboundHsPhones);
@@ -1669,12 +1741,12 @@ export default function Dashboard(){
           var result2=processInboundRows(filtered2,regionFilter,sp,hp);
           applyResult(result2);
         }
-        setInboundLoading(false);
-        // HubSpot phone match — load in background, update when ready
+        // HubSpot phone match — targeted search for inbound phones only
         if(!inboundHsPhones){
-          fetchAllContactsWithPhone().then(function(c){
-            var fetchedHp=extractHubSpotPhones(c);
-            // Merge fetched phones with crmContacts phones
+          setInboundLoadStep(4);
+          var inbPhones=[];
+          for(var ip=0;ip<csvRows.length;ip++){if(csvRows[ip].phone_number)inbPhones.push(csvRows[ip].phone_number);}
+          loadContactPhoneMatches(inbPhones).then(function(fetchedHp){
             var merged=Object.assign({},fetchedHp);
             if(crmContacts.length>0){Object.assign(merged,extractHubSpotPhones(crmContacts));}
             var hp2=Object.keys(merged).length>0?merged:null;
@@ -1684,11 +1756,14 @@ export default function Dashboard(){
               var r2=processInboundRows(f2,regionFilter,sp,hp2);
               applyResult(r2);
             }
-          }).catch(function(e){console.warn("HubSpot phones fetch failed:",e);});
+          }).catch(function(e){console.warn("HubSpot phones fetch failed:",e);})
+          .finally(function(){setInboundLoading(false);setInboundLoadStep(0);});
+        }else{
+          setInboundLoading(false);setInboundLoadStep(0);
         }
       }).catch(function(e){
         console.error("Inbound load error:",e);
-        setInboundLoading(false);
+        setInboundLoading(false);setInboundLoadStep(0);
       });
     }
   }
@@ -1740,41 +1815,37 @@ export default function Dashboard(){
   function _cS(s){return _tplScale!==1?Math.round(s*_tplScale):s;}
   function _cR(r,s){var cs=_cS(s);return cs>0?((r/cs)*100).toFixed(1)+"%":"0%";}
 
-  if(dbLoading) return (<div style={{background:C.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:font}}>
-    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
-    <div style={{textAlign:"center"}}>
-      <div style={{width:40,height:40,border:"3px solid "+C.border,borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto 16px"}}/>
-      <div style={{fontSize:18,fontWeight:700,color:C.text,marginBottom:4}}>Cargando datos</div>
-      <div style={{fontSize:14,color:C.muted}}>Conectando con Metabase...</div>
-    </div>
-  </div>);
-
-  if(loadError) return (<div style={{background:C.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:font}}>
-    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
-    <div style={{textAlign:"center",maxWidth:500}}>
-      <div style={{width:48,height:48,borderRadius:"50%",background:C.lRed,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}><span style={{fontSize:24,color:C.red}}>!</span></div>
-      <div style={{fontSize:18,fontWeight:700,color:C.text,marginBottom:6}}>Error al cargar datos</div>
-      <div style={{fontSize:14,color:C.muted,lineHeight:1.6,marginBottom:16}}>{loadError}</div>
-      <button onClick={function(){setLoadError(null);setDbLoading(true);fetchThreads(null,getFirstOfMonth()).then(function(threads){var csvRows=expandThreadMessages(threads);setRawRows(csvRows);var filtered=filterRowsByDate(csvRows,dateFrom,dateTo);var result=processCSVRows(filtered,templateConfig,regionFilter);applyResult(result);setDbLoading(false);}).catch(function(e){setLoadError(e.message||"Error");setDbLoading(false);});}} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font}}>Reintentar</button>
-    </div>
-  </div>);
 
   var _secKeys=Object.keys(SECTIONS);
   var _compareToggle=<><div style={{width:1,height:24,background:C.border}}/><button onClick={function(){setCompareEnabled(!compareEnabled);}} style={{background:compareEnabled?C.purple:"transparent",color:compareEnabled?"#fff":C.muted,border:"1px solid "+(compareEnabled?C.purple:C.border),borderRadius:20,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,transition:"all 0.15s ease",display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:14}}>{"\u2194"}</span>Comparar</button>{compareEnabled&&(function(){var prev=section==="ads"||section==="growth"?(function(){var pm=getPrevMonth(growthMonth);return{from:pm+"-01",to:new Date(parseInt(pm.split("-")[0]),parseInt(pm.split("-")[1]),0).toISOString().slice(0,10),days:new Date(parseInt(pm.split("-")[0]),parseInt(pm.split("-")[1]),0).getDate()};})():(section==="hubspot"&&subTab==="reuniones")?computePrevPeriod(hsReunionDateFrom,hsReunionDateTo):computePrevPeriod(dateFrom,dateTo);return prev?<span style={{fontSize:11,color:C.purple,fontWeight:600,background:C.lPurple,padding:"3px 10px",borderRadius:6}}>vs {formatPrevLabel(prev)}</span>:null;})()}</>;
   function renderFilterBar(){
     if(section==="resumen") return (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-        {[{k:"hoy",l:"Hoy"},{k:"ayer",l:"Ayer"},{k:"esta_semana",l:"Esta Semana"},{k:"este_mes",l:"Este Mes"},{k:"ultimos_7",l:"\u00DAlt. 7d"},{k:"ultimos_30",l:"\u00DAlt. 30d"},{k:"mes_pasado",l:"Mes Pasado"}].map(function(p){var a=resumenPreset===p.k;return <button key={p.k} onClick={function(){setResumenPreset(p.k);var r=resolvePreset(p.k);setDateFrom(r.from);setDateTo(r.to);}} style={{background:a?C.accent:"transparent",color:a?"#fff":C.muted,border:"1px solid "+(a?C.accent:C.border),borderRadius:20,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,transition:"all 0.15s ease"}}>{p.l}</button>;})}
-      </div>
+      <select value={resumenPreset} onChange={function(e){var k=e.target.value;setResumenPreset(k);if(k!=="custom"){var r=resolvePreset(k);setDateFrom(r.from);setDateTo(r.to);}}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
+        <option value="hoy">Hoy</option>
+        <option value="ayer">Ayer</option>
+        <option value="esta_semana">Esta Semana</option>
+        <option value="este_mes">Este Mes</option>
+        <option value="ultimos_7">{"\u00DA"}lt. 7d</option>
+        <option value="ultimos_30">{"\u00DA"}lt. 30d</option>
+        <option value="mes_pasado">Mes Pasado</option>
+        <option value="custom">Personalizado</option>
+      </select>
+      {resumenPreset==="custom" && <>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:12,color:C.muted}}>De</span>
+          <input type="date" value={dateFrom} onChange={function(e){setDateFrom(e.target.value);}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:12,color:C.muted}}>Hasta</span>
+          <input type="date" value={dateTo} onChange={function(e){setDateTo(e.target.value);}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+        </div>
+      </>}
       <div style={{width:1,height:24,background:C.border}}/>
-      <div style={{display:"flex",alignItems:"center",gap:6}}>
-        <span style={{fontSize:12,color:C.muted}}>De</span>
-        <input type="date" value={dateFrom} onChange={function(e){setDateFrom(e.target.value);setResumenPreset("custom");}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
-      </div>
-      <div style={{display:"flex",alignItems:"center",gap:6}}>
-        <span style={{fontSize:12,color:C.muted}}>Hasta</span>
-        <input type="date" value={dateTo} onChange={function(e){setDateTo(e.target.value);setResumenPreset("custom");}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
-      </div>
+      <select value={resumenRegionFilter} onChange={function(e){setResumenRegionFilter(e.target.value);}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
+        <option value="all">Todos</option>
+        <option value="latam">LATAM</option>
+        <option value="br">Brasil</option>
+      </select>
       {_compareToggle}
     </div>);
     if(section==="outbound") return (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
@@ -1877,6 +1948,47 @@ export default function Dashboard(){
     {showConfirmed && <MeetModal leads={confirmedLeads} mode={mode} onClose={function(){setShowConfirmed(false);}} title={"\u2705 Reuniones Agendadas"} crmContacts={crmContacts} tagContext="agendadas"/>}
     {qualModalLeads && <MeetModal leads={qualModalLeads} mode={mode} onClose={function(){setQualModalLeads(null);}} title={qualModalTitle} crmContacts={crmContacts}/>}
     {chartDayModalData && <MeetModal leads={chartDayModalData.leads} mode={mode} onClose={function(){setChartDayModalData(null);}} title={chartDayModalData.title} crmContacts={crmContacts} tagContext={chartDayModalData.tagContext}/>}
+    {realizadasModalData && (function(){
+      var rmMeetings=realizadasModalData.meetings.slice().sort(function(a,b){var sa=a.properties&&a.properties.hs_meeting_start_time||"";var sb=b.properties&&b.properties.hs_meeting_start_time||"";return sb.localeCompare(sa);});
+      var rmContactMap={};for(var ci=0;ci<crmContacts.length;ci++){rmContactMap[crmContacts[ci].id]=crmContacts[ci];}
+      function rmGetContact(m){var assoc=m.associations&&m.associations.contacts&&m.associations.contacts.results;if(!assoc||assoc.length===0)return null;return rmContactMap[assoc[0].id]||null;}
+      return <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#00000044",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:20,animation:"fadeInModal 0.2s ease-out"}} onClick={function(){setRealizadasModalData(null);}}>
+        <div style={{background:C.card,borderRadius:20,padding:28,maxWidth:1100,width:"100%",maxHeight:"92vh",boxShadow:"0 25px 60px #00000025",animation:"scaleInModal 0.2s ease-out"}} onClick={function(e){e.stopPropagation();}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+            <div>
+              <div style={{fontSize:19,fontWeight:900}}>{realizadasModalData.title}</div>
+              <div style={{fontSize:14,color:C.muted,marginTop:2}}>{rmMeetings.length} reuniones completadas</div>
+            </div>
+            <button onClick={function(){setRealizadasModalData(null);}} style={{background:C.rowAlt,border:"none",borderRadius:8,width:36,height:36,fontSize:18,cursor:"pointer",color:C.muted,fontWeight:700}}>{"\u2715"}</button>
+          </div>
+          <div style={{maxHeight:"74vh",overflowY:"auto",borderRadius:10,border:"1px solid "+C.border}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,fontFamily:font}}>
+              <thead>
+                <tr style={{background:C.rowAlt,position:"sticky",top:0,zIndex:1}}>
+                  {["Fecha","Hora","T\u00EDtulo","Contacto","Propietario"].map(function(h){return <th key={h} style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>{h}</th>;})}
+                </tr>
+              </thead>
+              <tbody>
+                {rmMeetings.map(function(m,idx){
+                  var p=m.properties||{};
+                  var st=p.hs_meeting_start_time?new Date(p.hs_meeting_start_time):null;
+                  var ct=rmGetContact(m);var ctP=ct&&ct.properties||{};
+                  var ctN=(ctP.firstname||"")+(ctP.lastname?(" "+ctP.lastname):"");
+                  return <tr key={m.id||idx} style={{background:idx%2===0?C.card:C.rowBg,borderBottom:"1px solid "+C.border+"44"}}>
+                    <td style={{padding:"8px 12px",fontSize:12,color:C.sub,fontFamily:mono}}>{st?st.toLocaleDateString("es",{day:"2-digit",month:"2-digit",year:"numeric"}):"\u2014"}</td>
+                    <td style={{padding:"8px 12px",fontSize:12,color:C.sub,fontFamily:mono}}>{st?st.toLocaleTimeString("es",{hour:"2-digit",minute:"2-digit"}):"\u2014"}</td>
+                    <td style={{padding:"8px 12px",fontWeight:600,color:C.text,maxWidth:280,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.hs_meeting_title||"Sin t\u00EDtulo"}</td>
+                    <td style={{padding:"8px 12px"}}>{ctN?<div><span style={{fontWeight:600,color:C.text}}>{ctN}</span>{ctP.email&&<span style={{fontSize:11,color:C.muted,marginLeft:6}}>{ctP.email}</span>}</div>:<span style={{color:C.muted,fontSize:12}}>Sin contacto</span>}</td>
+                    <td style={{padding:"8px 12px",color:C.sub,fontSize:12}}>{crmOwnerMap[p.hubspot_owner_id]||p.hubspot_owner_id||"\u2014"}</td>
+                  </tr>;
+                })}
+                {rmMeetings.length===0 && <tr><td colSpan={5} style={{padding:20,textAlign:"center",color:C.muted,fontSize:13}}>No hay reuniones realizadas</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>;
+    })()}
     {selTpl && <TplModal tpl={selTpl} leads={meetings} mode={mode} onClose={function(){setSelTpl(null);}}/>}
     {topicModal && (function(){
       var tkw=TOPIC_KEYWORDS[topicModal];
@@ -1977,7 +2089,10 @@ export default function Dashboard(){
 
       {/* Content */}
       <div style={{padding:"24px 28px",maxWidth:1300,margin:"0 auto"}}>
-      {inboundLoading && <div style={{background:C.lPurple,border:"1px solid "+C.purple+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center"}}><div style={{width:20,height:20,border:"2px solid "+C.purple+"33",borderTopColor:C.purple,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.purple}}>Cargando datos inbound...</strong></div></div>}
+      {dbLoading && <div style={{background:C.lBlue,border:"1px solid "+C.accent+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center"}}><div style={{width:20,height:20,border:"2px solid "+C.accent+"33",borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.accent}}>Cargando datos outbound...</strong></div></div>}
+      {loadError && <div style={{background:C.lRed,border:"1px solid "+C.red+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center",justifyContent:"space-between"}}><div style={{display:"flex",gap:12,alignItems:"center"}}><div style={{width:24,height:24,borderRadius:"50%",background:C.red+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><span style={{fontSize:14,color:C.red,fontWeight:700}}>!</span></div><div><strong style={{color:C.red}}>Error al cargar datos</strong><div style={{fontSize:12,color:C.muted,marginTop:2}}>{loadError}</div></div></div><button onClick={function(){setLoadError(null);setDbLoading(true);loadOutboundThreads(outboundSinceRef.current).then(function(threads){var csvRows=expandThreadMessages(threads);setRawRows(csvRows);var filtered=filterRowsByDate(csvRows,dateFrom,dateTo);var result=processCSVRows(filtered,templateConfig,regionFilter);applyResult(result);setDbLoading(false);}).catch(function(e){setLoadError(e.message||"Error");setDbLoading(false);});}} style={{background:C.red,color:"#fff",border:"none",borderRadius:8,padding:"6px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,flexShrink:0}}>Reintentar</button></div>}
+      {crmLoading && <div style={{background:C.lGreen,border:"1px solid "+C.green+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center"}}><div style={{width:20,height:20,border:"2px solid "+C.green+"33",borderTopColor:C.green,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.green}}>Cargando datos CRM...</strong></div></div>}
+      {inboundLoading && (function(){var steps=["Conversaciones","Lifecycle","Procesando","HubSpot match"];var pct=inboundLoadStep>0?Math.round((inboundLoadStep/steps.length)*100):0;var lbl=inboundLoadStep>0&&inboundLoadStep<=steps.length?steps[inboundLoadStep-1]:"...";return <div style={{background:C.lPurple,border:"1px solid "+C.purple+"25",borderRadius:12,padding:"12px 18px",marginBottom:20}}><div style={{display:"flex",gap:12,alignItems:"center",marginBottom:8}}><div style={{width:20,height:20,border:"2px solid "+C.purple+"33",borderTopColor:C.purple,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.purple}}>Cargando inbound</strong><span style={{color:C.muted,fontSize:12,marginLeft:8}}>{lbl} ({pct}%)</span></div></div><div style={{background:C.purple+"22",borderRadius:4,height:6,overflow:"hidden"}}><div style={{width:pct+"%",height:"100%",background:C.purple,borderRadius:4,transition:"width 0.4s ease"}}/></div></div>;})()}
 
       {/* ============ RESUMEN SECTION ============ */}
       {section==="resumen" && (function(){
@@ -2010,12 +2125,33 @@ export default function Dashboard(){
         for(var _ti2=0;_ti2<inbLeads.length;_ti2++){var _tp2=(inbLeads[_ti2].p||"").replace(/\D/g,"");inbLeads[_ti2]._src=(_tp2&&outPhones[_tp2])?"ambos":"inbound";}
         var allLeads=outLeads.concat(inbLeads);
 
-        // --- CRM meetings filtered by date ---
-        var filtCrmMeetings=crmMeetings;
+        // --- CRM meetings filtered by date + SDR owners + region ---
+        var _sdrNames=["pablo","martin","gabriel","rafaela","sebastian"];
+        var _brNames=["rafaela"];
+        var _sdrOwnerIds={};var _brOwnerIds={};var _latamOwnerIds={};
+        var _owKeys=Object.keys(crmOwnerMap);
+        for(var _oki=0;_oki<_owKeys.length;_oki++){
+          var _owN=(crmOwnerMap[_owKeys[_oki]]||"").toLowerCase();
+          for(var _sni=0;_sni<_sdrNames.length;_sni++){
+            if(_owN.indexOf(_sdrNames[_sni])>=0){
+              _sdrOwnerIds[_owKeys[_oki]]=true;
+              if(_brNames.indexOf(_sdrNames[_sni])>=0)_brOwnerIds[_owKeys[_oki]]=true;
+              else _latamOwnerIds[_owKeys[_oki]]=true;
+              break;
+            }
+          }
+        }
+        var filtCrmMeetings=crmMeetings.filter(function(m){
+          var oid=m.properties&&m.properties.hubspot_owner_id;
+          if(!oid||!_sdrOwnerIds[oid])return false;
+          if(resumenRegionFilter==="br"&&!_brOwnerIds[oid])return false;
+          if(resumenRegionFilter==="latam"&&!_latamOwnerIds[oid])return false;
+          return true;
+        });
         if(dateFrom||dateTo){
           var rfD=dateFrom?new Date(dateFrom+"T00:00:00"):null;
           var rtD=dateTo?new Date(dateTo+"T23:59:59"):null;
-          filtCrmMeetings=crmMeetings.filter(function(m){
+          filtCrmMeetings=filtCrmMeetings.filter(function(m){
             var st=m.properties&&m.properties.hs_createdate||m.createdAt;
             if(!st)return false;var md=new Date(st);
             if(rfD&&md<rfD)return false;
@@ -2189,7 +2325,7 @@ export default function Dashboard(){
               <div style={{fontSize:13,color:C.muted,marginTop:6}}>{totalOferta>0?((confirmedCount/totalOferta)*100).toFixed(1):"0"}% de ofertas {"\u00B7"} Out: <strong>{outConfirmed}</strong> / In: <strong>{inbConfirmed}</strong></div>
             </Cd>
             {/* Card: Realizadas */}
-            <Cd onClick={realizadas>0?function(){setHsReunionOutcomeFilter("COMPLETED");navigateTo("hubspot","reuniones");}:undefined} style={{border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)",position:"relative",overflow:"hidden",cursor:realizadas>0?"pointer":"default"}}>
+            <Cd onClick={realizadas>0?function(){var completed=filtCrmMeetings.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED";});setRealizadasModalData({title:"Reuniones Realizadas ("+completed.length+")",meetings:completed});}:undefined} style={{border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)",position:"relative",overflow:"hidden",cursor:realizadas>0?"pointer":"default"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F3AF}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.cyan+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F3AF}"}</div>
@@ -3480,6 +3616,17 @@ export default function Dashboard(){
         var avgDays=daysCount>0?Math.round(totalDaysClose/daysCount):0;
         var _hsPrev=null;
         if(compareEnabled){var _hsPP=computePrevPeriod(dateFrom,dateTo);if(_hsPP){var _hsPFD=crmDeals.filter(function(d){var p=d.properties||{};if(!TARGET_PIPELINES[p.pipeline])return false;if(hsDealPipelineFilter!=="all"&&p.pipeline!==hsDealPipelineFilter)return false;if(hsDealOwnerFilter.length>0&&hsDealOwnerFilter.indexOf(p.hubspot_owner_id)<0)return false;var _isW=p.hs_is_closed_won==="true";var cd=_isW?(p.closedate?new Date(p.closedate):null):(p.createdate?new Date(p.createdate):null);if(!cd)return false;return cd>=new Date(_hsPP.from+"T00:00:00")&&cd<=new Date(_hsPP.to+"T23:59:59");});var _hsW=_hsPFD.filter(function(d){return d.properties&&d.properties.hs_is_closed_won==="true";});var _hsL=_hsPFD.filter(function(d){return d.properties&&d.properties.hs_is_closed_lost==="true";});var _hsR=0;for(var _ri=0;_ri<_hsW.length;_ri++)_hsR+=parseFloat(_hsW[_ri].properties.amount)||0;var _hsWR=(_hsW.length+_hsL.length)>0?(_hsW.length/(_hsW.length+_hsL.length)*100):0;var _hsTD=0;var _hsDN=0;for(var _di=0;_di<_hsW.length;_di++){var _dv=parseFloat(_hsW[_di].properties.days_to_close);if(!isNaN(_dv)){_hsTD+=_dv;_hsDN++;}}_hsPrev={total:_hsPFD.length,revenue:_hsR,winRate:_hsWR,avgDays:_hsDN>0?Math.round(_hsTD/_hsDN):0};}}
+        // Count PQL leads (pipeline 808581652) filtered by date range for Self Service PLG win rate
+        var pqlLeadCount=crmLeads.filter(function(l){
+          var p=l.properties||{};
+          if(dateFrom||dateTo){
+            var cd=p.createdate?new Date(p.createdate):null;
+            if(!cd)return false;
+            if(dateFrom&&cd<new Date(dateFrom+"T00:00:00"))return false;
+            if(dateTo&&cd>new Date(dateTo+"T23:59:59"))return false;
+          }
+          return true;
+        }).length;
         function computePipelineKPIs(pid){
           var pDeals=filteredDeals.filter(function(d){return d.properties&&d.properties.pipeline===pid;});
           var pWon=pDeals.filter(function(d){return d.properties.hs_is_closed_won==="true";});
@@ -3487,7 +3634,9 @@ export default function Dashboard(){
           var pOpen=pDeals.filter(function(d){return d.properties.hs_is_closed_won!=="true"&&d.properties.hs_is_closed_lost!=="true";});
           var pRev=0;for(var ri=0;ri<pWon.length;ri++)pRev+=parseFloat(pWon[ri].properties.amount)||0;
           var pAvgT=pWon.length>0?pRev/pWon.length:0;
-          var pWR=(pWon.length+pLost.length)>0?(pWon.length/(pWon.length+pLost.length)*100):0;
+          var pWR;
+          if(pid==="833703951"){pWR=pqlLeadCount>0?(pWon.length/pqlLeadCount*100):0;}
+          else{pWR=(pWon.length+pLost.length)>0?(pWon.length/(pWon.length+pLost.length)*100):0;}
           var pDays=0;var pDC=0;for(var pdi=0;pdi<pWon.length;pdi++){var v=parseFloat(pWon[pdi].properties.days_to_close);if(!isNaN(v)){pDays+=v;pDC++;}}
           return{total:pDeals.length,won:pWon.length,lost:pLost.length,open:pOpen.length,revenue:pRev,avgTicket:pAvgT,winRate:pWR,avgDays:pDC>0?Math.round(pDays/pDC):0};
         }
@@ -3761,8 +3910,8 @@ export default function Dashboard(){
                         <XAxis type="number" tick={{fontSize:11,fill:C.muted}} tickFormatter={function(v){return"$"+v.toLocaleString();}}/>
                         <YAxis type="category" dataKey="name" tick={{fontSize:11,fill:C.sub}} width={120}/>
                         <Tooltip content={customTooltip} cursor={{fill:C.border+"33"}}/>
-                        <Bar dataKey="wonVal" name="Won" radius={[0,6,6,0]} cursor="pointer" onClick={function(data){var oid=(data&&data.payload?data.payload.oid:data.oid)||"";setHsSelVendedor(hsSelVendedor===oid?null:oid);}}>
-                          {ownerChartData.map(function(entry,idx){return <Cell key={idx} fill={hsSelVendedor===entry.oid?C.green:C.green+"bb"}/>;
+                        <Bar dataKey="wonVal" name="Won" radius={[0,6,6,0]} cursor="pointer" onClick={function(data){var oid=(data&&data.payload?data.payload.oid:data.oid)||"";var ownerName=crmOwnerMap[oid]||oid;var deals=filteredDeals.filter(function(d){var p=d.properties||{};return(p.hubspot_owner_id||"unassigned")===oid&&p.hs_is_closed_won==="true";}).sort(function(a,b){return(parseFloat(b.properties&&b.properties.amount)||0)-(parseFloat(a.properties&&a.properties.amount)||0);});var rev=0;for(var i=0;i<deals.length;i++)rev+=parseFloat(deals[i].properties.amount)||0;setHsDetailDeals({title:ownerName+" \u2014 Vendas Won ("+deals.length+") \xB7 $"+rev.toLocaleString(undefined,{maximumFractionDigits:0}),deals:deals});}}>
+                          {ownerChartData.map(function(entry,idx){return <Cell key={idx} fill={C.green+"bb"}/>;
                           })}
                           <LabelList dataKey="wonVal" position="right" formatter={function(v){return"$"+v.toLocaleString();}} style={{fontSize:11,fontWeight:700,fill:C.sub,fontFamily:mono}}/>
                         </Bar>
@@ -3772,45 +3921,6 @@ export default function Dashboard(){
                 </Cd>);
               })()}
             </div>
-            {/* C2. Detalhe Vendedor */}
-            {hsSelVendedor && (function(){
-              var selOwnerName=crmOwnerMap[hsSelVendedor]||hsSelVendedor;
-              var selWonDeals=filteredDeals.filter(function(d){var p=d.properties||{};return(p.hubspot_owner_id||"unassigned")===hsSelVendedor&&p.hs_is_closed_won==="true";}).sort(function(a,b){return(parseFloat(b.properties&&b.properties.amount)||0)-(parseFloat(a.properties&&a.properties.amount)||0);});
-              var selRev=0;for(var _sr=0;_sr<selWonDeals.length;_sr++)selRev+=parseFloat(selWonDeals[_sr].properties.amount)||0;
-              return (<Cd style={{marginBottom:22,border:"2px solid "+C.green+"44"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                  <Sec style={{margin:0}}>{selOwnerName} {"—"} Vendas Won ({selWonDeals.length})</Sec>
-                  <div style={{display:"flex",alignItems:"center",gap:12}}>
-                    <span style={{fontSize:16,fontWeight:900,fontFamily:mono,color:C.green}}>${selRev.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
-                    <button onClick={function(){setHsSelVendedor(null);}} style={{background:C.muted+"22",border:"none",borderRadius:6,padding:"4px 12px",cursor:"pointer",color:C.text,fontSize:12,fontWeight:700}}>{"✕"} Fechar</button>
-                  </div>
-                </div>
-                <div style={{overflowX:"auto",maxHeight:400,overflowY:"auto"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                    <thead style={{position:"sticky",top:0,background:C.card,zIndex:2}}><tr style={{borderBottom:"2px solid "+C.border}}>
-                      <th style={{textAlign:"left",padding:"8px 10px",color:C.muted,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Deal</th>
-                      <th style={{textAlign:"left",padding:"8px 10px",color:C.muted,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Pipeline</th>
-                      <th style={{textAlign:"right",padding:"8px 10px",color:C.muted,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Valor</th>
-                      <th style={{textAlign:"left",padding:"8px 10px",color:C.muted,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Fecha Cierre</th>
-                      <th style={{textAlign:"center",padding:"8px 10px",color:C.muted,fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>D{"í"}as</th>
-                    </tr></thead>
-                    <tbody>
-                      {selWonDeals.map(function(deal,idx){
-                        var dp=deal.properties||{};
-                        var closed=dp.closedate?new Date(dp.closedate).toLocaleDateString("es",{day:"2-digit",month:"short",year:"numeric"}):"";
-                        return (<tr key={deal.id} style={{borderBottom:"1px solid "+C.border+"66",background:idx%2===0?C.rowBg:"transparent"}}>
-                          <td style={{padding:"8px 10px",fontWeight:700,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{dp.dealname||"Sin nombre"}</td>
-                          <td style={{padding:"8px 10px",fontSize:11,color:C.sub}}>{TARGET_PIPELINES[dp.pipeline]||dp.pipeline}</td>
-                          <td style={{padding:"8px 10px",textAlign:"right",fontFamily:mono,fontWeight:800,color:C.green}}>${(parseFloat(dp.amount)||0).toLocaleString(undefined,{maximumFractionDigits:0})}</td>
-                          <td style={{padding:"8px 10px",fontSize:11,fontFamily:mono}}>{closed}</td>
-                          <td style={{padding:"8px 10px",textAlign:"center",fontFamily:mono,fontWeight:700}}>{dp.days_to_close||"—"}</td>
-                        </tr>);
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </Cd>);
-            })()}
             {/* D. Receita ao Longo do Tempo */}
             {revenueChartData.length>0 && (<Cd style={{marginBottom:22}}>
               <Sec>Receita ao Longo do Tempo (Won)</Sec>

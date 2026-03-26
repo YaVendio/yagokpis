@@ -16,8 +16,8 @@ export var supabase = createClient(
 );
 
 // Retry helper for Supabase queries that fail with transient errors (522, 503, 504, timeouts)
-var MAX_RETRIES = 4;
-var RETRY_BASE_MS = 2000;
+var MAX_RETRIES = 2;
+var RETRY_BASE_MS = 1000;
 
 function _sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
