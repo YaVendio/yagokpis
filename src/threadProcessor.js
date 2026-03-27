@@ -325,6 +325,7 @@ export function processOutboundThreads(threads, templateConfig, regionFilter) {
         fr: triggerTpl,
         c: [], // lazy load
         ml: groupHasMeetingLink,
+        _created: sentAt || null,
         _threadIds: groupThreadIds,
         _table: "mb_outbound_threads",
       });
@@ -757,6 +758,7 @@ export function processInboundThreads(threads, regionFilter, lifecyclePhones, hu
       lang: lang,
       signup: !!(lcInfo && lcInfo.firstStep1At),
       signupLink: hasSignupLink,
+      _created: th.created_at || null,
       _threadIds: [th.thread_id],
       _table: "mb_inbound_threads",
     });

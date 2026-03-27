@@ -1999,7 +1999,7 @@ export default function Dashboard(){
 
   return (<div style={{display:"flex",background:C.bg,minHeight:"100vh",color:C.text,fontFamily:font,fontSize:15}}>
     <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
-    {showM && <MeetModal leads={meetings.filter(function(l){return l.ml;})} mode={mode} onClose={function(){setShowM(false);}} title={"\u{1F4C5} Leads con Oferta de Reuni\u00F3n"} crmContacts={crmContacts} tagContext="ofertadas"/>}
+    {showM && <MeetModal leads={meetings.filter(function(l){return l.ml;}).map(function(l){var ph=(l.p||"").replace(/\D/g,"");var mc=crmMeetingPhones&&ph&&(crmMeetingPhones[ph]||crmMeetingPhones[ph.slice(-11)]||crmMeetingPhones[ph.slice(-10)]);return Object.assign({},l,{_confirmed:!!mc});})} mode={mode} onClose={function(){setShowM(false);}} title={"\u{1F4C5} Leads con Oferta de Reuni\u00F3n"} crmContacts={crmContacts} tagContext="ofertadas"/>}
     {showA && <MeetModal leads={meetings} mode={mode} onClose={function(){setShowA(false);}} title={"\u{1F4AC} Todas las Conversaciones"} crmContacts={crmContacts}/>}
     {showConfirmed && <MeetModal leads={confirmedLeads} mode={mode} onClose={function(){setShowConfirmed(false);}} title={"\u2705 Reuniones Agendadas"} crmContacts={crmContacts} tagContext="agendadas"/>}
     {qualModalLeads && <MeetModal leads={qualModalLeads} mode={mode} onClose={function(){setQualModalLeads(null);}} title={qualModalTitle} crmContacts={crmContacts}/>}
@@ -2250,7 +2250,9 @@ export default function Dashboard(){
             return false;
           }
           for(var ai=0;ai<ofertaAll.length;ai++){
-            if(matchPhone(ofertaAll[ai].p,ofertaAll[ai].hid)){confirmedCount++;confirmedArr.push(ofertaAll[ai]);}
+            var isConf=matchPhone(ofertaAll[ai].p,ofertaAll[ai].hid);
+            ofertaAll[ai]._confirmed=isConf;
+            if(isConf){confirmedCount++;confirmedArr.push(ofertaAll[ai]);}
           }
           for(var oi=0;oi<ofertaOut.length;oi++){if(matchPhone(ofertaOut[oi].p,ofertaOut[oi].hid))outConfirmed++;}
           for(var ii=0;ii<ofertaInb.length;ii++){if(matchPhone(ofertaInb[ii].p,ofertaInb[ii].hid))inbConfirmed++;}
@@ -2728,7 +2730,7 @@ export default function Dashboard(){
           for(var odi=0;odi<allMlLeads.length;odi++){
             var lead=allMlLeads[odi];
             var mlDate=null;
-            if(lead.c){
+            if(lead.c&&lead.c.length>0){
               for(var ci2=0;ci2<lead.c.length;ci2++){
                 var msg=lead.c[ci2];
                 if(msg[0]===2&&msg[1]&&(/meetings\.hubspot\.com\//.test(msg[1])||/yavendio\.com\/[^\s]*meetings/.test(msg[1]))){
@@ -2738,6 +2740,7 @@ export default function Dashboard(){
               }
               if(!mlDate&&lead.c[0]&&lead.c[0][2])mlDate=parseDatetime(lead.c[0][2]);
             }
+            if(!mlDate&&lead._created)mlDate=parseDatetime(lead._created);
             if(mlDate&&!isNaN(mlDate.getTime())){
               var dk=String(mlDate.getDate()).padStart(2,"0")+"/"+String(mlDate.getMonth()+1).padStart(2,"0");
               if(!ofertaByDay[dk])ofertaByDay[dk]=[];
@@ -2977,10 +2980,11 @@ export default function Dashboard(){
             var ofertaByDay={};
             for(var odi=0;odi<inbMlLeads.length;odi++){
               var lead=inbMlLeads[odi];var mlDate=null;
-              if(lead.c){
+              if(lead.c&&lead.c.length>0){
                 for(var ci2=0;ci2<lead.c.length;ci2++){var msg=lead.c[ci2];if(msg[0]===2&&msg[1]&&(/meetings\.hubspot\.com\//.test(msg[1])||/yavendio\.com\/[^\s]*meetings/.test(msg[1]))){if(msg[2])mlDate=parseDatetime(msg[2]);break;}}
                 if(!mlDate&&lead.c[0]&&lead.c[0][2])mlDate=parseDatetime(lead.c[0][2]);
               }
+              if(!mlDate&&lead._created)mlDate=parseDatetime(lead._created);
               if(mlDate&&!isNaN(mlDate.getTime())){var dk=String(mlDate.getDate()).padStart(2,"0")+"/"+String(mlDate.getMonth()+1).padStart(2,"0");if(!ofertaByDay[dk])ofertaByDay[dk]=[];ofertaByDay[dk].push(lead);}
             }
             var confirmedByDay={};
