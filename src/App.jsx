@@ -2201,8 +2201,9 @@ export default function Dashboard(){
         // --- Outcome stats ---
         var outcomeColor={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:C.yellow,RESCHEDULED:C.orange,"NO CALIFICADA":C.pink,UNKNOWN:C.muted};
         var outcomeCounts={};
-        for(var mi=0;mi<filtCrmMeetings.length;mi++){
-          var oc=filtCrmMeetings[mi].properties&&filtCrmMeetings[mi].properties.hs_meeting_outcome||"UNKNOWN";
+        var primeraOnly=filtCrmMeetings.filter(function(m){return m.properties&&m.properties.hs_activity_type==="\u2705 Primera Reuni\u00F3n";});
+        for(var mi=0;mi<primeraOnly.length;mi++){
+          var oc=primeraOnly[mi].properties&&primeraOnly[mi].properties.hs_meeting_outcome||"UNKNOWN";
           outcomeCounts[oc]=(outcomeCounts[oc]||0)+1;
         }
         var outcomeData=Object.keys(outcomeCounts).sort(function(a,b){return outcomeCounts[b]-outcomeCounts[a];}).map(function(k){return {name:k,count:outcomeCounts[k],color:outcomeColor[k]||C.muted};});
