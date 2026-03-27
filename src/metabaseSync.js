@@ -56,18 +56,30 @@ export async function loadThreadMessages(threadIds, table) {
 }
 
 // Load ALL distinct template names (no date filter) for config screen
-// Tries Metabase (Huble) first for full history, falls back to Supabase cache
+// Merges two sources: Metabase (full history: names, total_sent, last_sent) + Supabase RPC (reliable response rates from March+)
 export async function loadAllTemplateNames(queryMetabaseFn) {
-  // Try Metabase first (full history from Huble)
+  // 1. Supabase RPC: reliable response data from cached outbound threads
+  var respMap = {};
+  var { data: sbData, error: sbErr } = await retryQuery(function() {
+    return supabase.rpc("get_all_template_names");
+  });
+  if (sbErr) { console.error("[metabaseSync] Supabase template RPC error:", sbErr.message); }
+  if (sbData) {
+    for (var si = 0; si < sbData.length; si++) {
+      var s = sbData[si];
+      respMap[s.template_name] = { total_sent: s.total_sent || 0, total_resp: s.total_resp || 0 };
+    }
+  }
+
+  // 2. Metabase (Huble): full history — names, total_sent, step_order, last_sent
   if (queryMetabaseFn) {
     try {
       var mbResult = await queryMetabaseFn(
-        "SELECT le.template_name, lfs.step_order, COUNT(DISTINCT le.id) AS total_sent, " +
-        "COUNT(DISTINCT CASE WHEN t.thread_id IS NOT NULL AND (t.values::text LIKE '%\"type\": \"human\"%' OR t.values::text LIKE '%\"type\":\"human\"%') THEN le.id END) AS total_resp, " +
+        "SELECT le.template_name, lfs.step_order, " +
+        "COUNT(DISTINCT le.id) AS total_sent, " +
         "MAX(le.sent_at) AS last_sent " +
         "FROM lifecycle_executions le " +
         "JOIN lifecycle_flow_steps lfs ON le.step_id = lfs.id " +
-        "LEFT JOIN thread t ON (t.metadata->>'execution_id') = le.id::text " +
         "WHERE le.flow_id = 1 AND le.template_name IS NOT NULL AND le.template_name != '' " +
         "GROUP BY le.template_name, lfs.step_order " +
         "ORDER BY total_sent DESC"
@@ -78,27 +90,39 @@ export async function loadAllTemplateNames(queryMetabaseFn) {
         var rows = [];
         for (var ri = 0; ri < mbResult.results.length; ri++) {
           var r = mbResult.results[ri];
+          var tName = r[colIdx["template_name"]];
+          var sbInfo = respMap[tName];
           rows.push({
-            template_name: r[colIdx["template_name"]],
+            template_name: tName,
             step_order: r[colIdx["step_order"]] || null,
             total_sent: r[colIdx["total_sent"]] || 0,
-            total_resp: r[colIdx["total_resp"]] || 0,
+            total_resp: sbInfo ? sbInfo.total_resp : null,
             last_sent: r[colIdx["last_sent"]] || null,
           });
         }
-        console.log("[metabaseSync] Loaded " + rows.length + " template names from Metabase (full history)");
+        // Add any templates in Supabase but not in Metabase
+        var mbNames = {};
+        for (var mi = 0; mi < rows.length; mi++) mbNames[rows[mi].template_name] = true;
+        for (var sName in respMap) {
+          if (!mbNames[sName]) {
+            rows.push({
+              template_name: sName,
+              step_order: null,
+              total_sent: respMap[sName].total_sent || 0,
+              total_resp: respMap[sName].total_resp || 0,
+              last_sent: null,
+            });
+          }
+        }
+        console.log("[metabaseSync] Loaded " + rows.length + " templates (Metabase + Supabase merge)");
         return rows;
       }
     } catch (e) {
-      console.warn("[metabaseSync] Metabase template query failed, falling back to Supabase:", e.message);
+      console.warn("[metabaseSync] Metabase template query failed, using Supabase only:", e.message);
     }
   }
-  // Fallback: Supabase cache (only has recent data)
-  var { data, error } = await retryQuery(function() {
-    return supabase.rpc("get_all_template_names");
-  });
-  if (error) { console.error("[metabaseSync] all template names error:", error.message); return []; }
-  return data || [];
+  // Fallback: Supabase cache only
+  return sbData || [];
 }
 
 // Load lifecycle phones from mb_lifecycle_phones → { phone: { firstAt, firstStep1At } }
