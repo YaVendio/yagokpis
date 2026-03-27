@@ -759,7 +759,7 @@ export default function Dashboard(){
           if(resumenRegionFilter==="latam"&&!_prevLatamIds[oid])return false;
           var st=m.properties&&m.properties.hs_createdate||m.createdAt;if(!st)return false;var md=new Date(st);return md>=prFD&&md<=prTD;
         });
-        prevRealizadas=prFiltM.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED";}).length;
+        prevRealizadas=prFiltM.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED"&&m.properties.hs_activity_type==="\u2705 Primera Reuni\u00F3n";}).length;
         if(prFiltM.length>0){
           var prPh=getMeetingContactPhones(prFiltM,crmContacts);
           var prCI=getMeetingContactIds(prFiltM);
@@ -2194,8 +2194,8 @@ export default function Dashboard(){
           for(var ii=0;ii<ofertaInb.length;ii++){if(matchPhone(ofertaInb[ii].p,ofertaInb[ii].hid))inbConfirmed++;}
         }
 
-        // --- Realizadas (COMPLETED) ---
-        var realizadas=filtCrmMeetings.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED";}).length;
+        // --- Realizadas (COMPLETED + Primera Reunión only) ---
+        var realizadas=filtCrmMeetings.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED"&&m.properties.hs_activity_type==="\u2705 Primera Reuni\u00F3n";}).length;
         var realizadasPct=confirmedCount>0?((realizadas/confirmedCount)*100).toFixed(1):"0";
 
         // --- Outcome stats ---
@@ -2247,7 +2247,7 @@ export default function Dashboard(){
           if(!dayMap2[oDay]._sort){var opd2=parseDatetime(ol.c[0]&&ol.c[0][2]);if(opd2)dayMap2[oDay]._sort=opd2;}
         }
         var fCPhMap={};for(var fci=0;fci<crmContacts.length;fci++){var fcc=crmContacts[fci];var fcps=[];if(fcc.properties){if(fcc.properties.phone){var fcp1=fcc.properties.phone.replace(/\D/g,"");if(fcp1)fcps.push(fcp1);}if(fcc.properties.mobilephone){var fcp2=fcc.properties.mobilephone.replace(/\D/g,"");if(fcp2)fcps.push(fcp2);}if(fcc.properties.hs_whatsapp_phone_number){var fcp3=fcc.properties.hs_whatsapp_phone_number.replace(/\D/g,"");if(fcp3)fcps.push(fcp3);}}if(fcps.length>0)fCPhMap[fcc.id]=fcps;}
-        var fPhToDay={};var fIdToDay={};var fPhToOut={};var fIdToOut={};
+        var fPhToDay={};var fIdToDay={};var fPhToOut={};var fIdToOut={};var fPhToType={};var fIdToType={};
         // Confirmadas by hs_createdate
         for(var cfi=0;cfi<filtCrmMeetings.length;cfi++){
           var cm=filtCrmMeetings[cfi];
@@ -2257,11 +2257,11 @@ export default function Dashboard(){
           if(!dayMap2[cDay])dayMap2[cDay]={d:cDay,ofertas:0,confirmadas:0,realizadas:0,_sort:cpd};
           dayMap2[cDay].confirmadas++;
           if(!dayMap2[cDay]._sort)dayMap2[cDay]._sort=cpd;
-          // Realizadas
-          if(cm.properties&&cm.properties.hs_meeting_outcome==="COMPLETED") dayMap2[cDay].realizadas++;
-          var cmOut2=cm.properties&&cm.properties.hs_meeting_outcome;var cmAss2=cm.associations&&cm.associations.contacts&&cm.associations.contacts.results;if(cmAss2){for(var cai=0;cai<cmAss2.length;cai++){var caId2=cmAss2[cai].id;fIdToDay[caId2]=cDay;if(cmOut2)fIdToOut[caId2]=cmOut2;var caPs=fCPhMap[caId2];if(caPs){for(var cphi2=0;cphi2<caPs.length;cphi2++){var cph2=caPs[cphi2];fPhToDay[cph2]=cDay;if(cmOut2)fPhToOut[cph2]=cmOut2;if(cph2.length>11){fPhToDay[cph2.slice(-11)]=cDay;if(cmOut2)fPhToOut[cph2.slice(-11)]=cmOut2;}if(cph2.length>10){fPhToDay[cph2.slice(-10)]=cDay;if(cmOut2)fPhToOut[cph2.slice(-10)]=cmOut2;}}}}}
+          // Realizadas (Primera Reunión only)
+          if(cm.properties&&cm.properties.hs_meeting_outcome==="COMPLETED"&&cm.properties.hs_activity_type==="\u2705 Primera Reuni\u00F3n") dayMap2[cDay].realizadas++;
+          var cmOut2=cm.properties&&cm.properties.hs_meeting_outcome;var cmType2=cm.properties&&cm.properties.hs_activity_type;var cmAss2=cm.associations&&cm.associations.contacts&&cm.associations.contacts.results;if(cmAss2){for(var cai=0;cai<cmAss2.length;cai++){var caId2=cmAss2[cai].id;fIdToDay[caId2]=cDay;if(cmOut2)fIdToOut[caId2]=cmOut2;if(cmType2)fIdToType[caId2]=cmType2;var caPs=fCPhMap[caId2];if(caPs){for(var cphi2=0;cphi2<caPs.length;cphi2++){var cph2=caPs[cphi2];fPhToDay[cph2]=cDay;if(cmOut2)fPhToOut[cph2]=cmOut2;if(cmType2)fPhToType[cph2]=cmType2;if(cph2.length>11){fPhToDay[cph2.slice(-11)]=cDay;if(cmOut2)fPhToOut[cph2.slice(-11)]=cmOut2;if(cmType2)fPhToType[cph2.slice(-11)]=cmType2;}if(cph2.length>10){fPhToDay[cph2.slice(-10)]=cDay;if(cmOut2)fPhToOut[cph2.slice(-10)]=cmOut2;if(cmType2)fPhToType[cph2.slice(-10)]=cmType2;}}}}}
         }
-        var funnelConfByDay={};var funnelRealByDay={};for(var fli=0;fli<confirmedArr.length;fli++){var fl=confirmedArr[fli];var flp=(fl.p||"").replace(/\D/g,"");var flDay=null;var flOut=null;if(flp){flDay=fPhToDay[flp]||(flp.length>11&&fPhToDay[flp.slice(-11)])||(flp.length>10&&fPhToDay[flp.slice(-10)])||(flp.length>9&&fPhToDay[flp.slice(-9)])||(flp.length>8&&fPhToDay[flp.slice(-8)])||null;flOut=fPhToOut[flp]||(flp.length>11&&fPhToOut[flp.slice(-11)])||(flp.length>10&&fPhToOut[flp.slice(-10)])||(flp.length>9&&fPhToOut[flp.slice(-9)])||(flp.length>8&&fPhToOut[flp.slice(-8)])||null;}if(!flDay&&fl.hid){flDay=fIdToDay[fl.hid]||null;flOut=fIdToOut[fl.hid]||null;}if(flDay){if(!funnelConfByDay[flDay])funnelConfByDay[flDay]=[];funnelConfByDay[flDay].push(fl);if(flOut==="COMPLETED"){if(!funnelRealByDay[flDay])funnelRealByDay[flDay]=[];funnelRealByDay[flDay].push(fl);}}}
+        var funnelConfByDay={};var funnelRealByDay={};for(var fli=0;fli<confirmedArr.length;fli++){var fl=confirmedArr[fli];var flp=(fl.p||"").replace(/\D/g,"");var flDay=null;var flOut=null;var flType=null;if(flp){flDay=fPhToDay[flp]||(flp.length>11&&fPhToDay[flp.slice(-11)])||(flp.length>10&&fPhToDay[flp.slice(-10)])||(flp.length>9&&fPhToDay[flp.slice(-9)])||(flp.length>8&&fPhToDay[flp.slice(-8)])||null;flOut=fPhToOut[flp]||(flp.length>11&&fPhToOut[flp.slice(-11)])||(flp.length>10&&fPhToOut[flp.slice(-10)])||(flp.length>9&&fPhToOut[flp.slice(-9)])||(flp.length>8&&fPhToOut[flp.slice(-8)])||null;flType=fPhToType[flp]||(flp.length>11&&fPhToType[flp.slice(-11)])||(flp.length>10&&fPhToType[flp.slice(-10)])||(flp.length>9&&fPhToType[flp.slice(-9)])||(flp.length>8&&fPhToType[flp.slice(-8)])||null;}if(!flDay&&fl.hid){flDay=fIdToDay[fl.hid]||null;flOut=fIdToOut[fl.hid]||null;flType=fIdToType[fl.hid]||null;}if(flDay){if(!funnelConfByDay[flDay])funnelConfByDay[flDay]=[];funnelConfByDay[flDay].push(fl);if(flOut==="COMPLETED"&&flType==="\u2705 Primera Reuni\u00F3n"){if(!funnelRealByDay[flDay])funnelRealByDay[flDay]=[];funnelRealByDay[flDay].push(fl);}}}
         var handleFunnelBarClick=function(data,dataKey){var day=(data.payload||data).d;var leads=[];var title="";if(dataKey==="ofertas"){leads=(funnelOfertaByDay[day]||[]).map(function(l){var lp=(l.p||"").replace(/\D/g,"");var isConf=false;if(lp){isConf=!!(fPhToDay[lp]||(lp.length>11&&fPhToDay[lp.slice(-11)])||(lp.length>10&&fPhToDay[lp.slice(-10)])||(lp.length>9&&fPhToDay[lp.slice(-9)])||(lp.length>8&&fPhToDay[lp.slice(-8)]));}if(!isConf&&l.hid&&fIdToDay[l.hid])isConf=true;return Object.assign({},l,{_confirmed:isConf});});title="\u{1F4C5} Ofertadas "+day;}else if(dataKey==="confirmadas"){leads=funnelConfByDay[day]||[];title="\u2705 Agendadas "+day;}else if(dataKey==="realizadas"){leads=funnelRealByDay[day]||[];title="\u2705 Realizadas "+day;}if(leads.length>0)setChartDayModalData({title:title,leads:leads,tagContext:dataKey==="ofertas"?"ofertadas":"agendadas"});};
         var dailyFunnel=Object.values(dayMap2).sort(function(a,b){return (a._sort||0)-(b._sort||0);});
 
@@ -2320,7 +2320,7 @@ export default function Dashboard(){
               <div style={{fontSize:13,color:C.muted,marginTop:6}}>{totalOferta>0?((confirmedCount/totalOferta)*100).toFixed(1):"0"}% de ofertas {"\u00B7"} Out: <strong>{outConfirmed}</strong> / In: <strong>{inbConfirmed}</strong></div>
             </Cd>
             {/* Card: Realizadas */}
-            <Cd onClick={realizadas>0?function(){var completed=filtCrmMeetings.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED";});setRealizadasModalData({title:"Reuniones Realizadas ("+completed.length+")",meetings:completed});}:undefined} style={{border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)",position:"relative",overflow:"hidden",cursor:realizadas>0?"pointer":"default"}}>
+            <Cd onClick={realizadas>0?function(){var completed=filtCrmMeetings.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED"&&m.properties.hs_activity_type==="\u2705 Primera Reuni\u00F3n";});setRealizadasModalData({title:"Reuniones Realizadas \u2014 Primera Reuni\u00F3n ("+completed.length+")",meetings:completed});}:undefined} style={{border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)",position:"relative",overflow:"hidden",cursor:realizadas>0?"pointer":"default"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F3AF}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.cyan+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F3AF}"}</div>
@@ -2380,7 +2380,7 @@ export default function Dashboard(){
                   {m:"Tasa Oferta/Leads",o:outOfertaPct+"%",i:inbOfertaPct+"%",t:totalOfertaPct+"%"},
                   {m:"Agendadas",o:outConfirmed,i:inbConfirmed,t:confirmedCount},
                   {m:"Tasa Confirm/Oferta",o:outConfirmPct+"%",i:inbConfirmPct+"%",t:totalConfirmPct+"%"},
-                  {m:"Realizadas (COMPLETED)",o:"\u2014",i:"\u2014",t:realizadas},
+                  {m:"Realizadas (1\u00AA Reuni\u00F3n)",o:"\u2014",i:"\u2014",t:realizadas},
                   {m:"Tasa Realiz/Confirm",o:"\u2014",i:"\u2014",t:realizPct+"%"}
                 ].map(function(r,i){return(<tr key={i} style={{background:i%2===0?C.rowBg:"transparent"}}><td style={{padding:"12px 14px",fontWeight:600,borderRadius:"8px 0 0 8px"}}>{r.m}</td><td style={{padding:"12px 14px",fontWeight:800,fontFamily:mono,fontSize:15,textAlign:"center",color:C.accent}}>{r.o}</td><td style={{padding:"12px 14px",fontWeight:800,fontFamily:mono,fontSize:15,textAlign:"center",color:C.purple}}>{r.i}</td><td style={{padding:"12px 14px",fontWeight:800,fontFamily:mono,fontSize:15,textAlign:"center",borderRadius:"0 8px 8px 0"}}>{r.t}</td></tr>);})}
               </tbody>
