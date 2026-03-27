@@ -528,7 +528,7 @@ export default function Dashboard(){
 
   var _brevoIcon=<svg width="18" height="18" viewBox="0 0 24 24" fill="#0B996E"><path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zM7.2 4.8h5.747c2.34 0 3.895 1.406 3.895 3.516 0 1.022-.348 1.862-1.09 2.588C17.189 11.812 18 13.22 18 14.785c0 2.86-2.64 5.016-6.164 5.016H7.199v-15zm2.085 1.952v5.537h.07c.233-.432.858-.796 2.249-1.226 2.039-.659 3.037-1.52 3.037-2.655 0-.998-.766-1.656-1.924-1.656H9.285zm4.87 5.266c-.766.385-1.67.748-2.76 1.11-1.229.387-2.11 1.386-2.11 2.407v2.315h2.365c2.387 0 4.149-1.34 4.149-3.155 0-1.067-.625-2.087-1.645-2.677z"/></svg>;
   var _hubspotIcon=<svg width="18" height="18" viewBox="0 0 24 24" fill="#FF7A59"><path d="M18.164 7.93V5.084a2.198 2.198 0 001.267-1.978v-.067A2.2 2.2 0 0017.238.845h-.067a2.2 2.2 0 00-2.193 2.193v.067a2.196 2.196 0 001.252 1.973l.013.006v2.852a6.22 6.22 0 00-2.969 1.31l.012-.01-7.828-6.095A2.497 2.497 0 104.3 4.656l-.012.006 7.697 5.991a6.176 6.176 0 00-1.038 3.446c0 1.343.425 2.588 1.147 3.607l-.013-.02-2.342 2.343a1.968 1.968 0 00-.58-.095h-.002a2.033 2.033 0 102.033 2.033 1.978 1.978 0 00-.1-.595l.005.014 2.317-2.317a6.247 6.247 0 104.782-11.134l-.036-.005zm-.964 9.378a3.206 3.206 0 113.215-3.207v.002a3.206 3.206 0 01-3.207 3.207z"/></svg>;
-  const SECTIONS={resumen:{label:"Resumen",icon:"\uD83D\uDCCA",subTabs:[]},outbound:{label:"Outbound",icon:"\uD83C\uDFAF",subTabs:["resumen","engagement","templates"]},inbound:{label:"Inbound",icon:"\uD83D\uDCE5",subTabs:["resumen","engagement"]},ads:{label:"Ads",icon:"\uD83D\uDCE2",subTabs:[]},canales:{label:"Canales",icon:"\uD83D\uDCE1",subTabs:["grupos"]},hubspot:{label:"HubSpot",icon:_hubspotIcon,subTabs:["analytics","reuniones"]},brevo:{label:"Brevo",icon:_brevoIcon,subTabs:[]},growth:{label:"Marketing",icon:"\uD83D\uDCC8",subTabs:["resumen"]}};
+  const SECTIONS={resumen:{label:"Geral",icon:"\uD83D\uDCCA",subTabs:[]},outbound:{label:"Outbound",icon:"\uD83C\uDFAF",subTabs:["resumen","engagement","templates"]},inbound:{label:"Inbound",icon:"\uD83D\uDCE5",subTabs:["resumen","engagement"]},ads:{label:"Ads",icon:"\uD83D\uDCE2",subTabs:[]},canales:{label:"Canales",icon:"\uD83D\uDCE1",subTabs:["grupos"]},hubspot:{label:"HubSpot",icon:_hubspotIcon,subTabs:["analytics","reuniones"]},brevo:{label:"Brevo",icon:_brevoIcon,subTabs:[]},growth:{label:"Marketing",icon:"\uD83D\uDCC8",subTabs:["resumen"]}};
   function parseRoute(){var parts=window.location.pathname.replace(/^\/+|\/+$/g,"").split("/");var sec=parts[0]||"resumen";var sub=parts[1]||"";if(!SECTIONS[sec])return{section:"resumen",subTab:""};var info=SECTIONS[sec];if(info.subTabs.length>0&&!sub)sub=info.subTabs[0];if(sub&&info.subTabs.indexOf(sub)<0)sub=info.subTabs[0]||"";return{section:sec,subTab:sub};}
   var _initRoute=parseRoute();
   const [section,setSection]=useState(_initRoute.section);
@@ -823,7 +823,7 @@ export default function Dashboard(){
           if(resumenRegionFilter==="latam"&&!_prevLatamIds[oid])return false;
           var st=m.properties&&m.properties.hs_createdate||m.createdAt;if(!st)return false;var md=new Date(st);return md>=prFD&&md<=prTD;
         });
-        prevRealizadas=prFiltM.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED"&&m.properties.hs_activity_type==="\u2705 Primera Reuni\u00F3n";}).length;
+        prevRealizadas=prFiltM.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED";}).length;
         if(prFiltM.length>0){
           var prPh=getMeetingContactPhones(prFiltM,crmContacts);
           var prCI=getMeetingContactIds(prFiltM);
@@ -2263,14 +2263,14 @@ export default function Dashboard(){
           for(var ii=0;ii<ofertaInb.length;ii++){if(matchPhone(ofertaInb[ii].p,ofertaInb[ii].hid))inbConfirmed++;}
         }
 
-        // --- Realizadas (COMPLETED + Primera Reunión only) ---
-        var realizadas=filtCrmMeetings.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED"&&m.properties.hs_activity_type==="\u2705 Primera Reuni\u00F3n";}).length;
+        // --- Realizadas (COMPLETED) ---
+        var realizadas=filtCrmMeetings.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED";}).length;
         var realizadasPct=confirmedCount>0?((realizadas/confirmedCount)*100).toFixed(1):"0";
 
         // --- Outcome stats ---
         var outcomeColor={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:C.yellow,RESCHEDULED:C.orange,"NO CALIFICADA":C.pink,UNKNOWN:C.muted};
         var outcomeCounts={};
-        var primeraOnly=filtCrmMeetings.filter(function(m){return m.properties&&m.properties.hs_activity_type==="\u2705 Primera Reuni\u00F3n";});
+        var primeraOnly=filtCrmMeetings;
         for(var mi=0;mi<primeraOnly.length;mi++){
           var oc=primeraOnly[mi].properties&&primeraOnly[mi].properties.hs_meeting_outcome||"UNKNOWN";
           outcomeCounts[oc]=(outcomeCounts[oc]||0)+1;
@@ -2327,14 +2327,19 @@ export default function Dashboard(){
           if(!dayMap2[cDay])dayMap2[cDay]={d:cDay,ofertas:0,confirmadas:0,realizadas:0,_sort:cpd};
           dayMap2[cDay].confirmadas++;
           if(!dayMap2[cDay]._sort)dayMap2[cDay]._sort=cpd;
-          // Realizadas (Primera Reunión only)
-          if(cm.properties&&cm.properties.hs_meeting_outcome==="COMPLETED"&&cm.properties.hs_activity_type==="\u2705 Primera Reuni\u00F3n") dayMap2[cDay].realizadas++;
+          // Realizadas (all COMPLETED)
+          if(cm.properties&&cm.properties.hs_meeting_outcome==="COMPLETED") dayMap2[cDay].realizadas++;
           var cmOut2=cm.properties&&cm.properties.hs_meeting_outcome;var cmType2=cm.properties&&cm.properties.hs_activity_type;var cmAss2=cm.associations&&cm.associations.contacts&&cm.associations.contacts.results;if(cmAss2){for(var cai=0;cai<cmAss2.length;cai++){var caId2=cmAss2[cai].id;fIdToDay[caId2]=cDay;if(cmOut2)fIdToOut[caId2]=cmOut2;if(cmType2)fIdToType[caId2]=cmType2;var caPs=fCPhMap[caId2];if(caPs){for(var cphi2=0;cphi2<caPs.length;cphi2++){var cph2=caPs[cphi2];fPhToDay[cph2]=cDay;if(cmOut2)fPhToOut[cph2]=cmOut2;if(cmType2)fPhToType[cph2]=cmType2;if(cph2.length>11){fPhToDay[cph2.slice(-11)]=cDay;if(cmOut2)fPhToOut[cph2.slice(-11)]=cmOut2;if(cmType2)fPhToType[cph2.slice(-11)]=cmType2;}if(cph2.length>10){fPhToDay[cph2.slice(-10)]=cDay;if(cmOut2)fPhToOut[cph2.slice(-10)]=cmOut2;if(cmType2)fPhToType[cph2.slice(-10)]=cmType2;}}}}}
         }
-        var funnelConfByDay={};var funnelRealByDay={};for(var fli=0;fli<confirmedArr.length;fli++){var fl=confirmedArr[fli];var flp=(fl.p||"").replace(/\D/g,"");var flDay=null;var flOut=null;var flType=null;if(flp){flDay=fPhToDay[flp]||(flp.length>11&&fPhToDay[flp.slice(-11)])||(flp.length>10&&fPhToDay[flp.slice(-10)])||(flp.length>9&&fPhToDay[flp.slice(-9)])||(flp.length>8&&fPhToDay[flp.slice(-8)])||null;flOut=fPhToOut[flp]||(flp.length>11&&fPhToOut[flp.slice(-11)])||(flp.length>10&&fPhToOut[flp.slice(-10)])||(flp.length>9&&fPhToOut[flp.slice(-9)])||(flp.length>8&&fPhToOut[flp.slice(-8)])||null;flType=fPhToType[flp]||(flp.length>11&&fPhToType[flp.slice(-11)])||(flp.length>10&&fPhToType[flp.slice(-10)])||(flp.length>9&&fPhToType[flp.slice(-9)])||(flp.length>8&&fPhToType[flp.slice(-8)])||null;}if(!flDay&&fl.hid){flDay=fIdToDay[fl.hid]||null;flOut=fIdToOut[fl.hid]||null;flType=fIdToType[fl.hid]||null;}if(flDay){if(!funnelConfByDay[flDay])funnelConfByDay[flDay]=[];funnelConfByDay[flDay].push(fl);if(flOut==="COMPLETED"&&flType==="\u2705 Primera Reuni\u00F3n"){if(!funnelRealByDay[flDay])funnelRealByDay[flDay]=[];funnelRealByDay[flDay].push(fl);}}}
-                // --- Iago realizadas (cross-matched with out/inb leads) ---
+        var funnelConfByDay={};var funnelRealByDay={};for(var fli=0;fli<confirmedArr.length;fli++){var fl=confirmedArr[fli];var flp=(fl.p||"").replace(/\D/g,"");var flDay=null;var flOut=null;var flType=null;if(flp){flDay=fPhToDay[flp]||(flp.length>11&&fPhToDay[flp.slice(-11)])||(flp.length>10&&fPhToDay[flp.slice(-10)])||(flp.length>9&&fPhToDay[flp.slice(-9)])||(flp.length>8&&fPhToDay[flp.slice(-8)])||null;flOut=fPhToOut[flp]||(flp.length>11&&fPhToOut[flp.slice(-11)])||(flp.length>10&&fPhToOut[flp.slice(-10)])||(flp.length>9&&fPhToOut[flp.slice(-9)])||(flp.length>8&&fPhToOut[flp.slice(-8)])||null;flType=fPhToType[flp]||(flp.length>11&&fPhToType[flp.slice(-11)])||(flp.length>10&&fPhToType[flp.slice(-10)])||(flp.length>9&&fPhToType[flp.slice(-9)])||(flp.length>8&&fPhToType[flp.slice(-8)])||null;}if(!flDay&&fl.hid){flDay=fIdToDay[fl.hid]||null;flOut=fIdToOut[fl.hid]||null;flType=fIdToType[fl.hid]||null;}if(flDay){if(!funnelConfByDay[flDay])funnelConfByDay[flDay]=[];funnelConfByDay[flDay].push(fl);if(flOut==="COMPLETED"){if(!funnelRealByDay[flDay])funnelRealByDay[flDay]=[];funnelRealByDay[flDay].push(fl);}}}
+                // --- Yago realizadas (all COMPLETED meetings cross-matched with out/inb leads) ---
         var iagoRealizadas=0;var iagoRealOut=0;var iagoRealInb=0;var iagoRealArr=[];
-        var _rkKeys=Object.keys(funnelRealByDay);for(var _rki=0;_rki<_rkKeys.length;_rki++){var _rda=funnelRealByDay[_rkKeys[_rki]];for(var _rdi=0;_rdi<_rda.length;_rdi++){iagoRealizadas++;iagoRealArr.push(_rda[_rdi]);if(_rda[_rdi]._table==="mb_outbound_threads")iagoRealOut++;else iagoRealInb++;}}
+        for(var _yri=0;_yri<confirmedArr.length;_yri++){var _yrl=confirmedArr[_yri];var _yrlp=(_yrl.p||"").replace(/\D/g,"");var _yrOut=null;if(_yrlp){_yrOut=fPhToOut[_yrlp]||(_yrlp.length>11&&fPhToOut[_yrlp.slice(-11)])||(_yrlp.length>10&&fPhToOut[_yrlp.slice(-10)])||(_yrlp.length>9&&fPhToOut[_yrlp.slice(-9)])||(_yrlp.length>8&&fPhToOut[_yrlp.slice(-8)])||null;}if(!_yrOut&&_yrl.hid)_yrOut=fIdToOut[_yrl.hid]||null;if(_yrOut==="COMPLETED"){iagoRealizadas++;iagoRealArr.push(_yrl);if(_yrl._table==="mb_outbound_threads")iagoRealOut++;else iagoRealInb++;}}
+
+                // --- Yago outcome stats (from confirmed leads cross-matched with CRM) ---
+        var yagoOutcomeCounts={};
+        for(var _yoi=0;_yoi<confirmedArr.length;_yoi++){var _yl=confirmedArr[_yoi];var _ylp=(_yl.p||"").replace(/\D/g,"");var _ylOut=null;if(_ylp){_ylOut=fPhToOut[_ylp]||(_ylp.length>11&&fPhToOut[_ylp.slice(-11)])||(_ylp.length>10&&fPhToOut[_ylp.slice(-10)])||(_ylp.length>9&&fPhToOut[_ylp.slice(-9)])||(_ylp.length>8&&fPhToOut[_ylp.slice(-8)])||null;}if(!_ylOut&&_yl.hid){_ylOut=fIdToOut[_yl.hid]||null;}var _yoKey=_ylOut||"UNKNOWN";yagoOutcomeCounts[_yoKey]=(yagoOutcomeCounts[_yoKey]||0)+1;}
+        var yagoOutcomeData=Object.keys(yagoOutcomeCounts).sort(function(a,b){return yagoOutcomeCounts[b]-yagoOutcomeCounts[a];}).map(function(k){return{name:k,count:yagoOutcomeCounts[k],color:outcomeColor[k]||C.muted};});
 
         var handleFunnelBarClick=function(data,dataKey){var day=(data.payload||data).d;var leads=[];var title="";if(dataKey==="ofertas"){leads=(funnelOfertaByDay[day]||[]).map(function(l){var lp=(l.p||"").replace(/\D/g,"");var isConf=false;if(lp){isConf=!!(fPhToDay[lp]||(lp.length>11&&fPhToDay[lp.slice(-11)])||(lp.length>10&&fPhToDay[lp.slice(-10)])||(lp.length>9&&fPhToDay[lp.slice(-9)])||(lp.length>8&&fPhToDay[lp.slice(-8)]));}if(!isConf&&l.hid&&fIdToDay[l.hid])isConf=true;return Object.assign({},l,{_confirmed:isConf});});title="\u{1F4C5} Ofertadas "+day;}else if(dataKey==="confirmadas"){leads=funnelConfByDay[day]||[];title="\u2705 Agendadas "+day;}else if(dataKey==="realizadas"){leads=funnelRealByDay[day]||[];title="\u2705 Realizadas "+day;}if(leads.length>0)setChartDayModalData({title:title,leads:leads,tagContext:dataKey==="ofertas"?"ofertadas":"agendadas"});};
         var dailyFunnel=Object.values(dayMap2).sort(function(a,b){return (a._sort||0)-(b._sort||0);});
@@ -2394,15 +2399,15 @@ export default function Dashboard(){
               <div style={{fontSize:13,color:C.muted,marginTop:6}}>{totalOferta>0?((confirmedCount/totalOferta)*100).toFixed(1):"0"}% de ofertas {"\u00B7"} Out: <strong>{outConfirmed}</strong> / In: <strong>{inbConfirmed}</strong></div>
             </Cd>
             {/* Card: Realizadas */}
-            <Cd onClick={iagoRealizadas>0?function(){setQualModalLeads(iagoRealArr);setQualModalTitle("\u{1F3AF} Realizadas por Iago ("+iagoRealizadas+")");}:undefined} style={{border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)",position:"relative",overflow:"hidden",cursor:iagoRealizadas>0?"pointer":"default"}}>
+            <Cd onClick={iagoRealizadas>0?function(){setQualModalLeads(iagoRealArr);setQualModalTitle("\u{1F3AF} Realizadas por Yago ("+iagoRealizadas+")");}:undefined} style={{border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)",position:"relative",overflow:"hidden",cursor:iagoRealizadas>0?"pointer":"default"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F3AF}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.cyan+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F3AF}"}</div>
-                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Realizadas (Iago)</span>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Realizadas (Yago)</span>
               </div>
               <div style={{display:"flex",alignItems:"baseline",gap:4,marginTop:4}}><span style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.cyan,lineHeight:1}}>{iagoRealizadas}</span></div>
               <div style={{fontSize:13,color:C.muted,marginTop:6}}>Out: <strong>{iagoRealOut}</strong> / In: <strong>{iagoRealInb}</strong></div>
-              <div style={{fontSize:12,color:C.muted,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6,cursor:realizadas>0?"pointer":"default"}} onClick={realizadas>0?function(e){e.stopPropagation();var completed=filtCrmMeetings.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED"&&m.properties.hs_activity_type==="\u2705 Primera Reuni\u00f3n";});setRealizadasModalData({title:"Todas Primera Reuni\u00f3n Realizadas ("+completed.length+")",meetings:completed});}:undefined}>Total 1\u00aa Reuni\u00f3n: <strong style={{color:C.cyan,fontFamily:mono}}>{realizadas}</strong>{compareEnabled&&prevResumenData&&<DeltaBadge current={realizadas} previous={prevResumenData.realizadas}/>}</div>
+              <div style={{fontSize:12,color:C.muted,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6,cursor:realizadas>0?"pointer":"default"}} onClick={realizadas>0?function(e){e.stopPropagation();var completed=filtCrmMeetings.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED";});setRealizadasModalData({title:"Todas Reuniones Realizadas ("+completed.length+")",meetings:completed});}:undefined}>Total realizadas: <strong style={{color:C.cyan,fontFamily:mono}}>{realizadas}</strong>{compareEnabled&&prevResumenData&&<DeltaBadge current={realizadas} previous={prevResumenData.realizadas}/>}</div>
             </Cd>
           </div>
 
@@ -2412,10 +2417,21 @@ export default function Dashboard(){
               {funnelData.map(function(f,i){var base=funnelData[0].v||1;var w=Math.max((f.v/base)*100,3);var prev=i>0?((f.v/(funnelData[i-1].v||1))*100).toFixed(0):null;
                 return (<div key={i} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:C.sub,fontWeight:500}}><span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:6,background:f.c+"18",color:f.c,fontSize:11,fontWeight:800,marginRight:6}}>{i+1}</span>{f.n}</span><div><span style={{fontSize:17,fontWeight:800,fontFamily:mono}}>{f.v}</span><span style={{fontSize:13,color:C.muted,marginLeft:6}}>{(f.v/base*100).toFixed(1)}%</span>{prev && <span style={{fontSize:12,color:parseFloat(prev)>=50?C.green:parseFloat(prev)>=20?C.yellow:C.red,marginLeft:6}}>({prev}%{"\u2193"})</span>}</div></div><div style={{height:24,background:C.rowAlt,borderRadius:6,overflow:"hidden"}}><div style={{height:"100%",width:w+"%",background:"linear-gradient(90deg, "+f.c+" 0%, "+f.c+"CC 100%)",borderRadius:6,transition:"width 0.5s ease"}}/></div></div>);})}
             </Cd>
-            <Cd><Sec>Distribuci{"\u00F3"}n de Resultados (HubSpot)</Sec>
+            <Cd><Sec>Resultados Reuniones</Sec>
+              {/* Yago outcomes */}
+              {yagoOutcomeData.length>0 ? (<>
+                <div style={{fontSize:11,color:C.cyan,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Agendadas por Yago ({confirmedCount})</div>
+                {yagoOutcomeData.map(function(o,i){var maxC=yagoOutcomeData[0].count||1;var w2=Math.max((o.count/maxC)*100,3);
+                  return (<div key={"y"+i} style={{marginBottom:6,borderRadius:6,padding:"3px 6px"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:12,fontWeight:600,color:o.color}}>{o.name}</span><span style={{fontSize:13,fontWeight:800,fontFamily:mono}}>{o.count}</span></div><div style={{height:14,background:C.rowAlt,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:w2+"%",background:o.color,borderRadius:4,opacity:0.7,transition:"width 0.4s ease"}}/></div></div>);
+                })}
+              </>) : <div style={{fontSize:12,color:C.muted,padding:8,textAlign:"center"}}>Sin datos de Yago</div>}
+              {/* Divider */}
+              <div style={{borderTop:"1px solid "+C.border,margin:"12px 0"}}/>
+              {/* All HubSpot outcomes */}
+              <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Todas las Reuniones ({primeraOnly.length})</div>
               {outcomeData.length>0 ? outcomeData.map(function(o,i){var maxC=outcomeData[0].count||1;var w2=Math.max((o.count/maxC)*100,3);
-                return (<div key={i} onClick={function(){setHsReunionOutcomeFilter(o.name);navigateTo("hubspot","reuniones");}} style={{marginBottom:8,cursor:"pointer",borderRadius:6,padding:"4px 6px",transition:"background 0.15s ease"}} onMouseEnter={function(e){e.currentTarget.style.background=C.rowAlt;}} onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:13,fontWeight:600,color:o.color}}>{o.name}</span><span style={{fontSize:14,fontWeight:800,fontFamily:mono}}>{o.count}</span></div><div style={{height:18,background:C.rowAlt,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:w2+"%",background:o.color,borderRadius:4,opacity:0.7,transition:"width 0.4s ease"}}/></div></div>);
-              }) : <div style={{fontSize:13,color:C.muted,padding:20,textAlign:"center"}}>Sin datos de reuniones en HubSpot para este per{"\u00ED"}odo</div>}
+                return (<div key={"a"+i} onClick={function(){setHsReunionOutcomeFilter(o.name);navigateTo("hubspot","reuniones");}} style={{marginBottom:6,cursor:"pointer",borderRadius:6,padding:"3px 6px",transition:"background 0.15s ease"}} onMouseEnter={function(e){e.currentTarget.style.background=C.rowAlt;}} onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:12,fontWeight:600,color:o.color}}>{o.name}</span><span style={{fontSize:13,fontWeight:800,fontFamily:mono}}>{o.count}</span></div><div style={{height:14,background:C.rowAlt,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:w2+"%",background:o.color,borderRadius:4,opacity:0.7,transition:"width 0.4s ease"}}/></div></div>);
+              }) : <div style={{fontSize:12,color:C.muted,padding:8,textAlign:"center"}}>Sin datos de HubSpot</div>}
             </Cd>
           </div>
 
