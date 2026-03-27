@@ -162,6 +162,7 @@ export function processOutboundThreads(threads, templateConfig, regionFilter) {
     var groupTopicFlags = 0;
     var templatesSent = [];
     var earliestFirstHumanTs = null;
+    var latestLastHumanTs = null;
     var groupThreadIds = [];
 
     for (var gi2 = 0; gi2 < grp2.length; gi2++) {
@@ -182,6 +183,12 @@ export function processOutboundThreads(threads, templateConfig, regionFilter) {
         var fht = new Date(th.first_human_ts);
         if (!isNaN(fht.getTime()) && (!earliestFirstHumanTs || fht < earliestFirstHumanTs)) {
           earliestFirstHumanTs = fht;
+        }
+      }
+      if (th.last_human_ts) {
+        var lht2 = new Date(th.last_human_ts);
+        if (!isNaN(lht2.getTime()) && (!latestLastHumanTs || lht2 > latestLastHumanTs)) {
+          latestLastHumanTs = lht2;
         }
       }
     }
@@ -326,6 +333,7 @@ export function processOutboundThreads(threads, templateConfig, regionFilter) {
         c: [], // lazy load
         ml: groupHasMeetingLink,
         _created: sentAt || null,
+        _lastTs: latestLastHumanTs ? latestLastHumanTs.toISOString() : null,
         _threadIds: groupThreadIds,
         _table: "mb_outbound_threads",
       });
@@ -759,6 +767,7 @@ export function processInboundThreads(threads, regionFilter, lifecyclePhones, hu
       signup: !!(lcInfo && lcInfo.firstStep1At),
       signupLink: hasSignupLink,
       _created: th.created_at || null,
+      _lastTs: th.last_human_ts || null,
       _threadIds: [th.thread_id],
       _table: "mb_inbound_threads",
     });

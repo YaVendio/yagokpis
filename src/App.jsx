@@ -252,12 +252,10 @@ function timeAgo(ts){
 }
 
 function getLastMsgTs(lead){
-  if(!lead.c||lead.c.length===0)return 0;
-  var last=lead.c[lead.c.length-1];
-  var ts=last[2];
-  if(!ts)return 0;
-  var d=new Date(ts);
-  return isNaN(d.getTime())?0:d.getTime();
+  if(lead.c&&lead.c.length>0){var last=lead.c[lead.c.length-1];var ts=last[2];if(ts){var d=new Date(ts);if(!isNaN(d.getTime()))return d.getTime();}}
+  if(lead._lastTs){var d2=new Date(lead._lastTs);if(!isNaN(d2.getTime()))return d2.getTime();}
+  if(lead._created){var d3=new Date(lead._created);if(!isNaN(d3.getTime()))return d3.getTime();}
+  return 0;
 }
 
 function MeetModal({leads,onClose,mode,title,crmContacts,tagContext}){
@@ -289,7 +287,8 @@ function MeetModal({leads,onClose,mode,title,crmContacts,tagContext}){
             var company=props.company||"";
             var email=props.email||"";
             var hsId=ct?ct.id:"";
-            var lastTs=getLastMsgTs(l);
+            var _fd=function(s){if(!s)return"";var d2=new Date(s);if(isNaN(d2.getTime()))return"";return String(d2.getDate()).padStart(2,"0")+"/"+String(d2.getMonth()+1).padStart(2,"0")+" "+String(d2.getHours()).padStart(2,"0")+":"+String(d2.getMinutes()).padStart(2,"0");};
+            var firstDt=_fd(l._created);var lastDt=_fd(l._lastTs);
             return (<div key={i} onClick={function(){setSel(i);}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:C.rowBg,borderRadius:12,cursor:"pointer",border:"2px solid transparent",transition:"border-color 0.15s ease"}} onMouseEnter={function(e){e.currentTarget.style.borderColor=C.accent+"44";}} onMouseLeave={function(e){e.currentTarget.style.borderColor="transparent";}}>
               <span style={{fontSize:20}}>{l.co}</span>
               <div style={{flex:1,minWidth:0}}>
@@ -309,7 +308,7 @@ function MeetModal({leads,onClose,mode,title,crmContacts,tagContext}){
                   {!name && !email && <span style={{fontFamily:mono,fontSize:12}}>{l.p} {"\u00B7"} </span>}
                   {name && <span style={{fontFamily:mono,fontSize:12}}>{l.p} {"\u00B7"} </span>}
                   <span>{l.ms} msgs {"\u00B7"} {l.w.toLocaleString()} pal.</span>
-                  {lastTs>0 && <span> {"\u00B7"} {timeAgo(lastTs)}</span>}
+                  {firstDt && <span>{"\u00B7"} {firstDt}{lastDt&&lastDt!==firstDt?" \u2192 "+lastDt:""}</span>}
                 </div>
               </div>
               <div style={{color:C.accent,fontSize:18,fontWeight:700}}>{"\u2192"}</div>
