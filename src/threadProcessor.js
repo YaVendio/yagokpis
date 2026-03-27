@@ -162,9 +162,11 @@ export function processOutboundThreads(threads, templateConfig, regionFilter) {
     var groupTopicFlags = 0;
     var templatesSent = [];
     var earliestFirstHumanTs = null;
+    var groupThreadIds = [];
 
     for (var gi2 = 0; gi2 < grp2.length; gi2++) {
       var th = grp2[gi2];
+      if (th.thread_id) groupThreadIds.push(th.thread_id);
       if (th.phone_number) phone = th.phone_number;
       if (th.lead_qualification) qual = th.lead_qualification;
       if (th.hubspot_id) hid = th.hubspot_id;
@@ -323,6 +325,8 @@ export function processOutboundThreads(threads, templateConfig, regionFilter) {
         fr: triggerTpl,
         c: [], // lazy load
         ml: groupHasMeetingLink,
+        _threadIds: groupThreadIds,
+        _table: "mb_outbound_threads",
       });
     }
   }
@@ -753,6 +757,8 @@ export function processInboundThreads(threads, regionFilter, lifecyclePhones, hu
       lang: lang,
       signup: !!(lcInfo && lcInfo.firstStep1At),
       signupLink: hasSignupLink,
+      _threadIds: [th.thread_id],
+      _table: "mb_inbound_threads",
     });
   }
 

@@ -79,7 +79,61 @@ function SideBtn({children,label,onClick,active,style}){var _h=useState(false),h
 
 function qualLabel(q){if(!q)return{t:"Sin calificaci\u00F3n",c:C.muted};var lo=q.toLowerCase();if(lo==="alta")return{t:"Alta",c:C.green};if(lo==="media"||lo==="m\u00E9dia")return{t:"Media",c:C.accent};if(lo==="baja"||lo==="baixa")return{t:"Baja",c:C.yellow};return{t:q,c:C.muted};}
 
+function parseRawMessages(rawMsgs){
+  var TMARKER_ES="[Este mensaje fue enviado autom\u00E1ticamente por YaVendi\u00F3]";
+  var TMARKER_PT="[Esta mensagem foi enviada automaticamente pelo YaVendi\u00F3]";
+  var conv=[];
+  for(var i=0;i<rawMsgs.length;i++){
+    var msg=rawMsgs[i];
+    var type=msg.type==="human"?"human":msg.type==="tool"?"tool":"ai";
+    var content="";
+    if(typeof msg.content==="string"){content=msg.content;}
+    else if(Array.isArray(msg.content)){var parts=[];for(var bi=0;bi<msg.content.length;bi++){var block=msg.content[bi];if(typeof block==="string")parts.push(block);else if(block&&block.text)parts.push(block.text);}content=parts.join("");}
+    var dt="";
+    if(msg.additional_kwargs&&msg.additional_kwargs.metadata&&msg.additional_kwargs.metadata.timestamp){
+      var ts=msg.additional_kwargs.metadata.timestamp;
+      var d=typeof ts==="number"?new Date(ts*1000):new Date(ts);
+      if(!isNaN(d.getTime())){dt=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");}
+    }
+    var tplName=msg.additional_kwargs&&msg.additional_kwargs.metadata&&msg.additional_kwargs.metadata.template_name||"";
+    if(type==="ai"){
+      if(tplName||(content&&(content.includes(TMARKER_ES)||content.includes(TMARKER_PT)))){
+        conv.push([0,tplName||"template",dt,content]);
+      } else {
+        conv.push([2,content,dt]);
+      }
+    } else if(type==="human"){
+      conv.push([1,content,dt]);
+    }
+  }
+  return conv;
+}
 function ConvView({lead,onBack,crmContacts,tagContext}){
+  var [convMsgs,setConvMsgs]=useState(lead.c&&lead.c.length>0?lead.c:null);
+  var [loading,setLoading]=useState(false);
+  useEffect(function(){
+    if(convMsgs)return;
+    if(!lead._threadIds||lead._threadIds.length===0){setConvMsgs([]);return;}
+    setLoading(true);
+    loadThreadMessages(lead._threadIds,lead._table||"mb_outbound_threads").then(function(data){
+      var allMsgs=[];
+      for(var i=0;i<(lead._threadIds||[]).length;i++){
+        var tid=lead._threadIds[i];
+        for(var j=0;j<data.length;j++){
+          if(data[j].thread_id===tid&&data[j].messages){
+            var raw=typeof data[j].messages==="string"?JSON.parse(data[j].messages):data[j].messages;
+            if(Array.isArray(raw))for(var k=0;k<raw.length;k++)allMsgs.push(raw[k]);
+            break;
+          }
+        }
+      }
+      var parsed=parseRawMessages(allMsgs);
+      lead.c=parsed;
+      setConvMsgs(parsed);
+      setLoading(false);
+    }).catch(function(){setConvMsgs([]);setLoading(false);});
+  },[]);
+  var msgs=convMsgs||[];
   var ql=qualLabel(lead.q);
   var phoneMap=buildPhoneContactMap(crmContacts);
   var ct=findContact(phoneMap,lead.p);
@@ -110,8 +164,15 @@ function ConvView({lead,onBack,crmContacts,tagContext}){
         </div>
       </div>
     </div>
+    {loading ? (
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:40,gap:10}}>
+        <div style={{width:20,height:20,border:"3px solid "+C.accent+"30",borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+        <span style={{color:C.muted,fontSize:14}}>Cargando conversaci\u00F3n...</span>
+      </div>
+    ) : (
     <div style={{display:"flex",flexDirection:"column",gap:6,paddingTop:14}}>
-      {lead.c.map(function(m,i){
+      {msgs.length===0 && !loading && <div style={{textAlign:"center",color:C.muted,fontSize:14,padding:30}}>No hay mensajes disponibles</div>}
+      {msgs.map(function(m,i){
         var dt=m[2]||"";
         if(m[0]===0){
           var tc=tplCol[m[1]]||(m[1]&&m[1].startsWith("pt_")?C.green:m[1]&&m[1].startsWith("es_")?C.accent:C.accent);
@@ -137,8 +198,9 @@ function ConvView({lead,onBack,crmContacts,tagContext}){
         }
         return null;
       })}
-      {lead.c.length>=80 && <div style={{textAlign:"center",fontSize:13,color:C.muted,padding:16,background:C.rowBg,borderRadius:8,margin:"8px 0"}}>{"\u26A0 Conversaci\u00F3n truncada (primeros 80 mensajes)"}</div>}
+      {msgs.length>=80 && <div style={{textAlign:"center",fontSize:13,color:C.muted,padding:16,background:C.rowBg,borderRadius:8,margin:"8px 0"}}>{"\u26A0 Conversaci\u00F3n truncada (primeros 80 mensajes)"}</div>}
     </div>
+    )}
   </div>);
 }
 
