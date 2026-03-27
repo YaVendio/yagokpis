@@ -1959,7 +1959,7 @@ export default function Dashboard(){
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,fontFamily:font}}>
               <thead>
                 <tr style={{background:C.rowAlt,position:"sticky",top:0,zIndex:1}}>
-                  {["Fecha","Hora","T\u00EDtulo","Contacto","Propietario"].map(function(h){return <th key={h} style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>{h}</th>;})}
+                  {["Fecha","Hora","Tipo","T\u00EDtulo","Contacto","Propietario"].map(function(h){return <th key={h} style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>{h}</th>;})}
                 </tr>
               </thead>
               <tbody>
@@ -1971,12 +1971,13 @@ export default function Dashboard(){
                   return <tr key={m.id||idx} style={{background:idx%2===0?C.card:C.rowBg,borderBottom:"1px solid "+C.border+"44"}}>
                     <td style={{padding:"8px 12px",fontSize:12,color:C.sub,fontFamily:mono}}>{st?st.toLocaleDateString("es",{day:"2-digit",month:"2-digit",year:"numeric"}):"\u2014"}</td>
                     <td style={{padding:"8px 12px",fontSize:12,color:C.sub,fontFamily:mono}}>{st?st.toLocaleTimeString("es",{hour:"2-digit",minute:"2-digit"}):"\u2014"}</td>
+                    <td style={{padding:"8px 12px",fontSize:12,color:C.sub,whiteSpace:"nowrap"}}>{p.hs_activity_type||"\u2014"}</td>
                     <td style={{padding:"8px 12px",fontWeight:600,color:C.text,maxWidth:280,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.hs_meeting_title||"Sin t\u00EDtulo"}</td>
                     <td style={{padding:"8px 12px"}}>{ctN?<div><span style={{fontWeight:600,color:C.text}}>{ctN}</span>{ctP.email&&<span style={{fontSize:11,color:C.muted,marginLeft:6}}>{ctP.email}</span>}</div>:<span style={{color:C.muted,fontSize:12}}>Sin contacto</span>}</td>
                     <td style={{padding:"8px 12px",color:C.sub,fontSize:12}}>{crmOwnerMap[p.hubspot_owner_id]||p.hubspot_owner_id||"\u2014"}</td>
                   </tr>;
                 })}
-                {rmMeetings.length===0 && <tr><td colSpan={5} style={{padding:20,textAlign:"center",color:C.muted,fontSize:13}}>No hay reuniones realizadas</td></tr>}
+                {rmMeetings.length===0 && <tr><td colSpan={6} style={{padding:20,textAlign:"center",color:C.muted,fontSize:13}}>No hay reuniones realizadas</td></tr>}
               </tbody>
             </table>
           </div>
