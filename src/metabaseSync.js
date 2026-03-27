@@ -19,62 +19,40 @@ async function fetchAllRows(queryBuilder) {
   return { rows: all, error: null };
 }
 
-// Reconstruct values_json from messages column so expandThreadMessages() works unchanged
-function threadToValuesFormat(row) {
-  return {
-    thread_id: row.thread_id,
-    phone_number: row.phone_number || "",
-    template_sent_at: row.template_sent_at || "",
-    template_id: row.template_id || "",
-    template_name: row.template_name || "",
-    step_order: row.step_order,
-    lead_qualification: row.lead_qualification || "",
-    hubspot_id: row.hubspot_id || "",
-    values_json: JSON.stringify({ messages: row.messages || [] }),
-  };
-}
-
-function inboundThreadToValuesFormat(row) {
-  return {
-    thread_id: row.thread_id,
-    phone_number: row.phone_number || "",
-    thread_created_at: row.created_at || "",
-    values_json: JSON.stringify({ messages: row.messages || [] }),
-  };
-}
-
-// Load outbound threads from mb_outbound_threads
+// Load outbound threads with pre-computed metrics (no messages column)
 export async function loadOutboundThreads(since) {
   var q = supabase
     .from("mb_outbound_threads")
-    .select("thread_id, phone_number, template_sent_at, template_id, template_name, step_order, lead_qualification, hubspot_id, messages, created_at")
+    .select("thread_id, phone_number, template_sent_at, template_id, template_name, step_order, lead_qualification, hubspot_id, created_at, human_msg_count, ai_msg_count, total_word_count, is_auto_reply, has_tool, has_meeting_link, has_ig_link, has_ig_at, has_valid_response, first_human_ts, last_human_ts, first_human_hour, detected_lang, topic_flags")
     .gte("created_at", since)
     .order("thread_id");
   var { rows, error } = await fetchAllRows(q);
   if (error) { console.error("[metabaseSync] outbound error:", error.message); return []; }
-  var threads = [];
-  for (var i = 0; i < rows.length; i++) {
-    threads.push(threadToValuesFormat(rows[i]));
-  }
-  console.log("[metabaseSync] Loaded " + threads.length + " outbound threads from cache");
-  return threads;
+  console.log("[metabaseSync] Loaded " + rows.length + " outbound threads from cache (no messages)");
+  return rows;
 }
 
-// Load inbound threads from mb_inbound_threads
+// Load inbound threads with pre-computed metrics (no messages column)
 export async function loadInboundThreads(since) {
   var q = supabase
     .from("mb_inbound_threads")
-    .select("thread_id, phone_number, created_at, messages")
+    .select("thread_id, phone_number, created_at, human_msg_count, ai_msg_count, total_word_count, is_auto_reply, has_tool, has_meeting_link, has_ig_link, has_ig_at, has_valid_response, first_human_ts, last_human_ts, first_human_hour, detected_lang, topic_flags, has_signup_link")
     .gte("created_at", since)
     .order("thread_id");
   var { rows, error } = await fetchAllRows(q);
   if (error) { console.error("[metabaseSync] inbound error:", error.message); return []; }
-  var threads = [];
-  for (var i = 0; i < rows.length; i++) {
-    threads.push(inboundThreadToValuesFormat(rows[i]));
-  }
-  console.log("[metabaseSync] Loaded " + threads.length + " inbound threads from cache");
-  return threads;
+  console.log("[metabaseSync] Loaded " + rows.length + " inbound threads from cache (no messages)");
+  return rows;
+}
+
+// Lazy load messages for specific threads (on-demand conversation loading)
+export async function loadThreadMessages(threadIds, table) {
+  if (!threadIds || threadIds.length === 0) return [];
+  var { data, error } = await retryQuery(function() {
+    return supabase.from(table).select("thread_id, messages").in("thread_id", threadIds);
+  });
+  if (error) { console.error("[sync] loadThreadMessages error:", error.message); return []; }
+  return data || [];
 }
 
 // Load lifecycle phones from mb_lifecycle_phones → { phone: { firstAt, firstStep1At } }

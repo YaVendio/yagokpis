@@ -200,15 +200,15 @@ export async function loadContactPhoneMatches(phoneNumbers) {
   for (var b = 0; b < cleaned.length; b += 200) {
     var chunk = cleaned.slice(b, b + 200);
     var { data, error } = await retryQuery(function() {
-      return supabase.rpc("get_contacts_by_phones_lean", { p_phones: chunk });
+      return supabase.rpc("get_contacts_by_phones_fast", { p_phones: chunk });
     });
     if (error) { console.error("[sync] phone match error:", error.message); continue; }
     if (data) {
       for (var j = 0; j < data.length; j++) {
         var r = data[j];
-        addPhoneVariants(phones, r.phone);
-        addPhoneVariants(phones, r.mobilephone);
-        addPhoneVariants(phones, r.hs_whatsapp_phone_number);
+        addPhoneVariants(phones, r.phone_digits);
+        addPhoneVariants(phones, r.mobile_digits);
+        addPhoneVariants(phones, r.whatsapp_digits);
       }
     }
   }

@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Legend, PieChart, Pie, Sankey, LabelList } from "recharts";
-import { processCSVRows, processInboundRows, parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
-import { fetchThreads, expandThreadMessages, fetchInboundThreads, expandInboundThreadMessages, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats, fetchResponseStatsCached, fetchAdsThreads, fetchInboundCached, fetchLifecyclePhonesCached } from "./metabaseApi";
-import { loadOutboundThreads, loadInboundThreads, loadLifecyclePhones } from "./metabaseSync";
+import { parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
+import { processOutboundThreads, processInboundThreads } from "./threadProcessor";
+import { fetchThreads, fetchInboundThreads, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats, fetchResponseStatsCached, fetchAdsThreads, fetchInboundCached, fetchLifecyclePhonesCached } from "./metabaseApi";
+import { loadOutboundThreads, loadInboundThreads, loadLifecyclePhones, loadThreadMessages } from "./metabaseSync";
 import { DEFAULT_MEETINGS as _RAW_MEETINGS } from "./defaultData";
 import { supabase, retryQuery } from "./supabase";
 import InfoTip from "./components/InfoTip";
@@ -670,8 +671,8 @@ export default function Dashboard(){
     if((section==="inbound"||section==="resumen")&&inboundRawRows&&crmContacts.length>0){
       var merged=Object.assign({},inboundHsPhones||{},extractHubSpotPhones(crmContacts));
       if(Object.keys(merged).length>0){
-        var filtered=filterRowsByDate(inboundRawRows,dateFrom,dateTo);
-        var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData,merged);
+        var filtered=filterThreadsByDate(inboundRawRows,dateFrom,dateTo);
+        var result=processInboundThreads(filtered,regionFilter,lifecyclePhonesData,merged);
         if(section!=="resumen") applyResult(result);
       }
     }
@@ -715,21 +716,21 @@ export default function Dashboard(){
     if(!prev)return;
     // Outbound prev
     if(rawRows){
-      var pf=filterRowsByDate(rawRows,prev.from,prev.to);
-      var pr=processCSVRows(pf,templateConfig,regionFilter);
+      var pf=filterThreadsByDate(rawRows,prev.from,prev.to);
+      var pr=processOutboundThreads(pf,templateConfig,regionFilter);
       setPrevOutboundData(pr);
     }
     // Inbound prev
     if(inboundRawRows){
-      var pfi=filterRowsByDate(inboundRawRows,prev.from,prev.to);
-      var pri=processInboundRows(pfi,regionFilter,lifecyclePhonesData,inboundHsPhones);
+      var pfi=filterThreadsByDate(inboundRawRows,prev.from,prev.to);
+      var pri=processInboundThreads(pfi,regionFilter,lifecyclePhonesData,inboundHsPhones);
       setPrevInboundData(pri);
     }
     // Resumen: compute combined prev KPIs
     if(rawRows||inboundRawRows){
       var outLeads=[],inbLeads=[];
-      if(rawRows){var fo=filterRowsByDate(rawRows,prev.from,prev.to);var ro=processCSVRows(fo,templateConfig,"all");outLeads=ro.MEETINGS||[];}
-      if(inboundRawRows){var fi=filterRowsByDate(inboundRawRows,prev.from,prev.to);var ri=processInboundRows(fi,"all",lifecyclePhonesData,inboundHsPhones);inbLeads=ri.MEETINGS||[];}
+      if(rawRows){var fo=filterThreadsByDate(rawRows,prev.from,prev.to);var ro=processOutboundThreads(fo,templateConfig,"all");outLeads=ro.MEETINGS||[];}
+      if(inboundRawRows){var fi=filterThreadsByDate(inboundRawRows,prev.from,prev.to);var ri=processInboundThreads(fi,"all",lifecyclePhonesData,inboundHsPhones);inbLeads=ri.MEETINGS||[];}
       var prevTotalLeads=outLeads.length+inbLeads.length;
       var prevTotalOferta=outLeads.filter(function(l){return l.ml;}).length+inbLeads.filter(function(l){return l.ml;}).length;
       // CRM meetings in prev period for confirmed count (filtered by SDR owners + region)
@@ -854,11 +855,10 @@ export default function Dashboard(){
         var threads=await loadOutboundThreads(since);
         var stats=await fetchResponseStatsCached(since);
         setResponseStats(stats);
-        var csvRows=expandThreadMessages(threads);
-        setRawRows(csvRows);
+        setRawRows(threads);
         outboundSinceRef.current=since;
-        var filtered=filterRowsByDate(csvRows,since,new Date().toISOString().slice(0,10));
-        var result=processCSVRows(filtered,templateConfig,regionFilter);
+        var filtered=filterThreadsByDate(threads,since,new Date().toISOString().slice(0,10));
+        var result=processOutboundThreads(filtered,templateConfig,regionFilter);
         applyResult(result);
         // Auto-init templateConfig on first load if empty
         if(Object.keys(templateConfig).length===0&&result.tplStepInfo&&result.allTemplateNames){
@@ -905,10 +905,9 @@ export default function Dashboard(){
       }).then(function(res){
         outboundSinceRef.current=neededSince;
         setResponseStats(res[1]);
-        var csvRows=expandThreadMessages(res[0]);
-        setRawRows(csvRows);
-        var filtered=filterRowsByDate(csvRows,dateFrom,dateTo);
-        var result=processCSVRows(filtered,templateConfig,regionFilter);
+        setRawRows(res[0]);
+        var filtered=filterThreadsByDate(res[0],dateFrom,dateTo);
+        var result=processOutboundThreads(filtered,templateConfig,regionFilter);
         applyResult(result);
       }).catch(function(e){setLoadError(e.message||"Error");})
       .finally(function(){setDbLoading(false);});
@@ -918,12 +917,11 @@ export default function Dashboard(){
       setInboundLoading(true);
       loadInboundThreads(neededSince).then(function(threads){
         inboundSinceRef.current=neededSince;
-        var csvRows=expandInboundThreadMessages(threads);
-        setInboundRawRows(csvRows);
+        setInboundRawRows(threads);
         var hp=Object.assign({},inboundHsPhones||{});
         if(crmContacts.length>0) Object.assign(hp,extractHubSpotPhones(crmContacts));
-        var filtered=filterRowsByDate(csvRows,dateFrom,dateTo);
-        var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData,Object.keys(hp).length>0?hp:null);
+        var filtered=filterThreadsByDate(threads,dateFrom,dateTo);
+        var result=processInboundThreads(filtered,regionFilter,lifecyclePhonesData,Object.keys(hp).length>0?hp:null);
         if(section!=="resumen") applyResult(result);
       }).catch(function(e){console.error("Inbound reload error:",e);})
       .finally(function(){setInboundLoading(false);});
@@ -936,8 +934,8 @@ export default function Dashboard(){
     if(templateConfigRef.current===templateConfig) return; // skip initial
     templateConfigRef.current=templateConfig;
     if(!rawRows||section!=="outbound") return;
-    var filtered=filterRowsByDate(rawRows,dateFrom,dateTo);
-    var result=processCSVRows(filtered,templateConfig,regionFilter);
+    var filtered=filterThreadsByDate(rawRows,dateFrom,dateTo);
+    var result=processOutboundThreads(filtered,templateConfig,regionFilter);
     applyResult(result);
   },[templateConfig]);
 
@@ -1064,33 +1062,20 @@ export default function Dashboard(){
     return f+" \u2013 "+t+" ("+prev.days+"d)";
   }
 
-  function filterRowsByDate(rows,from,to){
-    if(!from&&!to) return rows;
+  // Filter threads (one row per thread) by date — used with pre-computed metrics
+  function filterThreadsByDate(threads,from,to){
+    if(!from&&!to) return threads;
     var fromD=from?new Date(from+"T00:00:00"):null;
     var toD=to?new Date(to+"T23:59:59"):null;
-    var threads={};
-    for(var i=0;i<rows.length;i++){
-      var tid=rows[i].thread_id;
-      if(!tid) continue;
-      if(!threads[tid]) threads[tid]={rows:[],sentAt:null};
-      threads[tid].rows.push(rows[i]);
-      if(!threads[tid].sentAt){
-        // Try template_sent_at first, then message_datetime as fallback
-        var src=rows[i].template_sent_at||rows[i].message_datetime;
-        if(src){
-          var dd=parseDatetime(src);
-          if(dd&&!isNaN(dd.getTime())) threads[tid].sentAt=dd;
-        }
-      }
-    }
     var out=[];
-    var tids=Object.keys(threads);
-    for(var j=0;j<tids.length;j++){
-      var th=threads[tids[j]];
-      if(!th.sentAt) continue;
-      if(fromD&&th.sentAt<fromD) continue;
-      if(toD&&th.sentAt>toD) continue;
-      out=out.concat(th.rows);
+    for(var i=0;i<threads.length;i++){
+      var src=threads[i].template_sent_at||threads[i].created_at;
+      if(!src) continue;
+      var dd=parseDatetime(src);
+      if(!dd||isNaN(dd.getTime())) continue;
+      if(fromD&&dd<fromD) continue;
+      if(toD&&dd>toD) continue;
+      out.push(threads[i]);
     }
     return out;
   }
@@ -1211,12 +1196,14 @@ export default function Dashboard(){
   // --- CRM (HubSpot) tab functions ---
   var CRM_SINCE=getCrmSinceDate();
   async function fetchHubSpotFresh(){
-    console.log("[CRM] Loading from Supabase since",CRM_SINCE,"(sequential)...");
-    var meetingsRes=await loadMeetingsFromDb(CRM_SINCE);
-    var dealsRes=await loadDealsFromDb(CRM_SINCE);
-    var leadsRes=await loadLeadsFromDb(CRM_SINCE,"808581652");
-    var pipelines=await loadPipelinesFromDb();
-    var ownerMap=await loadOwnersFromDb();
+    console.log("[CRM] Loading from Supabase since",CRM_SINCE,"(parallel)...");
+    var [meetingsRes,dealsRes,leadsRes,pipelines,ownerMap]=await Promise.all([
+      loadMeetingsFromDb(CRM_SINCE),
+      loadDealsFromDb(CRM_SINCE),
+      loadLeadsFromDb(CRM_SINCE,"808581652"),
+      loadPipelinesFromDb(),
+      loadOwnersFromDb()
+    ]);
     console.log("[CRM] DB load done. Meetings:",meetingsRes.length,"Deals:",dealsRes.length,"Leads:",leadsRes.length);
     var contactIdSet={};
     for(var i=0;i<meetingsRes.length;i++){
@@ -1727,8 +1714,8 @@ export default function Dashboard(){
     if(inboundRawRows){
       if(!isResumen){
         var hp=mergePhones(inboundHsPhones);
-        var filtered=filterRowsByDate(inboundRawRows,dateFrom,dateTo);
-        var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData,hp);
+        var filtered=filterThreadsByDate(inboundRawRows,dateFrom,dateTo);
+        var result=processInboundThreads(filtered,regionFilter,lifecyclePhonesData,hp);
         applyResult(result);
       }
     }else{
@@ -1738,29 +1725,29 @@ export default function Dashboard(){
         return loadLifecyclePhones().catch(function(e){console.warn("Lifecycle phones query failed:",e);return {};}).then(function(sp){return [threads,sp];});
       }).then(function(all){
         setInboundLoadStep(3);
-        var csvRows=expandInboundThreadMessages(all[0]);var sp=all[1];
-        setInboundRawRows(csvRows);
+        var inbThreads=all[0];var sp=all[1];
+        setInboundRawRows(inbThreads);
         inboundSinceRef.current=getFirstOfMonth();
         setLifecyclePhonesData(sp);
         if(!isResumen){
           var hp=mergePhones(inboundHsPhones);
-          var filtered2=filterRowsByDate(csvRows,dateFrom,dateTo);
-          var result2=processInboundRows(filtered2,regionFilter,sp,hp);
+          var filtered2=filterThreadsByDate(inbThreads,dateFrom,dateTo);
+          var result2=processInboundThreads(filtered2,regionFilter,sp,hp);
           applyResult(result2);
         }
         // HubSpot phone match — targeted search for inbound phones only
         if(!inboundHsPhones){
           setInboundLoadStep(4);
           var inbPhones=[];
-          for(var ip=0;ip<csvRows.length;ip++){if(csvRows[ip].phone_number)inbPhones.push(csvRows[ip].phone_number);}
+          for(var ip=0;ip<inbThreads.length;ip++){if(inbThreads[ip].phone_number)inbPhones.push(inbThreads[ip].phone_number);}
           loadContactPhoneMatches(inbPhones).then(function(fetchedHp){
             var merged=Object.assign({},fetchedHp);
             if(crmContacts.length>0){Object.assign(merged,extractHubSpotPhones(crmContacts));}
             var hp2=Object.keys(merged).length>0?merged:null;
             setInboundHsPhones(hp2);
             if(!isResumen){
-              var f2=filterRowsByDate(csvRows,dateFrom,dateTo);
-              var r2=processInboundRows(f2,regionFilter,sp,hp2);
+              var f2=filterThreadsByDate(inbThreads,dateFrom,dateTo);
+              var r2=processInboundThreads(f2,regionFilter,sp,hp2);
               applyResult(r2);
             }
           }).catch(function(e){console.warn("HubSpot phones fetch failed:",e);})
@@ -1788,8 +1775,8 @@ export default function Dashboard(){
     if(sec==="resumen"){ loadInboundData(); }
     else if(sec==="inbound") loadInboundData();
     else if(sec==="outbound"&&rawRows){
-      var filtered2=filterRowsByDate(rawRows,dateFrom,dateTo);
-      var result2=processCSVRows(filtered2,templateConfig,regionFilter);
+      var filtered2=filterThreadsByDate(rawRows,dateFrom,dateTo);
+      var result2=processOutboundThreads(filtered2,templateConfig,regionFilter);
       applyResult(result2);
     }
   }
@@ -1797,13 +1784,13 @@ export default function Dashboard(){
   function applyDateFilter(from,to){
     if(section==="inbound"){
       if(!inboundRawRows) return;
-      var filtered=filterRowsByDate(inboundRawRows,from,to);
-      var result=processInboundRows(filtered,regionFilter,lifecyclePhonesData,inboundHsPhones);
+      var filtered=filterThreadsByDate(inboundRawRows,from,to);
+      var result=processInboundThreads(filtered,regionFilter,lifecyclePhonesData,inboundHsPhones);
       applyResult(result);
     }else{
       if(!rawRows) return;
-      var filtered2=filterRowsByDate(rawRows,from,to);
-      var result2=processCSVRows(filtered2,templateConfig,regionFilter);
+      var filtered2=filterThreadsByDate(rawRows,from,to);
+      var result2=processOutboundThreads(filtered2,templateConfig,regionFilter);
       applyResult(result2);
     }
   }
@@ -1812,7 +1799,7 @@ export default function Dashboard(){
   function onDateToChange(e){setDateTo(e.target.value);}
   function onClickFilter(){setHsDetailDay(null);applyDateFilter(dateFrom,dateTo);}
   function clearDateFilter(){setDateFrom("");setDateTo("");applyDateFilter("","");}
-  function onRegionChange(e){var v=e.target.value;setRegionFilter(v);if(section==="inbound"&&inboundRawRows){var filtered=filterRowsByDate(inboundRawRows,dateFrom,dateTo);var result=processInboundRows(filtered,v,lifecyclePhonesData,inboundHsPhones);applyResult(result);}else if(section==="outbound"&&rawRows){var filtered2=filterRowsByDate(rawRows,dateFrom,dateTo);var result2=processCSVRows(filtered2,templateConfig,v);applyResult(result2);}}
+  function onRegionChange(e){var v=e.target.value;setRegionFilter(v);if(section==="inbound"&&inboundRawRows){var filtered=filterThreadsByDate(inboundRawRows,dateFrom,dateTo);var result=processInboundThreads(filtered,v,lifecyclePhonesData,inboundHsPhones);applyResult(result);}else if(section==="outbound"&&rawRows){var filtered2=filterThreadsByDate(rawRows,dateFrom,dateTo);var result2=processOutboundThreads(filtered2,templateConfig,v);applyResult(result2);}}
 
   var mk=mode===0?"all":"real";var d=dataD[mk];var funnel=mode===0?funnelAll:funnelReal;var mbt=mode===0?meetByTplAll:meetByTplReal;
   var _jsFiltTc=headerInfo.esTotal+headerInfo.ptTotal;
@@ -2097,7 +2084,7 @@ export default function Dashboard(){
       {/* Content */}
       <div style={{padding:"24px 28px",maxWidth:1300,margin:"0 auto"}}>
       {dbLoading && <div style={{background:C.lBlue,border:"1px solid "+C.accent+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center"}}><div style={{width:20,height:20,border:"2px solid "+C.accent+"33",borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.accent}}>Cargando datos outbound...</strong></div></div>}
-      {loadError && <div style={{background:C.lRed,border:"1px solid "+C.red+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center",justifyContent:"space-between"}}><div style={{display:"flex",gap:12,alignItems:"center"}}><div style={{width:24,height:24,borderRadius:"50%",background:C.red+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><span style={{fontSize:14,color:C.red,fontWeight:700}}>!</span></div><div><strong style={{color:C.red}}>Error al cargar datos</strong><div style={{fontSize:12,color:C.muted,marginTop:2}}>{loadError}</div></div></div><button onClick={function(){setLoadError(null);setDbLoading(true);loadOutboundThreads(outboundSinceRef.current).then(function(threads){var csvRows=expandThreadMessages(threads);setRawRows(csvRows);var filtered=filterRowsByDate(csvRows,dateFrom,dateTo);var result=processCSVRows(filtered,templateConfig,regionFilter);applyResult(result);setDbLoading(false);}).catch(function(e){setLoadError(e.message||"Error");setDbLoading(false);});}} style={{background:C.red,color:"#fff",border:"none",borderRadius:8,padding:"6px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,flexShrink:0}}>Reintentar</button></div>}
+      {loadError && <div style={{background:C.lRed,border:"1px solid "+C.red+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center",justifyContent:"space-between"}}><div style={{display:"flex",gap:12,alignItems:"center"}}><div style={{width:24,height:24,borderRadius:"50%",background:C.red+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><span style={{fontSize:14,color:C.red,fontWeight:700}}>!</span></div><div><strong style={{color:C.red}}>Error al cargar datos</strong><div style={{fontSize:12,color:C.muted,marginTop:2}}>{loadError}</div></div></div><button onClick={function(){setLoadError(null);setDbLoading(true);loadOutboundThreads(outboundSinceRef.current).then(function(threads){setRawRows(threads);var filtered=filterThreadsByDate(threads,dateFrom,dateTo);var result=processOutboundThreads(filtered,templateConfig,regionFilter);applyResult(result);setDbLoading(false);}).catch(function(e){setLoadError(e.message||"Error");setDbLoading(false);});}} style={{background:C.red,color:"#fff",border:"none",borderRadius:8,padding:"6px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,flexShrink:0}}>Reintentar</button></div>}
       {crmLoading && <div style={{background:C.lGreen,border:"1px solid "+C.green+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center"}}><div style={{width:20,height:20,border:"2px solid "+C.green+"33",borderTopColor:C.green,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.green}}>Cargando datos CRM...</strong></div></div>}
       {inboundLoading && (function(){var steps=["Conversaciones","Lifecycle","Procesando","HubSpot match"];var pct=inboundLoadStep>0?Math.round((inboundLoadStep/steps.length)*100):0;var lbl=inboundLoadStep>0&&inboundLoadStep<=steps.length?steps[inboundLoadStep-1]:"...";return <div style={{background:C.lPurple,border:"1px solid "+C.purple+"25",borderRadius:12,padding:"12px 18px",marginBottom:20}}><div style={{display:"flex",gap:12,alignItems:"center",marginBottom:8}}><div style={{width:20,height:20,border:"2px solid "+C.purple+"33",borderTopColor:C.purple,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.purple}}>Cargando inbound</strong><span style={{color:C.muted,fontSize:12,marginLeft:8}}>{lbl} ({pct}%)</span></div></div><div style={{background:C.purple+"22",borderRadius:4,height:6,overflow:"hidden"}}><div style={{width:pct+"%",height:"100%",background:C.purple,borderRadius:4,transition:"width 0.4s ease"}}/></div></div>;})()}
 
@@ -2106,8 +2093,8 @@ export default function Dashboard(){
         // --- Outbound leads ---
         var outLeads=[];
         if(rawRows){
-          var filtOut=filterRowsByDate(rawRows,dateFrom,dateTo);
-          var outResult=processCSVRows(filtOut,templateConfig,"all");
+          var filtOut=filterThreadsByDate(rawRows,dateFrom,dateTo);
+          var outResult=processOutboundThreads(filtOut,templateConfig,"all");
           outLeads=outResult.MEETINGS||[];
         }
         var outTc=outLeads.length;
@@ -2116,8 +2103,8 @@ export default function Dashboard(){
         // --- Inbound leads ---
         var inbLeads=[];
         if(inboundRawRows){
-          var filtInb=filterRowsByDate(inboundRawRows,dateFrom,dateTo);
-          var inbResult=processInboundRows(filtInb,"all",lifecyclePhonesData,inboundHsPhones);
+          var filtInb=filterThreadsByDate(inboundRawRows,dateFrom,dateTo);
+          var inbResult=processInboundThreads(filtInb,"all",lifecyclePhonesData,inboundHsPhones);
           inbLeads=inbResult.MEETINGS||[];
         }
         var inbTc=inbLeads.length;
