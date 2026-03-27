@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
 import { processOutboundThreads, processInboundThreads } from "./threadProcessor";
 import { fetchThreads, fetchInboundThreads, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats, fetchResponseStatsCached, fetchAdsThreads, fetchInboundCached, fetchLifecyclePhonesCached } from "./metabaseApi";
-import { loadOutboundThreads, loadInboundThreads, loadLifecyclePhones, loadThreadMessages } from "./metabaseSync";
+import { loadOutboundThreads, loadInboundThreads, loadLifecyclePhones, loadThreadMessages, loadAllTemplateNames } from "./metabaseSync";
 import { DEFAULT_MEETINGS as _RAW_MEETINGS } from "./defaultData";
 import { supabase, retryQuery } from "./supabase";
 import InfoTip from "./components/InfoTip";
@@ -581,6 +581,7 @@ export default function Dashboard(){
   const [templateConfig,setTemplateConfig]=useState({});
   const [configLoaded,setConfigLoaded]=useState(false);
   const [allTemplateNames,setAllTemplateNames]=useState([]);
+  const [allDbTemplates,setAllDbTemplates]=useState([]);
   const [templateLastSent,setTemplateLastSent]=useState({});
   const [inboundExtra,setInboundExtra]=useState(null);
   const [inboundHsPhones,setInboundHsPhones]=useState(null);
@@ -889,7 +890,7 @@ export default function Dashboard(){
     }
   }
 
-  // Load config from Supabase on mount
+  // Load config + all template names from Supabase on mount
   useEffect(function(){
     retryQuery(function(){ return supabase.from("template_config").select("template_name,category,region,ab_group,sort_order,hidden,qualification"); })
       .then(function(res){
@@ -903,6 +904,7 @@ export default function Dashboard(){
         }
         setConfigLoaded(true);
       });
+    loadAllTemplateNames(queryMetabase).then(function(rows){ setAllDbTemplates(rows); });
   },[]);
 
   useEffect(function(){
@@ -3486,6 +3488,48 @@ export default function Dashboard(){
             </div>)}
           </div>);})()}
         </>)}
+        {(function(){
+          if(!allDbTemplates||allDbTemplates.length===0)return null;
+          var activeTplNames={};
+          if(d.tpl){for(var ati=0;ati<d.tpl.length;ati++){var ak=d.tpl[ati].key||d.tpl[ati].name;if(ak)activeTplNames[ak]=true;}}
+          var inactiveList=[];
+          for(var iti=0;iti<allDbTemplates.length;iti++){
+            var it=allDbTemplates[iti];
+            if(!it.template_name||activeTplNames[it.template_name])continue;
+            if(_isH(it.template_name))continue;
+            var itRate=it.total_sent>0?parseFloat(((it.total_resp||0)/it.total_sent*100).toFixed(1)):0;
+            inactiveList.push({name:it.template_name,sent:it.total_sent||0,resp:it.total_resp||0,rate:itRate,lastSent:it.last_sent||null,stepOrder:it.step_order||null});
+          }
+          if(inactiveList.length===0)return null;
+          inactiveList.sort(function(a,b){return b.rate-a.rate||b.sent-a.sent;});
+          return (<div style={{marginTop:22,marginBottom:22}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,paddingBottom:8,borderBottom:"1px solid "+C.border+"44"}}>
+              <div style={{fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700}}>Inactivos</div>
+              <span style={{fontSize:11,color:C.muted,fontWeight:600}}>{inactiveList.length} templates sin envios en el periodo</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              {inactiveList.map(function(it){
+                var rn=it.rate;var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;
+                var lastDate=it.lastSent?new Date(it.lastSent).toLocaleDateString("es",{day:"2-digit",month:"short",year:"numeric"}):"";
+                return (<Cd key={it.name} style={{opacity:0.7,border:"1px dashed "+C.border}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div>
+                      <div style={{fontWeight:800,fontSize:14,fontFamily:mono}}>{it.name}</div>
+                      <div style={{display:"flex",gap:6,marginTop:4}}>
+                        <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:4,background:C.rowAlt,color:C.muted}}>Inactivo</span>
+                        {lastDate && <span style={{fontSize:10,fontWeight:600,color:C.muted}}>{"ult: "+lastDate}</span>}
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:22,fontWeight:800,color:sc,fontFamily:mono}}>{rn.toFixed(1)+"%"}</div>
+                      <div style={{fontSize:12,color:C.muted}}>{it.resp+" de "+it.sent.toLocaleString()}</div>
+                    </div>
+                  </div>
+                </Cd>);
+              })}
+            </div>
+          </div>);
+        })()}
         {d.bcast&&d.bcast.length>0&&(<div style={{marginTop:10,marginBottom:22}}><div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",marginBottom:8,letterSpacing:1}}>Disparos Puntuais (fora do lifecycle)</div><div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>{d.bcast.map(function(t,i){var rn=parseFloat(t.rate);var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;return(<Cd key={i} onClick={function(){setSelTpl(t);}} style={{background:C.lYellow,border:"1px dashed "+C.yellow+"55",cursor:"pointer"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontWeight:800,fontSize:16}}>{t.name}</div><span style={{fontSize:12,color:C.muted,background:C.lYellow,padding:"2px 8px",borderRadius:4}}>Broadcast</span></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:800,color:sc,fontFamily:mono}}>{t.rate}</div><div style={{fontSize:13,color:C.muted}}>{t.resp+" de "+t.sent}</div></div></div><div style={{fontSize:11,color:C.yellow,fontWeight:600,marginTop:8}}>Click para ver detalles {"\u2192"}</div></Cd>);})}</div></div>)}
         <Cd style={{marginBottom:18,background:C.lPurple,border:"1px solid "+C.purple+"20"}}>
           <Sec tipKey="meetByTemplate">{"\u{1F4C5} \u00BFEn qu\u00E9 template respondieron los que llegaron a reuni\u00F3n?"}</Sec>
@@ -5539,7 +5583,7 @@ export default function Dashboard(){
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
               <div style={{fontSize:18,fontWeight:800,color:C.text}}>Configuraci&oacute;n de Templates</div>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
-                {allTemplateNames.length>0 && (
+                {(allDbTemplates.length>0||allTemplateNames.length>0) && (
                   abSelectMode
                     ? <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <span style={{fontSize:13,color:C.accent,fontWeight:600}}>Selecciona 2 templates para comparar</span>
@@ -5551,55 +5595,87 @@ export default function Dashboard(){
               </div>
             </div>
             <div style={{fontSize:14,color:C.sub,marginBottom:18,lineHeight:1.6}}>Asigna cada template a una categor&iacute;a para agruparlos en la vista de Templates. Templates marcados como <strong>Autom&aacute;tico</strong> o <strong>Campa&ntilde;a</strong> ser&aacute;n excluidos de los indicadores de Resumen.</div>
-            {allTemplateNames.length===0 && <div style={{textAlign:"center",padding:30,color:C.muted,fontSize:14}}>No hay templates cargados a&uacute;n. Carga datos primero.</div>}
-            {allTemplateNames.length>0 && (<>
-              <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                {allTemplateNames.slice().sort(function(a,b){var da=templateLastSent[a]||"";var db=templateLastSent[b]||"";if(da!==db)return db.localeCompare(da);return a.localeCompare(b);}).map(function(tplName){
-                  var currentEntry=templateConfig[tplName]||{};
-                  var currentCat=typeof currentEntry==="string"?currentEntry:(currentEntry.category||"sin_categoria");
-                  var currentRegion=typeof currentEntry==="string"?"":(currentEntry.region||"");
-                  var currentQual=currentEntry.qualification||_deduceQual(tplName);
-                  var hasAbGroup=currentEntry.ab_group;
-                  var isAbSel=abSelected.indexOf(tplName)>=0;
-                  var isHidden=currentEntry.hidden||false;
-                  return (<div key={tplName} onClick={abSelectMode?function(){handleAbToggle(tplName);}:undefined} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:isAbSel?C.abSelBg:hasAbGroup?C.abRowBg:C.rowBg,borderRadius:10,border:"1px solid "+(isAbSel?C.purple+"66":hasAbGroup?C.purple+"33":C.border),cursor:abSelectMode?"pointer":"default",transition:"all 0.15s ease",opacity:isHidden?0.5:1}}>
-                    {abSelectMode && (
-                      <div style={{width:20,height:20,borderRadius:6,border:"2px solid "+(isAbSel?C.purple:C.border),background:isAbSel?C.purple:C.inputBg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s ease"}}>
-                        {isAbSel && <span style={{color:"#FFF",fontSize:12,fontWeight:800}}>{"\u2713"}</span>}
-                      </div>
-                    )}
-                    <div style={{display:"flex",flexDirection:"column",gap:2,flexShrink:0}}>
-                      <button onClick={function(e){e.stopPropagation();updateTemplateConfig(tplName,"sort_order",(currentEntry.sort_order||0)-1);}} style={{background:"none",border:"1px solid "+C.border,borderRadius:4,width:22,height:18,fontSize:10,cursor:"pointer",color:C.muted,display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>{"\u25B2"}</button>
-                      <button onClick={function(e){e.stopPropagation();updateTemplateConfig(tplName,"sort_order",(currentEntry.sort_order||0)+1);}} style={{background:"none",border:"1px solid "+C.border,borderRadius:4,width:22,height:18,fontSize:10,cursor:"pointer",color:C.muted,display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>{"\u25BC"}</button>
+            {(function(){
+              var tplMap={};
+              for(var di2=0;di2<allDbTemplates.length;di2++){var dt=allDbTemplates[di2];tplMap[dt.template_name]={totalSent:dt.total_sent||0,totalResp:dt.total_resp||0,lastSent:dt.last_sent||null,stepOrder:dt.step_order||null};}
+              for(var ni2=0;ni2<allTemplateNames.length;ni2++){if(!tplMap[allTemplateNames[ni2]])tplMap[allTemplateNames[ni2]]={totalSent:0,totalResp:0,lastSent:null,stepOrder:null};}
+              var nameList=Object.keys(tplMap);
+              if(nameList.length===0) return (<div style={{textAlign:"center",padding:30,color:C.muted,fontSize:14}}>No hay templates cargados a&uacute;n. Carga datos primero.</div>);
+              var now=new Date();var thirtyDaysAgo=new Date(now.getTime()-30*24*60*60*1000);
+              var lcGroups={calificado:[],no_calificado:[],general:[]};
+              var lcMeta={calificado:{label:"Calificados",color:C.green,bg:C.lGreen},no_calificado:{label:"No Calificados",color:C.orange,bg:C.lOrange},general:{label:"General",color:C.accent,bg:C.lBlue}};
+              for(var gi3=0;gi3<nameList.length;gi3++){var nm=nameList[gi3];var info=tplMap[nm];var qq=(templateConfig[nm]&&templateConfig[nm].qualification)||_deduceQual(nm);if(!lcGroups[qq])qq="general";var isActive=info.lastSent&&new Date(info.lastSent)>=thirtyDaysAgo;var tRate=info.totalSent>0?((info.totalResp||0)/info.totalSent*100):0;lcGroups[qq].push({name:nm,totalSent:info.totalSent,totalResp:info.totalResp||0,rate:tRate,lastSent:info.lastSent,stepOrder:info.stepOrder,active:isActive});}
+              for(var gk2 in lcGroups){lcGroups[gk2].sort(function(a,b){if(a.active!==b.active)return a.active?-1:1;if(b.rate!==a.rate)return b.rate-a.rate;if(b.totalSent!==a.totalSent)return b.totalSent-a.totalSent;return a.name.localeCompare(b.name);});}
+              var lcOrder=["calificado","no_calificado","general"];
+              function renderTplRow(tplName,tplInfo){
+                var currentEntry=templateConfig[tplName]||{};
+                var currentCat=typeof currentEntry==="string"?currentEntry:(currentEntry.category||"sin_categoria");
+                var currentRegion=typeof currentEntry==="string"?"":(currentEntry.region||"");
+                var currentQual=currentEntry.qualification||_deduceQual(tplName);
+                var hasAbGroup=currentEntry.ab_group;
+                var isAbSel=abSelected.indexOf(tplName)>=0;
+                var isHidden=currentEntry.hidden||false;
+                var sentCount=tplInfo.totalSent||0;
+                var respCount=tplInfo.totalResp||0;
+                var histRate=sentCount>0?parseFloat(((respCount/sentCount)*100).toFixed(1)):0;
+                var isActive=tplInfo.active;
+                var lastDate=tplInfo.lastSent?new Date(tplInfo.lastSent).toLocaleDateString("es",{day:"2-digit",month:"short"}):"";
+                return (<div key={tplName} onClick={abSelectMode?function(){handleAbToggle(tplName);}:undefined} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:isAbSel?C.abSelBg:hasAbGroup?C.abRowBg:C.rowBg,borderRadius:10,border:"1px solid "+(isAbSel?C.purple+"66":hasAbGroup?C.purple+"33":C.border),cursor:abSelectMode?"pointer":"default",transition:"all 0.15s ease",opacity:isHidden||!isActive?0.5:1}}>
+                  {abSelectMode && (
+                    <div style={{width:20,height:20,borderRadius:6,border:"2px solid "+(isAbSel?C.purple:C.border),background:isAbSel?C.purple:C.inputBg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s ease"}}>
+                      {isAbSel && <span style={{color:"#FFF",fontSize:12,fontWeight:800}}>{"\u2713"}</span>}
                     </div>
-                    <button onClick={function(e){e.stopPropagation();updateTemplateConfig(tplName,"hidden",!isHidden);}} title={isHidden?"Mostrar template":"Ocultar template"} style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:isHidden?C.muted:C.accent,flexShrink:0,opacity:isHidden?0.5:0.8,display:"flex",alignItems:"center"}}>{isHidden?<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button>
-                    <div style={{flex:1,minWidth:0,fontWeight:700,fontSize:14,fontFamily:mono,display:"flex",alignItems:"center",gap:8,overflow:"hidden"}}>
-                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={tplName}>{tplName}</span>
-                      {hasAbGroup && <span style={{background:C.purple+"18",color:C.purple,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,letterSpacing:0.5,flexShrink:0}}>A/B</span>}
-                      {isHidden && <span style={{background:C.red+"15",color:C.red,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,letterSpacing:0.5,flexShrink:0}}>Oculto</span>}
+                  )}
+                  <div style={{display:"flex",flexDirection:"column",gap:2,flexShrink:0}}>
+                    <button onClick={function(e){e.stopPropagation();updateTemplateConfig(tplName,"sort_order",(currentEntry.sort_order||0)-1);}} style={{background:"none",border:"1px solid "+C.border,borderRadius:4,width:22,height:18,fontSize:10,cursor:"pointer",color:C.muted,display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>{"\u25B2"}</button>
+                    <button onClick={function(e){e.stopPropagation();updateTemplateConfig(tplName,"sort_order",(currentEntry.sort_order||0)+1);}} style={{background:"none",border:"1px solid "+C.border,borderRadius:4,width:22,height:18,fontSize:10,cursor:"pointer",color:C.muted,display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>{"\u25BC"}</button>
+                  </div>
+                  <button onClick={function(e){e.stopPropagation();updateTemplateConfig(tplName,"hidden",!isHidden);}} title={isHidden?"Mostrar template":"Ocultar template"} style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",color:isHidden?C.muted:C.accent,flexShrink:0,opacity:isHidden?0.5:0.8,display:"flex",alignItems:"center"}}>{isHidden?<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button>
+                  <div style={{flex:1,minWidth:0,fontWeight:700,fontSize:14,fontFamily:mono,display:"flex",alignItems:"center",gap:8,overflow:"hidden"}}>
+                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={tplName}>{tplName}</span>
+                    <span style={{background:C.rowAlt,color:C.muted,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,flexShrink:0}}>{sentCount.toLocaleString()} env. | {histRate}%</span>
+                    {isActive?<span style={{background:C.lGreen,color:C.green,padding:"2px 8px",borderRadius:6,fontSize:10,fontWeight:800,letterSpacing:0.5,flexShrink:0}}>Activo</span>:<span style={{background:C.rowAlt,color:C.muted,padding:"2px 8px",borderRadius:6,fontSize:10,fontWeight:800,letterSpacing:0.5,flexShrink:0}}>Inactivo</span>}
+                    {lastDate && <span style={{color:C.muted,fontSize:10,fontWeight:600,flexShrink:0}} title={"Ultimo envio"}>{"ult: "+lastDate}</span>}
+                    {hasAbGroup && <span style={{background:C.purple+"18",color:C.purple,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,letterSpacing:0.5,flexShrink:0}}>A/B</span>}
+                    {isHidden && <span style={{background:C.red+"15",color:C.red,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,letterSpacing:0.5,flexShrink:0}}>Oculto</span>}
+                  </div>
+                  <select value={currentCat} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"category",e.target.value);}} style={{padding:"6px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:12,fontFamily:font,background:C.inputBg,color:C.text,cursor:"pointer",flexShrink:0}}>
+                    <option value="sin_categoria">Sin categor&iacute;a</option>
+                    <option value="d0">D+0</option>
+                    <option value="d1">D+1</option>
+                    <option value="d3">D+3</option>
+                    <option value="d5">D+5</option>
+                    <option value="automatico">Auto</option>
+                    <option value="campanha">Campa&ntilde;a</option>
+                  </select>
+                  <select value={currentRegion} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"region",e.target.value);}} style={{padding:"6px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:12,fontFamily:font,background:C.inputBg,color:C.text,cursor:"pointer",flexShrink:0}}>
+                    <option value="">Sin regi&oacute;n</option>
+                    <option value="br">BR</option>
+                    <option value="latam">LATAM</option>
+                  </select>
+                  <select value={currentQual} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"qualification",e.target.value);}} style={{padding:"6px 10px",border:"1px solid "+(currentQual==="calificado"?C.green+"66":currentQual==="no_calificado"?C.orange+"66":C.border),borderRadius:8,fontSize:12,fontFamily:font,background:currentQual==="calificado"?C.lGreen:currentQual==="no_calificado"?C.lOrange:C.inputBg,color:C.text,cursor:"pointer",flexShrink:0}}>
+                    <option value="general">General</option>
+                    <option value="calificado">Calificado</option>
+                    <option value="no_calificado">No Calificado</option>
+                  </select>
+                </div>);
+              }
+              return (<>
+                {lcOrder.map(function(lcKey){
+                  var items=lcGroups[lcKey];if(items.length===0)return null;var meta=lcMeta[lcKey];
+                  return (<div key={lcKey} style={{marginBottom:20}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,padding:"8px 14px",background:meta.bg,borderRadius:10,border:"1px solid "+meta.color+"33"}}>
+                      <div style={{width:10,height:10,borderRadius:"50%",background:meta.color}}></div>
+                      <div style={{fontSize:14,fontWeight:800,color:meta.color}}>{meta.label}</div>
+                      <div style={{fontSize:12,color:C.muted,fontWeight:600}}>{items.length} templates</div>
                     </div>
-                    <select value={currentCat} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"category",e.target.value);}} style={{padding:"6px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:12,fontFamily:font,background:C.inputBg,color:C.text,cursor:"pointer",flexShrink:0}}>
-                      <option value="sin_categoria">Sin categor&iacute;a</option>
-                      <option value="d0">D+0</option>
-                      <option value="d1">D+1</option>
-                      <option value="d3">D+3</option>
-                      <option value="d5">D+5</option>
-                      <option value="automatico">Auto</option>
-                      <option value="campanha">Campa&ntilde;a</option>
-                    </select>
-                    <select value={currentRegion} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"region",e.target.value);}} style={{padding:"6px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:12,fontFamily:font,background:C.inputBg,color:C.text,cursor:"pointer",flexShrink:0}}>
-                      <option value="">Sin regi&oacute;n</option>
-                      <option value="br">BR</option>
-                      <option value="latam">LATAM</option>
-                    </select>
-                    <select value={currentQual} onClick={function(e){e.stopPropagation();}} onChange={function(e){updateTemplateConfig(tplName,"qualification",e.target.value);}} style={{padding:"6px 10px",border:"1px solid "+(currentQual==="calificado"?C.green+"66":currentQual==="no_calificado"?C.orange+"66":C.border),borderRadius:8,fontSize:12,fontFamily:font,background:currentQual==="calificado"?C.lGreen:currentQual==="no_calificado"?C.lOrange:C.inputBg,color:C.text,cursor:"pointer",flexShrink:0}}>
-                      <option value="general">General</option>
-                      <option value="calificado">Calificado</option>
-                      <option value="no_calificado">No Calificado</option>
-                    </select>
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      {items.map(function(item){return renderTplRow(item.name,item);})}
+                    </div>
                   </div>);
                 })}
-              </div>
+              </>);
+            })()}
 
               {Object.keys(abGroups).length>0 && (
                 <div style={{marginTop:24}}>
@@ -5654,7 +5730,6 @@ export default function Dashboard(){
                 <button onClick={resetConfig} style={{background:C.lRed,color:C.red,border:"1px solid "+C.redBorder,borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Resetear config</button>
                 <span style={{fontSize:12,color:C.muted,alignSelf:"center"}}>Resetear volver&aacute; al auto-detect por step_order en la pr&oacute;xima carga.</span>
               </div>
-            </>)}
           </div>
         </div>);
       })()}

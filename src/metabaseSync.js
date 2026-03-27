@@ -55,6 +55,52 @@ export async function loadThreadMessages(threadIds, table) {
   return data || [];
 }
 
+// Load ALL distinct template names (no date filter) for config screen
+// Tries Metabase (Huble) first for full history, falls back to Supabase cache
+export async function loadAllTemplateNames(queryMetabaseFn) {
+  // Try Metabase first (full history from Huble)
+  if (queryMetabaseFn) {
+    try {
+      var mbResult = await queryMetabaseFn(
+        "SELECT le.template_name, lfs.step_order, COUNT(DISTINCT le.id) AS total_sent, " +
+        "COUNT(DISTINCT CASE WHEN t.thread_id IS NOT NULL AND (t.values::text LIKE '%\"type\": \"human\"%' OR t.values::text LIKE '%\"type\":\"human\"%') THEN le.id END) AS total_resp, " +
+        "MAX(le.sent_at) AS last_sent " +
+        "FROM lifecycle_executions le " +
+        "JOIN lifecycle_flow_steps lfs ON le.step_id = lfs.id " +
+        "LEFT JOIN thread t ON (t.metadata->>'execution_id') = le.id::text " +
+        "WHERE le.flow_id = 1 AND le.template_name IS NOT NULL AND le.template_name != '' " +
+        "GROUP BY le.template_name, lfs.step_order " +
+        "ORDER BY total_sent DESC"
+      );
+      if (mbResult && mbResult.results && mbResult.results.length > 0) {
+        var colIdx = {};
+        for (var ci = 0; ci < mbResult.columns.length; ci++) colIdx[mbResult.columns[ci]] = ci;
+        var rows = [];
+        for (var ri = 0; ri < mbResult.results.length; ri++) {
+          var r = mbResult.results[ri];
+          rows.push({
+            template_name: r[colIdx["template_name"]],
+            step_order: r[colIdx["step_order"]] || null,
+            total_sent: r[colIdx["total_sent"]] || 0,
+            total_resp: r[colIdx["total_resp"]] || 0,
+            last_sent: r[colIdx["last_sent"]] || null,
+          });
+        }
+        console.log("[metabaseSync] Loaded " + rows.length + " template names from Metabase (full history)");
+        return rows;
+      }
+    } catch (e) {
+      console.warn("[metabaseSync] Metabase template query failed, falling back to Supabase:", e.message);
+    }
+  }
+  // Fallback: Supabase cache (only has recent data)
+  var { data, error } = await retryQuery(function() {
+    return supabase.rpc("get_all_template_names");
+  });
+  if (error) { console.error("[metabaseSync] all template names error:", error.message); return []; }
+  return data || [];
+}
+
 // Load lifecycle phones from mb_lifecycle_phones → { phone: { firstAt, firstStep1At } }
 export async function loadLifecyclePhones() {
   var q = supabase
