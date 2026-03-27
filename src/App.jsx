@@ -489,6 +489,8 @@ export default function Dashboard(){
   const [lifecyclePhonesData,setLifecyclePhonesData]=useState(null);
   const outboundSinceRef=useRef(getFirstOfMonth());
   const inboundSinceRef=useRef(getFirstOfMonth());
+  const crmLoadingRef=useRef(false);
+  const outboundLoadingRef=useRef(false);
 
   const [meetings,setMeetings]=useState([]);
   const [totalContactadosByQual,setTotalContactadosByQual]=useState({});
@@ -843,6 +845,8 @@ export default function Dashboard(){
   useEffect(function(){
     if(!configLoaded) return;
     async function loadThreads(){
+      if(outboundLoadingRef.current) return;
+      outboundLoadingRef.current=true;
       setDbLoading(true);
       setLoadError(null);
       try{
@@ -880,6 +884,7 @@ export default function Dashboard(){
         setLoadError(e.message||"Error al cargar datos de Metabase");
       }
       setDbLoading(false);
+      outboundLoadingRef.current=false;
     }
     loadThreads();
   },[configLoaded]);
@@ -1257,6 +1262,8 @@ export default function Dashboard(){
   }
 
   async function initCrm(){
+    if(crmLoadingRef.current) return;
+    crmLoadingRef.current=true;
     setCrmLoading(true);setCrmError(null);
     try{
       // Load directly from Supabase tables (server-synced)
@@ -1266,7 +1273,7 @@ export default function Dashboard(){
       // Trigger incremental sync in background (server-side)
       setTimeout(triggerIncrementalSync, 10000);
     }catch(e){console.error("[CRM] Error:",e);setCrmError(e.message);}
-    finally{setCrmLoading(false);}
+    finally{setCrmLoading(false);crmLoadingRef.current=false;}
   }
 
   async function loadCrmCrossReference(){

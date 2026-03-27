@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 // Custom fetch with per-request timeout (15s) to prevent hanging on 522/slowness
-var QUERY_TIMEOUT_MS = 15000;
+var QUERY_TIMEOUT_MS = 30000;
 function fetchWithTimeout(url, options) {
   var controller = new AbortController();
   var timer = setTimeout(function() { controller.abort(); }, QUERY_TIMEOUT_MS);
