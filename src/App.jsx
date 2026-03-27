@@ -792,8 +792,9 @@ export default function Dashboard(){
     // Resumen: compute combined prev KPIs
     if(rawRows||inboundRawRows){
       var outLeads=[],inbLeads=[];
-      if(rawRows){var fo=filterThreadsByDate(rawRows,prev.from,prev.to);var ro=processOutboundThreads(fo,templateConfig,"all");outLeads=ro.MEETINGS||[];}
-      if(inboundRawRows){var fi=filterThreadsByDate(inboundRawRows,prev.from,prev.to);var ri=processInboundThreads(fi,"all",lifecyclePhonesData,inboundHsPhones);inbLeads=ri.MEETINGS||[];}
+      var _prevResLang=resumenRegionFilter==="br"?"pt":resumenRegionFilter==="latam"?"es":"all";
+      if(rawRows){var fo=filterThreadsByDate(rawRows,prev.from,prev.to);var ro=processOutboundThreads(fo,templateConfig,_prevResLang);outLeads=ro.MEETINGS||[];}
+      if(inboundRawRows){var fi=filterThreadsByDate(inboundRawRows,prev.from,prev.to);var ri=processInboundThreads(fi,_prevResLang,lifecyclePhonesData,inboundHsPhones);inbLeads=ri.MEETINGS||[];}
       var prevTotalLeads=outLeads.length+inbLeads.length;
       var prevTotalOferta=outLeads.filter(function(l){return l.ml;}).length+inbLeads.filter(function(l){return l.ml;}).length;
       // CRM meetings in prev period for confirmed count (filtered by SDR owners + region)
@@ -2156,11 +2157,12 @@ export default function Dashboard(){
 
       {/* ============ RESUMEN SECTION ============ */}
       {section==="resumen" && (function(){
+        var _resLang=resumenRegionFilter==="br"?"pt":resumenRegionFilter==="latam"?"es":"all";
         // --- Outbound leads ---
         var outLeads=[];
         if(rawRows){
           var filtOut=filterThreadsByDate(rawRows,dateFrom,dateTo);
-          var outResult=processOutboundThreads(filtOut,templateConfig,"all");
+          var outResult=processOutboundThreads(filtOut,templateConfig,_resLang);
           outLeads=outResult.MEETINGS||[];
         }
         var outTc=outLeads.length;
@@ -2170,7 +2172,7 @@ export default function Dashboard(){
         var inbLeads=[];
         if(inboundRawRows){
           var filtInb=filterThreadsByDate(inboundRawRows,dateFrom,dateTo);
-          var inbResult=processInboundThreads(filtInb,"all",lifecyclePhonesData,inboundHsPhones);
+          var inbResult=processInboundThreads(filtInb,_resLang,lifecyclePhonesData,inboundHsPhones);
           inbLeads=inbResult.MEETINGS||[];
         }
         var inbTc=inbLeads.length;
@@ -2330,6 +2332,10 @@ export default function Dashboard(){
           var cmOut2=cm.properties&&cm.properties.hs_meeting_outcome;var cmType2=cm.properties&&cm.properties.hs_activity_type;var cmAss2=cm.associations&&cm.associations.contacts&&cm.associations.contacts.results;if(cmAss2){for(var cai=0;cai<cmAss2.length;cai++){var caId2=cmAss2[cai].id;fIdToDay[caId2]=cDay;if(cmOut2)fIdToOut[caId2]=cmOut2;if(cmType2)fIdToType[caId2]=cmType2;var caPs=fCPhMap[caId2];if(caPs){for(var cphi2=0;cphi2<caPs.length;cphi2++){var cph2=caPs[cphi2];fPhToDay[cph2]=cDay;if(cmOut2)fPhToOut[cph2]=cmOut2;if(cmType2)fPhToType[cph2]=cmType2;if(cph2.length>11){fPhToDay[cph2.slice(-11)]=cDay;if(cmOut2)fPhToOut[cph2.slice(-11)]=cmOut2;if(cmType2)fPhToType[cph2.slice(-11)]=cmType2;}if(cph2.length>10){fPhToDay[cph2.slice(-10)]=cDay;if(cmOut2)fPhToOut[cph2.slice(-10)]=cmOut2;if(cmType2)fPhToType[cph2.slice(-10)]=cmType2;}}}}}
         }
         var funnelConfByDay={};var funnelRealByDay={};for(var fli=0;fli<confirmedArr.length;fli++){var fl=confirmedArr[fli];var flp=(fl.p||"").replace(/\D/g,"");var flDay=null;var flOut=null;var flType=null;if(flp){flDay=fPhToDay[flp]||(flp.length>11&&fPhToDay[flp.slice(-11)])||(flp.length>10&&fPhToDay[flp.slice(-10)])||(flp.length>9&&fPhToDay[flp.slice(-9)])||(flp.length>8&&fPhToDay[flp.slice(-8)])||null;flOut=fPhToOut[flp]||(flp.length>11&&fPhToOut[flp.slice(-11)])||(flp.length>10&&fPhToOut[flp.slice(-10)])||(flp.length>9&&fPhToOut[flp.slice(-9)])||(flp.length>8&&fPhToOut[flp.slice(-8)])||null;flType=fPhToType[flp]||(flp.length>11&&fPhToType[flp.slice(-11)])||(flp.length>10&&fPhToType[flp.slice(-10)])||(flp.length>9&&fPhToType[flp.slice(-9)])||(flp.length>8&&fPhToType[flp.slice(-8)])||null;}if(!flDay&&fl.hid){flDay=fIdToDay[fl.hid]||null;flOut=fIdToOut[fl.hid]||null;flType=fIdToType[fl.hid]||null;}if(flDay){if(!funnelConfByDay[flDay])funnelConfByDay[flDay]=[];funnelConfByDay[flDay].push(fl);if(flOut==="COMPLETED"&&flType==="\u2705 Primera Reuni\u00F3n"){if(!funnelRealByDay[flDay])funnelRealByDay[flDay]=[];funnelRealByDay[flDay].push(fl);}}}
+                // --- Iago realizadas (cross-matched with out/inb leads) ---
+        var iagoRealizadas=0;var iagoRealOut=0;var iagoRealInb=0;var iagoRealArr=[];
+        var _rkKeys=Object.keys(funnelRealByDay);for(var _rki=0;_rki<_rkKeys.length;_rki++){var _rda=funnelRealByDay[_rkKeys[_rki]];for(var _rdi=0;_rdi<_rda.length;_rdi++){iagoRealizadas++;iagoRealArr.push(_rda[_rdi]);if(_rda[_rdi]._table==="mb_outbound_threads")iagoRealOut++;else iagoRealInb++;}}
+
         var handleFunnelBarClick=function(data,dataKey){var day=(data.payload||data).d;var leads=[];var title="";if(dataKey==="ofertas"){leads=(funnelOfertaByDay[day]||[]).map(function(l){var lp=(l.p||"").replace(/\D/g,"");var isConf=false;if(lp){isConf=!!(fPhToDay[lp]||(lp.length>11&&fPhToDay[lp.slice(-11)])||(lp.length>10&&fPhToDay[lp.slice(-10)])||(lp.length>9&&fPhToDay[lp.slice(-9)])||(lp.length>8&&fPhToDay[lp.slice(-8)]));}if(!isConf&&l.hid&&fIdToDay[l.hid])isConf=true;return Object.assign({},l,{_confirmed:isConf});});title="\u{1F4C5} Ofertadas "+day;}else if(dataKey==="confirmadas"){leads=funnelConfByDay[day]||[];title="\u2705 Agendadas "+day;}else if(dataKey==="realizadas"){leads=funnelRealByDay[day]||[];title="\u2705 Realizadas "+day;}if(leads.length>0)setChartDayModalData({title:title,leads:leads,tagContext:dataKey==="ofertas"?"ofertadas":"agendadas"});};
         var dailyFunnel=Object.values(dayMap2).sort(function(a,b){return (a._sort||0)-(b._sort||0);});
 
@@ -3497,11 +3503,12 @@ export default function Dashboard(){
             var it=allDbTemplates[iti];
             if(!it.template_name||activeTplNames[it.template_name])continue;
             if(_isH(it.template_name))continue;
-            var itRate=it.total_sent>0?parseFloat(((it.total_resp||0)/it.total_sent*100).toFixed(1)):0;
-            inactiveList.push({name:it.template_name,sent:it.total_sent||0,resp:it.total_resp||0,rate:itRate,lastSent:it.last_sent||null,stepOrder:it.step_order||null});
+            var hasResp=it.total_resp!=null;
+            var itRate=hasResp&&it.total_sent>0?parseFloat((it.total_resp/it.total_sent*100).toFixed(1)):null;
+            inactiveList.push({name:it.template_name,sent:it.total_sent||0,resp:hasResp?it.total_resp:null,rate:itRate,lastSent:it.last_sent||null,stepOrder:it.step_order||null});
           }
           if(inactiveList.length===0)return null;
-          inactiveList.sort(function(a,b){return b.rate-a.rate||b.sent-a.sent;});
+          inactiveList.sort(function(a,b){var ar=a.rate!=null?a.rate:-1;var br=b.rate!=null?b.rate:-1;return br-ar||b.sent-a.sent;});
           return (<div style={{marginTop:22,marginBottom:22}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,paddingBottom:8,borderBottom:"1px solid "+C.border+"44"}}>
               <div style={{fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700}}>Inactivos</div>
@@ -3509,7 +3516,7 @@ export default function Dashboard(){
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               {inactiveList.map(function(it){
-                var rn=it.rate;var sc=rn>=20?C.green:rn>=12?C.yellow:C.red;
+                var rn=it.rate;var hasRate=rn!=null;var sc=hasRate?(rn>=20?C.green:rn>=12?C.yellow:C.red):C.muted;
                 var lastDate=it.lastSent?new Date(it.lastSent).toLocaleDateString("es",{day:"2-digit",month:"short",year:"numeric"}):"";
                 return (<Cd key={it.name} style={{opacity:0.7,border:"1px dashed "+C.border}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -3521,8 +3528,8 @@ export default function Dashboard(){
                       </div>
                     </div>
                     <div style={{textAlign:"right"}}>
-                      <div style={{fontSize:22,fontWeight:800,color:sc,fontFamily:mono}}>{rn.toFixed(1)+"%"}</div>
-                      <div style={{fontSize:12,color:C.muted}}>{it.resp+" de "+it.sent.toLocaleString()}</div>
+                      <div style={{fontSize:22,fontWeight:800,color:sc,fontFamily:mono}}>{hasRate?rn.toFixed(1)+"%":"\u2014"}</div>
+                      <div style={{fontSize:12,color:C.muted}}>{hasRate?(it.resp+" de "+it.sent.toLocaleString()):(it.sent.toLocaleString()+" env.")}</div>
                     </div>
                   </div>
                 </Cd>);
@@ -5597,15 +5604,15 @@ export default function Dashboard(){
             <div style={{fontSize:14,color:C.sub,marginBottom:18,lineHeight:1.6}}>Asigna cada template a una categor&iacute;a para agruparlos en la vista de Templates. Templates marcados como <strong>Autom&aacute;tico</strong> o <strong>Campa&ntilde;a</strong> ser&aacute;n excluidos de los indicadores de Resumen.</div>
             {(function(){
               var tplMap={};
-              for(var di2=0;di2<allDbTemplates.length;di2++){var dt=allDbTemplates[di2];tplMap[dt.template_name]={totalSent:dt.total_sent||0,totalResp:dt.total_resp||0,lastSent:dt.last_sent||null,stepOrder:dt.step_order||null};}
-              for(var ni2=0;ni2<allTemplateNames.length;ni2++){if(!tplMap[allTemplateNames[ni2]])tplMap[allTemplateNames[ni2]]={totalSent:0,totalResp:0,lastSent:null,stepOrder:null};}
+              for(var di2=0;di2<allDbTemplates.length;di2++){var dt=allDbTemplates[di2];tplMap[dt.template_name]={totalSent:dt.total_sent||0,totalResp:dt.total_resp!=null?dt.total_resp:null,lastSent:dt.last_sent||null,stepOrder:dt.step_order||null};}
+              for(var ni2=0;ni2<allTemplateNames.length;ni2++){if(!tplMap[allTemplateNames[ni2]])tplMap[allTemplateNames[ni2]]={totalSent:0,totalResp:null,lastSent:null,stepOrder:null};}
               var nameList=Object.keys(tplMap);
               if(nameList.length===0) return (<div style={{textAlign:"center",padding:30,color:C.muted,fontSize:14}}>No hay templates cargados a&uacute;n. Carga datos primero.</div>);
               var now=new Date();var thirtyDaysAgo=new Date(now.getTime()-30*24*60*60*1000);
               var lcGroups={calificado:[],no_calificado:[],general:[]};
               var lcMeta={calificado:{label:"Calificados",color:C.green,bg:C.lGreen},no_calificado:{label:"No Calificados",color:C.orange,bg:C.lOrange},general:{label:"General",color:C.accent,bg:C.lBlue}};
-              for(var gi3=0;gi3<nameList.length;gi3++){var nm=nameList[gi3];var info=tplMap[nm];var qq=(templateConfig[nm]&&templateConfig[nm].qualification)||_deduceQual(nm);if(!lcGroups[qq])qq="general";var isActive=info.lastSent&&new Date(info.lastSent)>=thirtyDaysAgo;var tRate=info.totalSent>0?((info.totalResp||0)/info.totalSent*100):0;lcGroups[qq].push({name:nm,totalSent:info.totalSent,totalResp:info.totalResp||0,rate:tRate,lastSent:info.lastSent,stepOrder:info.stepOrder,active:isActive});}
-              for(var gk2 in lcGroups){lcGroups[gk2].sort(function(a,b){if(a.active!==b.active)return a.active?-1:1;if(b.rate!==a.rate)return b.rate-a.rate;if(b.totalSent!==a.totalSent)return b.totalSent-a.totalSent;return a.name.localeCompare(b.name);});}
+              for(var gi3=0;gi3<nameList.length;gi3++){var nm=nameList[gi3];var info=tplMap[nm];var qq=(templateConfig[nm]&&templateConfig[nm].qualification)||_deduceQual(nm);if(!lcGroups[qq])qq="general";var isActive=info.lastSent&&new Date(info.lastSent)>=thirtyDaysAgo;var tRate=info.totalResp!=null&&info.totalSent>0?(info.totalResp/info.totalSent*100):null;lcGroups[qq].push({name:nm,totalSent:info.totalSent,totalResp:info.totalResp,rate:tRate,lastSent:info.lastSent,stepOrder:info.stepOrder,active:isActive});}
+              for(var gk2 in lcGroups){lcGroups[gk2].sort(function(a,b){if(a.active!==b.active)return a.active?-1:1;var ar=a.rate!=null?a.rate:-1;var br=b.rate!=null?b.rate:-1;if(br!==ar)return br-ar;if(b.totalSent!==a.totalSent)return b.totalSent-a.totalSent;return a.name.localeCompare(b.name);});}
               var lcOrder=["calificado","no_calificado","general"];
               function renderTplRow(tplName,tplInfo){
                 var currentEntry=templateConfig[tplName]||{};
@@ -5616,8 +5623,9 @@ export default function Dashboard(){
                 var isAbSel=abSelected.indexOf(tplName)>=0;
                 var isHidden=currentEntry.hidden||false;
                 var sentCount=tplInfo.totalSent||0;
-                var respCount=tplInfo.totalResp||0;
-                var histRate=sentCount>0?parseFloat(((respCount/sentCount)*100).toFixed(1)):0;
+                var hasResp=tplInfo.totalResp!=null;
+                var respCount=hasResp?tplInfo.totalResp:0;
+                var histRate=hasResp&&sentCount>0?parseFloat(((respCount/sentCount)*100).toFixed(1)):null;
                 var isActive=tplInfo.active;
                 var lastDate=tplInfo.lastSent?new Date(tplInfo.lastSent).toLocaleDateString("es",{day:"2-digit",month:"short"}):"";
                 return (<div key={tplName} onClick={abSelectMode?function(){handleAbToggle(tplName);}:undefined} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:isAbSel?C.abSelBg:hasAbGroup?C.abRowBg:C.rowBg,borderRadius:10,border:"1px solid "+(isAbSel?C.purple+"66":hasAbGroup?C.purple+"33":C.border),cursor:abSelectMode?"pointer":"default",transition:"all 0.15s ease",opacity:isHidden||!isActive?0.5:1}}>
