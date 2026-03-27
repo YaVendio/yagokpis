@@ -16,7 +16,7 @@ import { fetchPostHogSources, fetchPostHogOrganizations, fetchPostHogPersonsByEm
 
 function getFirstOfMonth(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";}
 function getLastOfMonth(){var d=new Date(new Date().getFullYear(),new Date().getMonth()+1,0);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
-function getCrmSinceDate(){var d=new Date();d.setMonth(d.getMonth()-3);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";}
+function getCrmSinceDate(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";}
 
 function toGMT5(date){var d=new Date(date);d.setTime(d.getTime()+(d.getTimezoneOffset()*60000)-(5*3600000));return d;}
 
