@@ -252,6 +252,7 @@ async function syncDeal(supabase: any, id: string) {
     data: deal,
     pipeline: deal.properties?.pipeline || null,
     createdate: deal.properties?.createdate || null,
+    closedate: deal.properties?.closedate || null,
     hubspot_owner_id: deal.properties?.hubspot_owner_id || null,
   });
   console.log(`[webhook] Upserted deal ${id}`);
