@@ -494,18 +494,19 @@ function Delta({current,previous,suffix,invert}){
   return <span style={{fontSize:12,fontWeight:700,color:positive?C.green:C.red,marginLeft:6}}>{diff>0?"\u25B2":"\u25BC"} {Math.abs(diff).toFixed(1)}{suffix||"pp"}</span>;
 }
 
-function DeltaBadge({current,previous,invert,suffix}){
+function DeltaBadge({current,previous,invert,suffix,fmt}){
   if(previous===null||previous===undefined)return null;
   var cv=typeof current==="string"?parseFloat(current):current;
   var pv=typeof previous==="string"?parseFloat(previous):previous;
   if(isNaN(cv)||isNaN(pv))return null;
-  if(pv===0&&cv===0)return <span style={{fontSize:11,fontWeight:700,color:C.muted,background:C.rowAlt,padding:"2px 8px",borderRadius:10,marginLeft:6}}>= 0%</span>;
-  if(pv===0&&cv>0)return <span style={{fontSize:11,fontWeight:700,color:C.green,background:C.lGreen,padding:"2px 8px",borderRadius:10,marginLeft:6}}>NUEVO</span>;
+  var pvLabel=fmt?fmt(pv):Number.isInteger(pv)?String(pv):pv.toFixed(1);
+  if(pv===0&&cv===0)return <span style={{fontSize:11,fontWeight:700,color:C.muted,background:C.rowAlt,padding:"2px 8px",borderRadius:10,marginLeft:6}}>= 0% <span style={{opacity:0.6,fontWeight:500}}>({pvLabel})</span></span>;
+  if(pv===0&&cv>0)return <span style={{fontSize:11,fontWeight:700,color:C.green,background:C.lGreen,padding:"2px 8px",borderRadius:10,marginLeft:6}}>NUEVO <span style={{opacity:0.6,fontWeight:500}}>({pvLabel})</span></span>;
   var pct=((cv-pv)/Math.abs(pv))*100;
-  if(Math.abs(pct)<0.5)return <span style={{fontSize:11,fontWeight:700,color:C.muted,background:C.rowAlt,padding:"2px 8px",borderRadius:10,marginLeft:6}}>= 0%</span>;
+  if(Math.abs(pct)<0.5)return <span style={{fontSize:11,fontWeight:700,color:C.muted,background:C.rowAlt,padding:"2px 8px",borderRadius:10,marginLeft:6}}>= 0% <span style={{opacity:0.6,fontWeight:500}}>({pvLabel})</span></span>;
   var positive=invert?pct<0:pct>0;
   var arrow=pct>0?"\u2191":"\u2193";
-  return <span style={{fontSize:11,fontWeight:700,color:positive?C.green:C.red,background:positive?C.lGreen:C.lRed,padding:"2px 8px",borderRadius:10,marginLeft:6}}>{arrow} {Math.abs(pct).toFixed(1)}%{suffix||""}</span>;
+  return <span style={{fontSize:11,fontWeight:700,color:positive?C.green:C.red,background:positive?C.lGreen:C.lRed,padding:"2px 8px",borderRadius:10,marginLeft:6}}>{arrow} {Math.abs(pct).toFixed(1)}%{suffix||""} <span style={{opacity:0.6,fontWeight:500}}>({pvLabel})</span></span>;
 }
 
 var EMPTY_ENG={alto:{v:0,p:"0%"},medio:{v:0,p:"0%"},bajo:{v:0,p:"0%"},minimo:{v:0,p:"0%"}};
@@ -1865,7 +1866,8 @@ export default function Dashboard(){
 
   var mk=mode===0?"all":"real";var d=dataD[mk];var funnel=mode===0?funnelAll:funnelReal;var mbt=mode===0?meetByTplAll:meetByTplReal;
   var _jsFiltTc=headerInfo.esTotal+headerInfo.ptTotal;
-  var tc=(section==="outbound"&&regionFilter==="all"&&responseStats&&responseStats.outboundTotal)?responseStats.outboundTotal:_jsFiltTc;
+  var _today2=new Date().toISOString().slice(0,10);var _useSql=regionFilter==="all"&&responseStats&&dateFrom<=(outboundSinceRef.current||getFirstOfMonth())&&dateTo>=_today2;
+  var tc=(section==="outbound"&&_useSql&&responseStats.outboundTotal)?responseStats.outboundTotal:_jsFiltTc;
   var lpd=headerInfo.leadsPerDay;
   var _jsTc=_jsFiltTc;var _tplScale=(tc>0&&_jsTc>0&&tc>_jsTc)?tc/_jsTc:1;
   function _cS(s){return _tplScale!==1?Math.round(s*_tplScale):s;}
@@ -2462,9 +2464,9 @@ export default function Dashboard(){
           {/* Outbound: 4 KPI funnel cards */}
           <div style={{fontSize:13,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700,marginBottom:10,paddingBottom:8,borderBottom:"2px solid "+C.border+"66",display:"flex",alignItems:"center",gap:8}}>{"\u{1F4CA}"} GENERAL</div>
           {(function(){
-            var sqlTotal=(regionFilter==="all"&&responseStats)?responseStats.outboundTotal:null;
-            var sqlResp=(regionFilter==="all"&&responseStats)?responseStats.outboundResponded:null;
-            var sqlRespReal=(regionFilter==="all"&&responseStats)?responseStats.outboundRespondedReal:null;
+            var sqlTotal=_useSql?responseStats.outboundTotal:null;
+            var sqlResp=_useSql?responseStats.outboundResponded:null;
+            var sqlRespReal=_useSql?responseStats.outboundRespondedReal:null;
             var contactados=sqlTotal||tc;
             var respCount=mode===1?(sqlRespReal!=null?sqlRespReal:d.resp):(sqlResp!=null?sqlResp:d.resp);
             var respRate=contactados>0?((respCount/contactados)*100).toFixed(1):"0";
@@ -2711,7 +2713,7 @@ export default function Dashboard(){
                   var fOferta=meetings.filter(function(l){return l.ml;});
                   for(var mi2=0;mi2<fOferta.length;mi2++){var fp=(fOferta[mi2].p||"").replace(/\D/g,"");if(!fp)continue;if(fPhIdx[fp]||(fp.length>11&&fPhIdx[fp.slice(-11)])||(fp.length>10&&fPhIdx[fp.slice(-10)])||(fp.length>9&&fPhIdx[fp.slice(-9)])||(fp.length>8&&fPhIdx[fp.slice(-8)]))actualMC++;}
                 }
-                var funnelRespCount=mode===1?(regionFilter==="all"&&responseStats&&responseStats.outboundRespondedReal!=null?responseStats.outboundRespondedReal:d.resp):(regionFilter==="all"&&responseStats&&responseStats.outboundResponded!=null?responseStats.outboundResponded:d.resp);
+                var funnelRespCount=mode===1?(_useSql&&responseStats.outboundRespondedReal!=null?responseStats.outboundRespondedReal:d.resp):(_useSql&&responseStats.outboundResponded!=null?responseStats.outboundResponded:d.resp);
                 var correctedFunnel=funnel.map(function(f,i){if(i===0&&tc>0)return{n:f.n,v:tc,c:f.c};if(i===1)return{n:f.n,v:funnelRespCount,c:f.c};return f;});
                 var funnelFull=correctedFunnel.concat([{n:"Reuni\u00F3n Agendada",v:actualMC,c:C.green}]);
                 return funnelFull.map(function(f,i){var w=Math.max((f.v/(tc||1))*100,4);var prev=i>0?((f.v/(funnelFull[i-1].v||1))*100).toFixed(0):null;
@@ -2719,7 +2721,7 @@ export default function Dashboard(){
               })()}
             </Cd>
             <Cd><Sec tipKey="yagoVsMercado">Yago vs Mercado</Sec>
-              {(function(){var _cResp=(regionFilter==="all"&&responseStats&&responseStats.outboundResponded!=null)?responseStats.outboundResponded:d.resp;var _cRespReal=(regionFilter==="all"&&responseStats&&responseStats.outboundRespondedReal!=null)?responseStats.outboundRespondedReal:d.resp;var _cRateTodas=tc>0?parseFloat(((_cResp/tc)*100).toFixed(1)):0;var _cRateReales=tc>0?parseFloat(((_cRespReal/tc)*100).toFixed(1)):0;var _corrBench=chBench.map(function(b){if(b.ch==="Yago (todas)")return{ch:b.ch,r:_cRateTodas,y:b.y};if(b.ch==="Yago (reales)")return{ch:b.ch,r:_cRateReales,y:b.y};return b;});return _corrBench.map(function(b,i){return (<div key={i} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:b.y?C.text:C.muted,fontWeight:b.y?700:400}}>{b.ch}</span><span style={{fontSize:15,fontWeight:800,color:b.y?C.accent:C.muted,fontFamily:mono}}>{b.r}%</span></div><div style={{height:8,background:C.rowAlt,borderRadius:4}}><div style={{height:"100%",width:(b.r/45)*100+"%",background:b.y?C.accent:C.muted,borderRadius:4,opacity:b.y?0.8:0.3}}/></div></div>);});})()}
+              {(function(){var _cResp=(_useSql&&responseStats.outboundResponded!=null)?responseStats.outboundResponded:d.resp;var _cRespReal=(_useSql&&responseStats.outboundRespondedReal!=null)?responseStats.outboundRespondedReal:d.resp;var _cRateTodas=tc>0?parseFloat(((_cResp/tc)*100).toFixed(1)):0;var _cRateReales=tc>0?parseFloat(((_cRespReal/tc)*100).toFixed(1)):0;var _corrBench=chBench.map(function(b){if(b.ch==="Yago (todas)")return{ch:b.ch,r:_cRateTodas,y:b.y};if(b.ch==="Yago (reales)")return{ch:b.ch,r:_cRateReales,y:b.y};return b;});return _corrBench.map(function(b,i){return (<div key={i} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:14,color:b.y?C.text:C.muted,fontWeight:b.y?700:400}}>{b.ch}</span><span style={{fontSize:15,fontWeight:800,color:b.y?C.accent:C.muted,fontFamily:mono}}>{b.r}%</span></div><div style={{height:8,background:C.rowAlt,borderRadius:4}}><div style={{height:"100%",width:(b.r/45)*100+"%",background:b.y?C.accent:C.muted,borderRadius:4,opacity:b.y?0.8:0.3}}/></div></div>);});})()}
             </Cd>
           </div>
         {/* Daily chart: Ofertadas vs Confirmadas (no qualification filter, self-contained) */}
@@ -2866,7 +2868,7 @@ export default function Dashboard(){
         </Cd>
       </>);})()}
 
-      {section==="inbound"&&subTab==="resumen" && (function(){var ix=inboundExtra;var inbTc=(regionFilter==="all"&&responseStats&&responseStats.inbound)?responseStats.inbound:(ix?ix.uniqueLeadCount:0);
+      {section==="inbound"&&subTab==="resumen" && (function(){var ix=inboundExtra;var inbTc=(_useSql&&responseStats.inbound)?responseStats.inbound:(ix?ix.uniqueLeadCount:0);
         var _prevIx=compareEnabled&&prevInboundData?prevInboundData.inboundExtra||null:null;
         var _prevInbTc=_prevIx?(_prevIx.uniqueLeadCount||0):null;
         var _prevInbSignup=_prevIx?(_prevIx.signupLinkCount||0):null;
@@ -3080,7 +3082,7 @@ export default function Dashboard(){
           ];
           var depthLabels={profunda:"Profunda (10+)",media:"Media (5-9)",corta:"Corta (2-4)",rebote:"Rebote (1 msg)"};
           /* Conversion step helpers */
-          var stLeads=(regionFilter==="all"&&responseStats&&responseStats.inbound)?responseStats.inbound:ix.uniqueLeadCount;
+          var stLeads=(_useSql&&responseStats.inbound)?responseStats.inbound:ix.uniqueLeadCount;
           var stEngaged=ix.engagedTotal;
           var stLink=ix.signupLinkCount;
           var stStep1=ix.signupCount;
@@ -3232,8 +3234,8 @@ export default function Dashboard(){
       })()}
 
       {section==="outbound"&&subTab==="engagement" && (function(){
-        var _sqlR=(regionFilter==="all"&&responseStats)?responseStats.outboundResponded:null;
-        var _sqlRReal=(regionFilter==="all"&&responseStats)?responseStats.outboundRespondedReal:null;
+        var _sqlR=_useSql?responseStats.outboundResponded:null;
+        var _sqlRReal=_useSql?responseStats.outboundRespondedReal:null;
         var totalResp=(_sqlR!=null)?_sqlR:(headerInfo.realesCount+headerInfo.autoReplyCount);
         var corrRespCount=mode===1?(_sqlRReal!=null?_sqlRReal:d.resp):totalResp;
         var corrRate=tc>0?((corrRespCount/tc)*100).toFixed(1)+"%":"0%";
@@ -3904,17 +3906,17 @@ export default function Dashboard(){
               </Cd>
               <Cd style={{border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
                 <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Receita Won</div>
-                <div style={{display:"flex",alignItems:"baseline",gap:4,marginTop:6}}><span style={{fontSize:28,fontWeight:900,color:C.green,fontFamily:mono}}>${wonRevenue.toLocaleString(undefined,{maximumFractionDigits:0})}</span>{compareEnabled&&_hsPrev&&<DeltaBadge current={wonRevenue} previous={_hsPrev.revenue}/>}</div>
+                <div style={{display:"flex",alignItems:"baseline",gap:4,marginTop:6}}><span style={{fontSize:28,fontWeight:900,color:C.green,fontFamily:mono}}>${wonRevenue.toLocaleString(undefined,{maximumFractionDigits:0})}</span>{compareEnabled&&_hsPrev&&<DeltaBadge current={wonRevenue} previous={_hsPrev.revenue} fmt={function(v){return "$"+v.toLocaleString(undefined,{maximumFractionDigits:0});}}/>}</div>
                 <div style={{fontSize:12,color:C.muted,marginTop:2}}>avg ticket ${avgTicket.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
               </Cd>
               <Cd style={{border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)"}}>
                 <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Win Rate</div>
-                <div style={{display:"flex",alignItems:"baseline",gap:4,marginTop:6}}><span style={{fontSize:32,fontWeight:900,color:C.purple,fontFamily:mono}}>{winRate.toFixed(1)}%</span>{compareEnabled&&_hsPrev&&<DeltaBadge current={winRate} previous={_hsPrev.winRate} suffix="pp"/>}</div>
+                <div style={{display:"flex",alignItems:"baseline",gap:4,marginTop:6}}><span style={{fontSize:32,fontWeight:900,color:C.purple,fontFamily:mono}}>{winRate.toFixed(1)}%</span>{compareEnabled&&_hsPrev&&<DeltaBadge current={winRate} previous={_hsPrev.winRate} suffix="pp" fmt={function(v){return v.toFixed(1)+"%";}}/>}</div>
                 <div style={{fontSize:12,color:C.muted,marginTop:2}}>{wonDeals.length} won / {lostDeals.length} lost</div>
               </Cd>
               <Cd style={{border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
                 <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>D{"í"}as Medio p/ Fechar</div>
-                <div style={{display:"flex",alignItems:"baseline",gap:4,marginTop:6}}><span style={{fontSize:32,fontWeight:900,color:C.cyan,fontFamily:mono}}>{avgDays}</span>{compareEnabled&&_hsPrev&&<DeltaBadge current={avgDays} previous={_hsPrev.avgDays} invert/>}</div>
+                <div style={{display:"flex",alignItems:"baseline",gap:4,marginTop:6}}><span style={{fontSize:32,fontWeight:900,color:C.cyan,fontFamily:mono}}>{avgDays}</span>{compareEnabled&&_hsPrev&&<DeltaBadge current={avgDays} previous={_hsPrev.avgDays} invert fmt={function(v){return v+"d";}}/>}</div>
                 <div style={{fontSize:12,color:C.muted,marginTop:2}}>de {daysCount} deals cerrados</div>
               </Cd>
             </div>
