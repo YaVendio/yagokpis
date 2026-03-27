@@ -3582,16 +3582,14 @@ export default function Dashboard(){
           }
         }
 
-        // Filter deals by target pipelines + date + pipeline filter + owner filter
-        // Won deals: filter by closedate; others: filter by createdate
+        // Filter deals by target pipelines + closedate in period + pipeline filter + owner filter
         var filteredDeals=crmDeals.filter(function(d){
           var p=d.properties||{};
           if(!TARGET_PIPELINES[p.pipeline])return false;
           if(hsDealPipelineFilter!=="all"&&p.pipeline!==hsDealPipelineFilter)return false;
           if(hsDealOwnerFilter.length>0&&hsDealOwnerFilter.indexOf(p.hubspot_owner_id)<0)return false;
           if(dateFrom||dateTo){
-            var isWon=p.hs_is_closed_won==="true";
-            var cd=isWon?(p.closedate?new Date(p.closedate):null):(p.createdate?new Date(p.createdate):null);
+            var cd=p.closedate?new Date(p.closedate):null;
             if(!cd)return false;
             if(dateFrom&&cd<new Date(dateFrom+"T00:00:00"))return false;
             if(dateTo&&cd>new Date(dateTo+"T23:59:59"))return false;
@@ -3611,7 +3609,7 @@ export default function Dashboard(){
         for(var dci=0;dci<wonDeals.length;dci++){var dtc=parseFloat(wonDeals[dci].properties.days_to_close);if(!isNaN(dtc)){totalDaysClose+=dtc;daysCount++;}}
         var avgDays=daysCount>0?Math.round(totalDaysClose/daysCount):0;
         var _hsPrev=null;
-        if(compareEnabled){var _hsPP=computePrevPeriod(dateFrom,dateTo);if(_hsPP){var _hsPFD=crmDeals.filter(function(d){var p=d.properties||{};if(!TARGET_PIPELINES[p.pipeline])return false;if(hsDealPipelineFilter!=="all"&&p.pipeline!==hsDealPipelineFilter)return false;if(hsDealOwnerFilter.length>0&&hsDealOwnerFilter.indexOf(p.hubspot_owner_id)<0)return false;var _isW=p.hs_is_closed_won==="true";var cd=_isW?(p.closedate?new Date(p.closedate):null):(p.createdate?new Date(p.createdate):null);if(!cd)return false;return cd>=new Date(_hsPP.from+"T00:00:00")&&cd<=new Date(_hsPP.to+"T23:59:59");});var _hsW=_hsPFD.filter(function(d){return d.properties&&d.properties.hs_is_closed_won==="true";});var _hsL=_hsPFD.filter(function(d){return d.properties&&d.properties.hs_is_closed_lost==="true";});var _hsR=0;for(var _ri=0;_ri<_hsW.length;_ri++)_hsR+=parseFloat(_hsW[_ri].properties.amount)||0;var _hsWR=(_hsW.length+_hsL.length)>0?(_hsW.length/(_hsW.length+_hsL.length)*100):0;var _hsTD=0;var _hsDN=0;for(var _di=0;_di<_hsW.length;_di++){var _dv=parseFloat(_hsW[_di].properties.days_to_close);if(!isNaN(_dv)){_hsTD+=_dv;_hsDN++;}}_hsPrev={total:_hsPFD.length,revenue:_hsR,winRate:_hsWR,avgDays:_hsDN>0?Math.round(_hsTD/_hsDN):0};}}
+        if(compareEnabled){var _hsPP=computePrevPeriod(dateFrom,dateTo);if(_hsPP){var _hsPFD=crmDeals.filter(function(d){var p=d.properties||{};if(!TARGET_PIPELINES[p.pipeline])return false;if(hsDealPipelineFilter!=="all"&&p.pipeline!==hsDealPipelineFilter)return false;if(hsDealOwnerFilter.length>0&&hsDealOwnerFilter.indexOf(p.hubspot_owner_id)<0)return false;var cd=p.closedate?new Date(p.closedate):null;if(!cd)return false;return cd>=new Date(_hsPP.from+"T00:00:00")&&cd<=new Date(_hsPP.to+"T23:59:59");});var _hsW=_hsPFD.filter(function(d){return d.properties&&d.properties.hs_is_closed_won==="true";});var _hsL=_hsPFD.filter(function(d){return d.properties&&d.properties.hs_is_closed_lost==="true";});var _hsR=0;for(var _ri=0;_ri<_hsW.length;_ri++)_hsR+=parseFloat(_hsW[_ri].properties.amount)||0;var _hsWR=(_hsW.length+_hsL.length)>0?(_hsW.length/(_hsW.length+_hsL.length)*100):0;var _hsTD=0;var _hsDN=0;for(var _di=0;_di<_hsW.length;_di++){var _dv=parseFloat(_hsW[_di].properties.days_to_close);if(!isNaN(_dv)){_hsTD+=_dv;_hsDN++;}}_hsPrev={total:_hsPFD.length,revenue:_hsR,winRate:_hsWR,avgDays:_hsDN>0?Math.round(_hsTD/_hsDN):0};}}
         // Count PQL leads (pipeline 808581652) filtered by date range for Self Service PLG win rate
         var pqlLeadCount=crmLeads.filter(function(l){
           var p=l.properties||{};
