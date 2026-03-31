@@ -4657,16 +4657,19 @@ export default function Dashboard(){
         var dailyChartData=Object.keys(dailyMap).sort().map(function(k){return dailyMap[k];});
         var handleReunionBarClick=function(data){var day=(data.payload||data).date;var mts=meetingsByDay[day];if(mts&&mts.length>0)setHsDetailDay({date:day,meetings:mts});};
 
-        // Build daily creation count (independent — all meetings, no filters)
-        var dailyCreatedMap={};
-        for(var dci=0;dci<dedupMeetings.length;dci++){
-          var dcst=dedupMeetings[dci].properties&&dedupMeetings[dci].properties.hs_createdate;
+        // Build daily creation count (uses filtered meetings, grouped by hs_createdate)
+        var dailyCreatedMap={};var createdByDay={};
+        for(var dci=0;dci<filteredMeetings.length;dci++){
+          var dcst=filteredMeetings[dci].properties&&filteredMeetings[dci].properties.hs_createdate;
           if(!dcst)continue;
           var dckey=dcst.slice(0,10);
           if(!dailyCreatedMap[dckey])dailyCreatedMap[dckey]={date:dckey,count:0};
           dailyCreatedMap[dckey].count++;
+          if(!createdByDay[dckey])createdByDay[dckey]=[];
+          createdByDay[dckey].push(filteredMeetings[dci]);
         }
         var dailyCreatedData=Object.keys(dailyCreatedMap).sort().map(function(k){return dailyCreatedMap[k];});
+        var handleCreatedBarClick=function(data){var day=(data.payload||data).date;var mts=createdByDay[day];if(mts&&mts.length>0)setHsDetailDay({date:day,meetings:mts});};
 
         function toggleOwner(id){
           setHsReunionOwnerFilter(function(prev){
@@ -4826,10 +4829,10 @@ export default function Dashboard(){
               </div>
             </Cd>
 
-            {/* Daily created chart — independent of filters */}
+            {/* Daily created chart */}
             {dailyCreatedData.length>1 && <Cd style={{marginBottom:22}}>
               <Sec>Reuniones Creadas por D{"\u00ED"}a</Sec>
-              <div style={{fontSize:11,color:C.muted,marginBottom:4,marginTop:-4}}>Total de reuniones creadas por d{"\u00ED"}a (sin filtros)</div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:4,marginTop:-4}}>Click en una barra para ver las reuniones creadas ese d{"\u00ED"}a</div>
               <div style={{height:260}}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={dailyCreatedData} margin={{left:-15,right:5,top:5,bottom:0}}>
@@ -4837,7 +4840,7 @@ export default function Dashboard(){
                     <XAxis dataKey="date" tick={{fontSize:11,fill:C.muted}} tickFormatter={function(v){var pp=v.split("-");return pp[2]+"/"+pp[1];}}/>
                     <YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
                     <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}} labelFormatter={function(v){var pp=v.split("-");return pp[2]+"/"+pp[1]+"/"+pp[0];}}/>
-                    <Bar dataKey="count" name="Reuniones creadas" fill={C.accent} radius={[4,4,0,0]}/>
+                    <Bar dataKey="count" name="Reuniones creadas" fill={C.accent} radius={[4,4,0,0]} cursor="pointer" onClick={handleCreatedBarClick}/>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
