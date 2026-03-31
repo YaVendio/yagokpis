@@ -2457,7 +2457,7 @@ export default function Dashboard(){
         }
 
         // --- Realizadas (COMPLETED) ---
-        var realizadas=allDateMeetings.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED";}).length;
+        var realizadas=filtCrmMeetings.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED";}).length;
         var realizadasPct=confirmedCount>0?((realizadas/confirmedCount)*100).toFixed(1):"0";
 
         // --- Outcome stats ---
@@ -4580,17 +4580,6 @@ export default function Dashboard(){
         var _rNow=new Date();
         function rGetOutcomeStatus(m){var oc=m.properties&&m.properties.hs_meeting_outcome||"UNKNOWN";if(oc==="SCHEDULED"||oc==="UNKNOWN"){var mst=m.properties&&m.properties.hs_meeting_start_time;if(mst&&new Date(mst)<_rNow)return "RETRASADA";}return oc;}
 
-        // Save pre-outcome filtered list for KPI cards (so cards always show full counts)
-        var preOutcomeFiltered=filteredMeetings;
-
-        // Filter meetings by outcome (multi-select, with RETRASADA support)
-        if(hsReunionOutcomeFilter.length>0){
-          var outcomeSet={};for(var ofi=0;ofi<hsReunionOutcomeFilter.length;ofi++)outcomeSet[hsReunionOutcomeFilter[ofi]]=true;
-          filteredMeetings=filteredMeetings.filter(function(m){
-            return outcomeSet[rGetOutcomeStatus(m)];
-          });
-        }
-
         // Filter by Prioridad PLG (from associated contact, multi-select)
         if(hsReunionPrioridadFilter.length>0){
           var prioSet={};for(var pfi=0;pfi<hsReunionPrioridadFilter.length;pfi++)prioSet[hsReunionPrioridadFilter[pfi]]=true;
@@ -4616,6 +4605,17 @@ export default function Dashboard(){
           for(var ffi=0;ffi<hsReunionFuenteFilter.length;ffi++)fuenteSet[hsReunionFuenteFilter[ffi]]=true;
           filteredMeetings=filteredMeetings.filter(function(m){
             return fuenteSet[getCanalForMeeting(m)];
+          });
+        }
+
+        // Save pre-outcome filtered list for KPI cards (so cards always show full counts)
+        var preOutcomeFiltered=filteredMeetings;
+
+        // Filter meetings by outcome (multi-select, with RETRASADA support)
+        if(hsReunionOutcomeFilter.length>0){
+          var outcomeSet={};for(var ofi=0;ofi<hsReunionOutcomeFilter.length;ofi++)outcomeSet[hsReunionOutcomeFilter[ofi]]=true;
+          filteredMeetings=filteredMeetings.filter(function(m){
+            return outcomeSet[rGetOutcomeStatus(m)];
           });
         }
 
