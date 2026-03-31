@@ -4657,6 +4657,18 @@ export default function Dashboard(){
         var dailyChartData=Object.keys(dailyMap).sort().map(function(k){return dailyMap[k];});
         var handleReunionBarClick=function(data){var day=(data.payload||data).date;var mts=meetingsByDay[day];if(mts&&mts.length>0)setHsDetailDay({date:day,meetings:mts});};
 
+        // Build daily creation count (no status, from preOutcomeFiltered)
+        var dailyCreatedMap={};
+        for(var dci=0;dci<preOutcomeFiltered.length;dci++){
+          var dcst=preOutcomeFiltered[dci].properties&&preOutcomeFiltered[dci].properties.hs_createdate;
+          if(!dcst)dcst=preOutcomeFiltered[dci].properties&&preOutcomeFiltered[dci].properties.hs_meeting_start_time;
+          if(!dcst)continue;
+          var dckey=dcst.slice(0,10);
+          if(!dailyCreatedMap[dckey])dailyCreatedMap[dckey]={date:dckey,count:0};
+          dailyCreatedMap[dckey].count++;
+        }
+        var dailyCreatedData=Object.keys(dailyCreatedMap).sort().map(function(k){return dailyCreatedMap[k];});
+
         function toggleOwner(id){
           setHsReunionOwnerFilter(function(prev){
             var idx=prev.indexOf(id);
@@ -4709,6 +4721,22 @@ export default function Dashboard(){
               }).filter(Boolean)}
             </div>);
             })()}
+
+            {/* Daily created chart (no status) */}
+            {dailyCreatedData.length>1 && <Cd style={{marginBottom:22}}>
+              <Sec>Reuniones Creadas por D{"\u00ED"}a</Sec>
+              <div style={{height:260}}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dailyCreatedData} margin={{left:-15,right:5,top:5,bottom:0}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                    <XAxis dataKey="date" tick={{fontSize:11,fill:C.muted}} tickFormatter={function(v){var pp=v.split("-");return pp[2]+"/"+pp[1];}}/>
+                    <YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
+                    <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}} labelFormatter={function(v){var pp=v.split("-");return pp[2]+"/"+pp[1]+"/"+pp[0];}}/>
+                    <Bar dataKey="count" name="Reuniones" fill={C.accent} radius={[4,4,0,0]}/>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </Cd>}
 
             {/* Daily stacked chart */}
             {dailyChartData.length>1 && <Cd style={{marginBottom:22}}>
