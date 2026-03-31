@@ -107,11 +107,18 @@ Deno.serve(async (req: Request) => {
 
   console.log(`[webhook] HMAC validated OK — processing ${deduped.length} events (from ${events.length} raw)`);
 
-  for (const evt of deduped) {
-    try {
-      await processEvent(supabase, evt);
-    } catch (e) {
-      console.error(`[webhook] Error processing event ${evt.subscriptionType} ${evt.objectId}:`, e);
+  // Process events concurrently (max 3 at a time) to avoid sequential bottleneck
+  const CONCURRENCY = 3;
+  for (let i = 0; i < deduped.length; i += CONCURRENCY) {
+    const batch = deduped.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map((evt) => processEvent(supabase, evt))
+    );
+    for (let j = 0; j < results.length; j++) {
+      if (results[j].status === "rejected") {
+        const evt = batch[j];
+        console.error(`[webhook] Error processing ${evt.subscriptionType} ${evt.objectId}:`, (results[j] as PromiseRejectedResult).reason);
+      }
     }
   }
 

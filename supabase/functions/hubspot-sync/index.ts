@@ -81,12 +81,19 @@ Deno.serve(async (req: Request) => {
     console.log(`[sync] ${syncType} since ${sinceIso}`);
     const counts: Record<string, number> = {};
 
-    // 1. Meetings
-    const meetings = await fetchAllPaginated("/crm/v3/objects/meetings/search", {
-      filterGroups: [{ filters: [{ propertyName: "hs_createdate", operator: "GTE", value: sinceMs }] }],
+    // 1. Meetings — by createdate OR lastmodifieddate (to catch outcome changes)
+    const meetingsRaw = await fetchAllPaginated("/crm/v3/objects/meetings/search", {
+      filterGroups: [
+        { filters: [{ propertyName: "hs_createdate", operator: "GTE", value: sinceMs }] },
+        { filters: [{ propertyName: "hs_lastmodifieddate", operator: "GTE", value: sinceMs }] },
+      ],
       properties: MEETING_PROPS,
     });
-    console.log(`[sync] meetings: ${meetings.length}`);
+    // Deduplicate by meeting ID
+    const meetingMap = new Map<string, any>();
+    for (const m of meetingsRaw) meetingMap.set(m.id, m);
+    const meetings = Array.from(meetingMap.values());
+    console.log(`[sync] meetings: ${meetings.length} (raw ${meetingsRaw.length})`);
 
     // Meeting associations
     if (meetings.length > 0) {

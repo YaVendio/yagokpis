@@ -12,19 +12,32 @@ export function getSupabaseAdmin() {
 
 // --- HubSpot API helpers ---
 
-async function fetchWithRetry(url: string, opts: RequestInit, label: string, maxRetries = 3): Promise<any> {
+async function fetchWithRetry(url: string, opts: RequestInit, label: string, maxRetries = 2): Promise<any> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const res = await fetch(url, opts);
-    if (res.ok) return res.json();
-    if (res.status === 429 && attempt < maxRetries) {
-      const retryAfter = parseInt(res.headers.get("Retry-After") || "1", 10);
-      const wait = Math.max(retryAfter * 1000, 1000 * (attempt + 1));
-      console.warn(`[HS] ${label} rate limited, retrying in ${wait}ms (attempt ${attempt + 1}/${maxRetries})`);
-      await new Promise((r) => setTimeout(r, wait));
-      continue;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const res = await fetch(url, { ...opts, signal: controller.signal });
+      clearTimeout(timeout);
+      if (res.ok) return res.json();
+      if (res.status === 429 && attempt < maxRetries) {
+        const retryAfter = parseInt(res.headers.get("Retry-After") || "1", 10);
+        const wait = Math.min(Math.max(retryAfter * 1000, 1000), 5000);
+        console.warn(`[HS] ${label} rate limited, retrying in ${wait}ms (attempt ${attempt + 1}/${maxRetries})`);
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+      const text = await res.text();
+      throw new Error(`HS ${label} ${res.status}: ${text}`);
+    } catch (e: any) {
+      clearTimeout(timeout);
+      if (e.name === "AbortError") {
+        console.warn(`[HS] ${label} timed out (10s) attempt ${attempt + 1}/${maxRetries + 1}`);
+        if (attempt < maxRetries) continue;
+        throw new Error(`HS ${label} timed out after ${maxRetries + 1} attempts`);
+      }
+      throw e;
     }
-    const text = await res.text();
-    throw new Error(`HS ${label} ${res.status}: ${text}`);
   }
 }
 
