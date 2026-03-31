@@ -658,6 +658,10 @@ export default function Dashboard(){
   const [growthInited,setGrowthInited]=useState(false);
   const [growthGoals,setGrowthGoals]=useState({latam:{signups:0,pqls:0},brasil:{signups:0,pqls:0}});
   const [growthMonth,setGrowthMonth]=useState(function(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");});
+  const [growthDatePreset,setGrowthDatePreset]=useState("este_mes");
+  const [growthCustomFrom,setGrowthCustomFrom]=useState("");
+  const [growthCustomTo,setGrowthCustomTo]=useState("");
+  const [growthDateDropOpen,setGrowthDateDropOpen]=useState(false);
   const [showGoalsEditor,setShowGoalsEditor]=useState(false);
   const [growthModal,setGrowthModal]=useState(null);
   const [growthChartDateFrom,setGrowthChartDateFrom]=useState("");
@@ -698,6 +702,7 @@ export default function Dashboard(){
 
   useEffect(function(){if(!hsReunionDropOpen)return;function close(){setHsReunionDropOpen("");}window.addEventListener("click",close);return function(){window.removeEventListener("click",close);};},[hsReunionDropOpen]);
   useEffect(function(){if(!hsDealDropOpen)return;function close(){setHsDealDropOpen("");}window.addEventListener("click",close);return function(){window.removeEventListener("click",close);};},[hsDealDropOpen]);
+  useEffect(function(){if(!growthDateDropOpen)return;function close(){setGrowthDateDropOpen(false);}window.addEventListener("click",close);return function(){window.removeEventListener("click",close);};},[growthDateDropOpen]);
 
   // Auto-init Grupos when selected for the first time
   useEffect(function(){
@@ -711,7 +716,9 @@ export default function Dashboard(){
 
   // Auto-init Growth when selected for the first time
   useEffect(function(){
-    if(section==="growth"&&subTab==="resumen"&&!growthInited&&!growthLoading&&!growthError){initGrowth();}
+    if(section==="growth"&&subTab==="resumen"&&!growthInited&&!growthLoading&&!growthError){
+      if(growthDatePreset==="custom"&&growthCustomFrom){initGrowth(null,growthCustomFrom,growthCustomTo);}else{initGrowth();}
+    }
     if(section==="ads"&&!adsInited&&!adsLoading&&!adsError){initAds();}
   },[section,subTab]);
 
@@ -1436,28 +1443,45 @@ export default function Dashboard(){
   var BRASIL_OWNER_ID="79360573";
   var SOURCE_COLORS={"PAID_SOCIAL":C.accent,"DIRECT_TRAFFIC":C.purple,"ORGANIC_SEARCH":C.green,"REFERRALS":C.cyan,"OFFLINE":C.orange,"OTHER_CAMPAIGNS":C.pink,"EMAIL_MARKETING":C.yellow,"ORGANIC_SOCIAL":C.red,"PAID_SEARCH":"#6366F1"};
 
-  async function initGrowth(monthOverride){
+  async function initGrowth(monthOverride,customFromStr,customToStr){
     var selMonth=monthOverride||growthMonth;
     setGrowthLoading(true);setGrowthError(null);
     try{
-      // Parse month
-      var parts=selMonth.split("-");
-      var year=parseInt(parts[0]);var mo=parseInt(parts[1])-1;
-      var firstDay=new Date(year,mo,1);
-      var lastDay=new Date(year,mo+1,0);
+      // Determine date range: custom dates or month-based
+      var firstDay,lastDay,goalsMonth,isCustomRange=false;
+      if(customFromStr){
+        isCustomRange=true;
+        firstDay=new Date(customFromStr+"T00:00:00");
+        lastDay=customToStr?new Date(customToStr+"T23:59:59"):new Date();
+        // Goals from the month of the start date
+        goalsMonth=firstDay.getFullYear()+"-"+String(firstDay.getMonth()+1).padStart(2,"0");
+      }else{
+        var parts=selMonth.split("-");
+        var year=parseInt(parts[0]);var mo=parseInt(parts[1])-1;
+        firstDay=new Date(year,mo,1);
+        lastDay=new Date(year,mo+1,0);
+        goalsMonth=selMonth;
+      }
       var now=toGMT5(new Date());
-      var currentDay=now.getFullYear()===year&&now.getMonth()===mo?now.getDate():lastDay.getDate();
-      var totalDays=lastDay.getDate();
+      var totalDays,currentDay;
+      if(isCustomRange){
+        totalDays=Math.max(1,Math.round((lastDay-firstDay)/(1000*60*60*24))+1);
+        currentDay=Math.min(totalDays,Math.max(1,Math.round((now-firstDay)/(1000*60*60*24))+1));
+      }else{
+        var _y=firstDay.getFullYear(),_m=firstDay.getMonth();
+        totalDays=new Date(_y,_m+1,0).getDate();
+        currentDay=now.getFullYear()===_y&&now.getMonth()===_m?now.getDate():totalDays;
+      }
 
       // Fetch goals + leads + PostHog sources in parallel (independent calls)
       console.log("[Growth] Fetching goals + leads + PostHog since",firstDay.toISOString());
       setPosthogSourcesLoading(true);setPosthogSourcesError(null);
-      var nextMonth=new Date(year,mo+1,1);
+      var nextDay=new Date(lastDay.getTime()+86400000);
       var parallelResults=await Promise.allSettled([
-        retryQuery(function(){ return supabase.from("growth_goals").select("*").eq("month",selMonth); }),
+        retryQuery(function(){ return supabase.from("growth_goals").select("*").eq("month",goalsMonth); }),
         fetchGrowthLeads(firstDay.toISOString(),"808581652"),
-        fetchPostHogSources(firstDay,nextMonth),
-        fetchPostHogOrganizations(firstDay,nextMonth)
+        fetchPostHogSources(firstDay,nextDay),
+        fetchPostHogOrganizations(firstDay,nextDay)
       ]);
       // PostHog is non-blocking — handle separately
       if(parallelResults[2].status==="fulfilled"){setPosthogSources(parallelResults[2].value);console.log("[Growth] PostHog sources loaded");}
@@ -1480,16 +1504,16 @@ export default function Dashboard(){
       }
       setGrowthGoals(goals);
 
-      // Filter to selected month only (leads already filtered by date, but double-check month boundary) — use GMT-5
-      var monthEnd=new Date(year,mo+1,0,23,59,59,999);
+      // Filter leads to selected date range — use GMT-5
+      var rangeEnd=isCustomRange?lastDay:new Date(firstDay.getFullYear(),firstDay.getMonth()+1,0,23,59,59,999);
       var filtered=leads.filter(function(l){
         var props=l.properties||{};
         var cd=props.createdate||props.hs_createdate||l.createdAt;
         if(!cd)return false;
         var d=toGMT5(new Date(cd));
-        return d>=firstDay&&d<=monthEnd;
+        return d>=firstDay&&d<=rangeEnd;
       });
-      console.log("[Growth] Leads in month:",filtered.length);
+      console.log("[Growth] Leads in range:",filtered.length);
 
       // Enrich leads with PostHog person data (non-blocking)
       var phPersons={};
@@ -5272,13 +5296,69 @@ export default function Dashboard(){
           {growthError && <div style={{color:C.red,fontSize:13,fontWeight:600,marginBottom:16,background:C.lRed,padding:"12px 18px",borderRadius:10,border:"1px solid "+C.redBorder}}>Error: {growthError} <button onClick={function(){setGrowthError(null);setGrowthInited(false);}} style={{marginLeft:12,background:C.accent,color:"#fff",border:"none",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Reintentar</button></div>}
 
           {/* Header bar */}
-          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:18,flexWrap:"wrap"}}>
-            <input type="month" value={growthMonth} onChange={function(e){setGrowthMonth(e.target.value);setGrowthInited(false);}} style={{padding:"8px 14px",border:"1px solid "+C.border,borderRadius:10,fontSize:14,fontFamily:font,background:C.inputBg,color:C.text,outline:"none"}}/>
-            <button onClick={function(){setGrowthInited(false);initGrowth();}} disabled={growthLoading} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"8px 20px",fontSize:13,fontWeight:700,cursor:growthLoading?"wait":"pointer",fontFamily:font,opacity:growthLoading?0.6:1}}>Actualizar</button>
-            <button onClick={function(){setShowGoalsEditor(true);}} style={{background:C.rowAlt,color:C.muted,border:"1px solid "+C.border,borderRadius:10,padding:"8px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Configurar Metas</button>
-            {gd.currentDay && <span style={{fontSize:12,color:C.muted,background:C.rowAlt,padding:"4px 10px",borderRadius:6,fontWeight:600}}>D{"\u00ED"}a {gd.currentDay} de {gd.totalDays}</span>}
-            {_compareToggle}
-          </div>
+          {(function(){
+            var _gdPresets=[
+              {k:"este_mes",l:"Este mes"},
+              {k:"mes_pasado",l:"Mes pasado"},
+              {k:"custom",l:"Personalizado"}
+            ];
+            function _applyGrowthPreset(key){
+              var today=new Date();
+              if(key==="este_mes"){
+                var m=today.getFullYear()+"-"+String(today.getMonth()+1).padStart(2,"0");
+                setGrowthDatePreset("este_mes");setGrowthCustomFrom("");setGrowthCustomTo("");setGrowthMonth(m);setGrowthInited(false);setGrowthDateDropOpen(false);
+              }else if(key==="mes_pasado"){
+                var pm=new Date(today.getFullYear(),today.getMonth()-1,1);
+                var m2=pm.getFullYear()+"-"+String(pm.getMonth()+1).padStart(2,"0");
+                setGrowthDatePreset("mes_pasado");setGrowthCustomFrom("");setGrowthCustomTo("");setGrowthMonth(m2);setGrowthInited(false);setGrowthDateDropOpen(false);
+              }else if(key==="custom"){
+                setGrowthDatePreset("custom");setGrowthDateDropOpen(false);
+              }
+            }
+            function _applyCustomRange(){
+              if(!growthCustomFrom)return;
+              var fromParts=growthCustomFrom.split("-");
+              var monthKey=fromParts[0]+"-"+fromParts[1];
+              setGrowthMonth(monthKey);setGrowthInited(false);
+              initGrowth(null,growthCustomFrom,growthCustomTo);
+            }
+            var _presetLabel=(_gdPresets.find(function(p){return p.k===growthDatePreset;})||{}).l||"Este mes";
+            var _dateHint="";
+            if(growthDatePreset==="este_mes"||growthDatePreset==="mes_pasado"){
+              var _mp=growthMonth.split("-");
+              var _mnames=["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+              _dateHint=_mnames[parseInt(_mp[1])-1]+" "+_mp[0];
+            }else if(growthDatePreset==="custom"&&growthCustomFrom){
+              _dateHint=growthCustomFrom+(growthCustomTo&&growthCustomTo!==growthCustomFrom?" \u2192 "+growthCustomTo:"");
+            }
+            return <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18,flexWrap:"wrap"}}>
+              <div style={{position:"relative"}}>
+                <button onClick={function(e){e.stopPropagation();setGrowthDateDropOpen(!growthDateDropOpen);}} style={{background:C.inputBg,color:C.text,border:"1px solid "+C.border,borderRadius:10,padding:"8px 16px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font,minWidth:150,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>
+                  <span>{_presetLabel}</span>
+                  {_dateHint && <span style={{fontSize:12,color:C.muted,fontWeight:500}}>{_dateHint}</span>}
+                  <span style={{marginLeft:"auto",fontSize:10}}>{"\u25BE"}</span>
+                </button>
+                {growthDateDropOpen && <div onClick={function(e){e.stopPropagation();}} style={{position:"absolute",top:"100%",left:0,marginTop:4,background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:8,zIndex:999,minWidth:200,boxShadow:"0 4px 16px rgba(0,0,0,0.15)"}}>
+                  {_gdPresets.map(function(p){
+                    var active=growthDatePreset===p.k;
+                    return <div key={p.k} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",cursor:"pointer",borderRadius:8,fontSize:13,fontWeight:600,color:active?C.accent:C.text,background:active?C.rowAlt:"transparent"}} onClick={function(){_applyGrowthPreset(p.k);}} onMouseEnter={function(e){if(!active)e.currentTarget.style.background=C.rowAlt;}} onMouseLeave={function(e){if(!active)e.currentTarget.style.background="transparent";}}>
+                      {active&&<span style={{fontSize:10,fontWeight:900}}>{"\u2713"}</span>}{p.l}
+                    </div>;
+                  })}
+                </div>}
+              </div>
+              {growthDatePreset==="custom" && <>
+                <input type="date" value={growthCustomFrom} onChange={function(e){setGrowthCustomFrom(e.target.value);}} style={{padding:"8px 12px",border:"1px solid "+C.border,borderRadius:10,fontSize:13,fontFamily:mono,color:C.text,background:C.inputBg,outline:"none"}}/>
+                <span style={{fontSize:13,color:C.muted}}>a</span>
+                <input type="date" value={growthCustomTo} onChange={function(e){setGrowthCustomTo(e.target.value);}} style={{padding:"8px 12px",border:"1px solid "+C.border,borderRadius:10,fontSize:13,fontFamily:mono,color:C.text,background:C.inputBg,outline:"none"}}/>
+                <button onClick={function(){_applyCustomRange();}} disabled={!growthCustomFrom||growthLoading} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:!growthCustomFrom||growthLoading?"not-allowed":"pointer",fontFamily:font,opacity:!growthCustomFrom||growthLoading?0.5:1}}>Aplicar</button>
+              </>}
+              <button onClick={function(){setGrowthInited(false);if(growthDatePreset==="custom"&&growthCustomFrom){initGrowth(null,growthCustomFrom,growthCustomTo);}else{initGrowth();}}} disabled={growthLoading} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"8px 20px",fontSize:13,fontWeight:700,cursor:growthLoading?"wait":"pointer",fontFamily:font,opacity:growthLoading?0.6:1}}>Actualizar</button>
+              <button onClick={function(){setShowGoalsEditor(true);}} style={{background:C.rowAlt,color:C.muted,border:"1px solid "+C.border,borderRadius:10,padding:"8px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Configurar Metas</button>
+              {gd.currentDay && <span style={{fontSize:12,color:C.muted,background:C.rowAlt,padding:"4px 10px",borderRadius:6,fontWeight:600}}>D{"\u00ED"}a {gd.currentDay} de {gd.totalDays}</span>}
+              {_compareToggle}
+            </div>;
+          })()}
 
           {!growthLoading && growthInited && (<>
             {/* LATAM KPIs */}
