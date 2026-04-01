@@ -1,48 +1,86 @@
 import { supabase, retryQuery } from "./supabase";
+import { staleWhileRevalidate, setCache, getStale } from "./dataCache";
 
 var PAGE_SIZE = 1000;
+var MAX_PARALLEL = 3;
 
 // Generic paginated fetch with retry — works around PostgREST max-rows (1000)
-async function fetchAllRows(queryBuilder) {
-  var all = [];
-  var from = 0;
-  while (true) {
-    var { data, error } = await retryQuery(function() {
-      return queryBuilder.range(from, from + PAGE_SIZE - 1);
-    });
-    if (error) { return { rows: all, error: error }; }
-    if (!data || data.length === 0) break;
-    for (var i = 0; i < data.length; i++) all.push(data[i]);
-    if (data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
+// Accepts a factory function that returns a fresh query builder for each page
+async function fetchAllRows(queryFactory) {
+  // First page: sequential to determine if more pages needed
+  var { data, error } = await retryQuery(function() {
+    return queryFactory().range(0, PAGE_SIZE - 1);
+  });
+  if (error) { return { rows: [], error: error }; }
+  if (!data || data.length === 0) return { rows: [], error: null };
+
+  var all = data.slice();
+  if (data.length < PAGE_SIZE) return { rows: all, error: null };
+
+  // First page was full — fetch remaining pages in parallel batches
+  var from = PAGE_SIZE;
+  var done = false;
+  while (!done) {
+    // Create a batch of up to MAX_PARALLEL requests
+    var batch = [];
+    for (var b = 0; b < MAX_PARALLEL; b++) {
+      var start = from + b * PAGE_SIZE;
+      batch.push((function(s) {
+        return retryQuery(function() { return queryFactory().range(s, s + PAGE_SIZE - 1); });
+      })(start));
+    }
+    var results = await Promise.all(batch);
+    for (var ri = 0; ri < results.length; ri++) {
+      if (results[ri].error) { return { rows: all, error: results[ri].error }; }
+      var pageData = results[ri].data;
+      if (!pageData || pageData.length === 0) { done = true; break; }
+      for (var i = 0; i < pageData.length; i++) all.push(pageData[i]);
+      if (pageData.length < PAGE_SIZE) { done = true; break; }
+    }
+    from += MAX_PARALLEL * PAGE_SIZE;
   }
   return { rows: all, error: null };
 }
 
 // Load outbound threads with pre-computed metrics (no messages column)
-export async function loadOutboundThreads(since) {
-  var q = supabase
-    .from("mb_outbound_threads")
-    .select("thread_id, phone_number, template_sent_at, template_id, template_name, step_order, lead_qualification, hubspot_id, created_at, human_msg_count, ai_msg_count, total_word_count, is_auto_reply, has_tool, has_meeting_link, has_ig_link, has_ig_at, has_valid_response, first_human_ts, last_human_ts, first_human_hour, detected_lang, topic_flags")
-    .gte("created_at", since)
-    .order("thread_id");
-  var { rows, error } = await fetchAllRows(q);
-  if (error) { console.error("[metabaseSync] outbound error:", error.message); return []; }
-  console.log("[metabaseSync] Loaded " + rows.length + " outbound threads from cache (no messages)");
-  return rows;
+// Uses stale-while-revalidate: returns cached data instantly, refreshes in background
+export async function loadOutboundThreads(since, onRefresh) {
+  var cacheKey = "outbound_" + since;
+  function doFetch() {
+    return fetchAllRows(function() {
+      return supabase
+        .from("mb_outbound_threads")
+        .select("thread_id, phone_number, template_sent_at, template_id, template_name, step_order, lead_qualification, hubspot_id, created_at, human_msg_count, ai_msg_count, total_word_count, is_auto_reply, has_tool, has_meeting_link, has_ig_link, has_ig_at, has_valid_response, first_human_ts, last_human_ts, first_human_hour, detected_lang, topic_flags")
+        .gte("created_at", since)
+        .order("thread_id");
+    }).then(function(r) {
+      if (r.error) throw new Error(r.error.message);
+      return r.rows;
+    });
+  }
+  var result = await staleWhileRevalidate(cacheKey, "threads", doFetch, onRefresh);
+  console.log("[metabaseSync] Loaded " + result.data.length + " outbound threads" + (result.isStale ? " (from cache, refreshing...)" : ""));
+  return result.data;
 }
 
 // Load inbound threads with pre-computed metrics (no messages column)
-export async function loadInboundThreads(since) {
-  var q = supabase
-    .from("mb_inbound_threads")
-    .select("thread_id, phone_number, created_at, human_msg_count, ai_msg_count, total_word_count, is_auto_reply, has_tool, has_meeting_link, has_ig_link, has_ig_at, has_valid_response, first_human_ts, last_human_ts, first_human_hour, detected_lang, topic_flags, has_signup_link")
-    .gte("created_at", since)
-    .order("thread_id");
-  var { rows, error } = await fetchAllRows(q);
-  if (error) { console.error("[metabaseSync] inbound error:", error.message); return []; }
-  console.log("[metabaseSync] Loaded " + rows.length + " inbound threads from cache (no messages)");
-  return rows;
+export async function loadInboundThreads(since, onRefresh) {
+  var cacheKey = "inbound_" + since;
+  function doFetch() {
+    return fetchAllRows(function() {
+      return supabase
+        .from("mb_inbound_threads")
+        .select("thread_id, phone_number, created_at, human_msg_count, ai_msg_count, total_word_count, is_auto_reply, has_tool, has_meeting_link, has_ig_link, has_ig_at, has_valid_response, first_human_ts, last_human_ts, first_human_hour, detected_lang, topic_flags, has_signup_link")
+        .gte("created_at", since)
+        .order("thread_id");
+    }).then(function(r) {
+      if (r.error) throw new Error(r.error.message);
+      return r.rows;
+    });
+  }
+  var result = await staleWhileRevalidate(cacheKey, "threads", doFetch, onRefresh);
+  console.log("[metabaseSync] Loaded " + result.data.length + " inbound threads" + (result.isStale ? " (from cache, refreshing...)" : ""));
+  return result.data;
 }
 
 // Lazy load messages for specific threads (on-demand conversation loading)
@@ -125,23 +163,30 @@ export async function loadAllTemplateNames(queryMetabaseFn) {
   return sbData || [];
 }
 
-// Load lifecycle phones from mb_lifecycle_phones → { phone: { firstAt, firstStep1At } }
+// Load lifecycle phones from mb_lifecycle_phones -> { phone: { firstAt, firstStep1At } }
 export async function loadLifecyclePhones() {
-  var q = supabase
-    .from("mb_lifecycle_phones")
-    .select("phone_number, first_lifecycle_at, first_step1_at");
-  var { rows, error } = await fetchAllRows(q);
-  if (error) { console.error("[metabaseSync] lifecycle error:", error.message); return {}; }
-  var phones = {};
-  for (var i = 0; i < rows.length; i++) {
-    var r = rows[i];
-    if (r.phone_number) {
-      phones[r.phone_number] = {
-        firstAt: r.first_lifecycle_at || null,
-        firstStep1At: r.first_step1_at || null,
-      };
-    }
+  var cacheKey = "lifecycle_phones";
+  function doFetch() {
+    return fetchAllRows(function() {
+      return supabase
+        .from("mb_lifecycle_phones")
+        .select("phone_number, first_lifecycle_at, first_step1_at");
+    }).then(function(r) {
+      if (r.error) throw new Error(r.error.message);
+      var phones = {};
+      for (var i = 0; i < r.rows.length; i++) {
+        var row = r.rows[i];
+        if (row.phone_number) {
+          phones[row.phone_number] = {
+            firstAt: row.first_lifecycle_at || null,
+            firstStep1At: row.first_step1_at || null,
+          };
+        }
+      }
+      return phones;
+    });
   }
-  console.log("[metabaseSync] Loaded " + Object.keys(phones).length + " lifecycle phones from cache");
-  return phones;
+  var result = await staleWhileRevalidate(cacheKey, "lifecycle", doFetch);
+  console.log("[metabaseSync] Loaded " + Object.keys(result.data).length + " lifecycle phones" + (result.isStale ? " (from cache)" : ""));
+  return result.data;
 }

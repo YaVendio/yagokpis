@@ -1,20 +1,39 @@
 import { supabase, retryQuery } from "./supabase";
 
 var PAGE_SIZE = 1000;
+var MAX_PARALLEL = 3;
 
-// Generic paginated fetch with retry — works for both .from() and .rpc() queries
-async function fetchAllRows(queryBuilder) {
-  var all = [];
-  var from = 0;
-  while (true) {
-    var { data, error } = await retryQuery(function() {
-      return queryBuilder.range(from, from + PAGE_SIZE - 1);
-    });
-    if (error) { return { rows: all, error: error }; }
-    if (!data || data.length === 0) break;
-    for (var i = 0; i < data.length; i++) all.push(data[i]);
-    if (data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
+// Generic paginated fetch with retry + parallel pages
+// Accepts a factory function that returns a fresh query builder for each page
+async function fetchAllRows(queryFactory) {
+  var { data, error } = await retryQuery(function() {
+    return queryFactory().range(0, PAGE_SIZE - 1);
+  });
+  if (error) { return { rows: [], error: error }; }
+  if (!data || data.length === 0) return { rows: [], error: null };
+
+  var all = data.slice();
+  if (data.length < PAGE_SIZE) return { rows: all, error: null };
+
+  var from = PAGE_SIZE;
+  var done = false;
+  while (!done) {
+    var batch = [];
+    for (var b = 0; b < MAX_PARALLEL; b++) {
+      var start = from + b * PAGE_SIZE;
+      batch.push((function(s) {
+        return retryQuery(function() { return queryFactory().range(s, s + PAGE_SIZE - 1); });
+      })(start));
+    }
+    var results = await Promise.all(batch);
+    for (var ri = 0; ri < results.length; ri++) {
+      if (results[ri].error) { return { rows: all, error: results[ri].error }; }
+      var pageData = results[ri].data;
+      if (!pageData || pageData.length === 0) { done = true; break; }
+      for (var i = 0; i < pageData.length; i++) all.push(pageData[i]);
+      if (pageData.length < PAGE_SIZE) { done = true; break; }
+    }
+    from += MAX_PARALLEL * PAGE_SIZE;
   }
   return { rows: all, error: null };
 }
@@ -107,15 +126,16 @@ function adaptLead(r) {
 
 // --- Public functions (same signatures as before) ---
 
-// Load meetings from Supabase via lean RPC
+// Load meetings from Supabase via lean RPC (direct, no cache)
 export async function loadMeetingsFromDb(sinceIso) {
-  var q = supabase.rpc("get_meetings_lean", { since_iso: sinceIso });
-  var { rows, error } = await fetchAllRows(q);
+  var { rows, error } = await fetchAllRows(function() {
+    return supabase.rpc("get_meetings_lean", { since_iso: sinceIso });
+  });
   if (error) { console.error("[sync] meetings error:", error.message); return []; }
   return rows.map(adaptMeeting);
 }
 
-// Load contacts by IDs via lean RPC (batched 300)
+// Load contacts by IDs via lean RPC (batched 300, not cached — depends on dynamic IDs)
 export async function loadContactsFromDb(contactIds) {
   if (!contactIds || contactIds.length === 0) return [];
   var all = [];
@@ -130,18 +150,20 @@ export async function loadContactsFromDb(contactIds) {
   return all.map(adaptContact);
 }
 
-// Load deals from Supabase via lean RPC
+// Load deals from Supabase via lean RPC (direct, no cache)
 export async function loadDealsFromDb(sinceIso) {
-  var q = supabase.rpc("get_deals_lean", { since_iso: sinceIso });
-  var { rows, error } = await fetchAllRows(q);
+  var { rows, error } = await fetchAllRows(function() {
+    return supabase.rpc("get_deals_lean", { since_iso: sinceIso });
+  });
   if (error) { console.error("[sync] deals error:", error.message); return []; }
   return rows.map(adaptDeal);
 }
 
-// Load leads from Supabase via lean RPC
+// Load leads from Supabase via lean RPC (direct, no cache)
 export async function loadLeadsFromDb(sinceIso, pipelineId) {
-  var q = supabase.rpc("get_leads_lean", { since_iso: sinceIso, p_pipeline_id: pipelineId || null });
-  var { rows, error } = await fetchAllRows(q);
+  var { rows, error } = await fetchAllRows(function() {
+    return supabase.rpc("get_leads_lean", { since_iso: sinceIso, p_pipeline_id: pipelineId || null });
+  });
   if (error) { console.error("[sync] leads error:", error.message); return []; }
   return rows.map(adaptLead);
 }

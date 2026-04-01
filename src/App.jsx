@@ -1,10 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Legend, PieChart, Pie, Sankey, LabelList } from "recharts";
 import { parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
 import { processOutboundThreads, processInboundThreads } from "./threadProcessor";
 import { fetchThreads, fetchInboundThreads, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats, fetchResponseStatsCached, fetchAdsThreads, fetchInboundCached, fetchLifecyclePhonesCached } from "./metabaseApi";
 import { loadOutboundThreads, loadInboundThreads, loadLifecyclePhones, loadThreadMessages, loadAllTemplateNames } from "./metabaseSync";
-import { DEFAULT_MEETINGS as _RAW_MEETINGS } from "./defaultData";
 import { supabase, retryQuery } from "./supabase";
 import InfoTip from "./components/InfoTip";
 import TIPS from "./tooltips";
@@ -17,7 +16,7 @@ import { fetchPostHogSources, fetchPostHogOrganizations, fetchPostHogPersonsByEm
 
 function getFirstOfMonth(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";}
 function getLastOfMonth(){var d=new Date(new Date().getFullYear(),new Date().getMonth()+1,0);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
-function getCrmSinceDate(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";}
+function getCrmSinceDate(){var d=new Date(new Date().getFullYear(),new Date().getMonth()-1,1);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";}
 
 function toGMT5(date){var d=new Date(date);d.setTime(d.getTime()+(d.getTimezoneOffset()*60000)-(5*3600000));return d;}
 
@@ -27,46 +26,6 @@ var _CLight={bg:"#FAFBFC",card:"#FFF",border:"#E5E7EB",text:"#111827",sub:"#3741
 var _CDark={bg:"#0F1117",card:"#1A1D27",border:"#2D3140",text:"#E5E7EB",sub:"#B0B5C3",muted:"#808696",accent:"#3B82F6",green:"#10B981",red:"#EF4444",yellow:"#F59E0B",purple:"#8B5CF6",cyan:"#06B6D4",orange:"#F97316",pink:"#F472B6",lBlue:"#1E2A40",lGreen:"#122B25",lRed:"#2D1B1B",lPurple:"#221F33",lYellow:"#2B2714",lOrange:"#2B2114",inputBg:"#252836",rowBg:"#1E2029",rowAlt:"#252836",bubbleOut:"#1A3A2A",gradFrom:"#13151D",gradTo:"#181B25",abSelBg:"#2A2540",abRowBg:"#1F1E2A",barTrack:"#252836",redBorder:"#5C2020",white:"#E5E7EB"};
 var C=_CLight;
 var _isDark=false;
-
-// Filter default meetings to only those that received MSG1, and compute ml/igL/igA flags
-var DEFAULT_MEETINGS=_RAW_MEETINGS.filter(function(m){return m.tr.indexOf("MSG1")>=0;}).map(function(m){var hasMl=false,hasIgL=false,hasIgA=false;for(var i=0;i<m.c.length;i++){if(m.c[i][0]===2&&m.c[i][1]&&(/meetings\.hubspot\.com\//.test(m.c[i][1])||/yavendio\.com\/[^\s]*meetings/.test(m.c[i][1])))hasMl=true;if(m.c[i][0]===1&&m.c[i][1]){if(/instagram\.com/i.test(m.c[i][1]))hasIgL=true;if(/@\w+|ig\s*:/i.test(m.c[i][1]))hasIgA=true;}}return Object.assign({},m,{ml:hasMl,igL:hasIgL,igA:hasIgA});});
-var _dIgL=DEFAULT_MEETINGS.filter(function(m){return m.igL;}).length;
-var _dIgA=DEFAULT_MEETINGS.filter(function(m){return m.igA&&!m.igL;}).length;
-
-var DEFAULT_TOPICS=[{"t":"Automatizaci\u00f3n","e":"\u{1F916}","n":192,"p":71.1},{"t":"Whatsapp","e":"\u{1F4AC}","n":116,"p":43},{"t":"Soporte","e":"\u{1F527}","n":106,"p":39.3},{"t":"Configuraci\u00f3n","e":"\u2699\uFE0F","n":88,"p":32.6},{"t":"Precios","e":"\u{1F4B0}","n":87,"p":32.2},{"t":"Ventas","e":"\u{1F4CA}","n":77,"p":28.5}];
-
-var DEFAULT_D={
-  all:{resp:270,rate:"24.2%",topics:DEFAULT_TOPICS,ig:73,igR:"27.0%",igLink:_dIgL,igLinkR:(_dIgL/270*100).toFixed(1)+"%",igAt:_dIgA,igAtR:(_dIgA/270*100).toFixed(1)+"%",mc:33,mR:"12.2%",tool:170,tR:"63.0%",eng:{alto:{v:7,p:"2.6%"},medio:{v:43,p:"15.9%"},bajo:{v:123,p:"45.6%"},minimo:{v:97,p:"35.9%"}},hours:[154,90,52,36,149,49,34,13,22,25,27,45,158,138,66,138,191,157,184,93,109,113,163,94],
-    tpl:[
-      {name:"msg_1_yago_sdr_1",day:"D+0",sent:562,resp:161,rate:"28.6%"},
-      {name:"msg_1_yago_sdr",day:"D+0",sent:225,resp:37,rate:"16.4%"},
-      {name:"msg_1_yago_sdr_br_1",day:"D+0",sent:153,resp:28,rate:"18.3%"},
-      {name:"leads_baja_d0_v1",day:"D+0",sent:74,resp:15,rate:"20.3%"},
-      {name:"calificados_d0__v3",day:"D+0",sent:36,resp:14,rate:"38.9%"},
-      {name:"es_caso_de_xito",day:"D+1",sent:5,resp:3,rate:"60.0%"},
-    ],
-    bcast:[]},
-  real:{resp:241,rate:"21.6%",topics:DEFAULT_TOPICS,ig:71,igR:"29.5%",igLink:_dIgL,igLinkR:(_dIgL/241*100).toFixed(1)+"%",igAt:_dIgA,igAtR:(_dIgA/241*100).toFixed(1)+"%",mc:30,mR:"12.4%",tool:149,tR:"61.8%",eng:{alto:{v:4,p:"1.7%"},medio:{v:38,p:"15.8%"},bajo:{v:113,p:"46.9%"},minimo:{v:86,p:"35.7%"}},hours:[152,86,47,26,145,49,34,13,22,25,27,45,158,131,60,138,190,153,183,92,109,92,160,92],
-    tpl:[
-      {name:"msg_1_yago_sdr_1",day:"D+0",sent:562,resp:143,rate:"25.4%"},
-      {name:"msg_1_yago_sdr",day:"D+0",sent:225,resp:33,rate:"14.7%"},
-      {name:"msg_1_yago_sdr_br_1",day:"D+0",sent:153,resp:28,rate:"18.3%"},
-      {name:"calificados_d0__v3",day:"D+0",sent:36,resp:13,rate:"36.1%"},
-      {name:"leads_baja_d0_v1",day:"D+0",sent:74,resp:13,rate:"17.6%"},
-      {name:"es_caso_de_xito",day:"D+1",sent:5,resp:3,rate:"60.0%"},
-    ],
-    bcast:[]}
-};
-
-var DEFAULT_FUNNEL_ALL=[{n:"Contactados",v:1116,c:C.accent},{n:"Respondieron",v:270,c:C.purple},{n:"Oferta Reuni\u00F3n",v:33,c:C.pink}];
-var DEFAULT_FUNNEL_REAL=[{n:"Contactados",v:1116,c:C.accent},{n:"Resp. Reales",v:241,c:C.cyan},{n:"Oferta Reuni\u00F3n",v:30,c:C.pink}];
-var DEFAULT_CH_BENCH=[{ch:"WA Warm*",r:45,y:0},{ch:"Yago (todas)",r:24.2,y:1},{ch:"Yago (reales)",r:21.6,y:1},{ch:"LinkedIn Cold*",r:18,y:0},{ch:"WA Cold*",r:15,y:0},{ch:"SMS Mktg*",r:12,y:0},{ch:"Email Cold*",r:8.5,y:0}];
-var DEFAULT_DAILY=[{d:"02/03",l:88},{d:"02/04",l:56},{d:"02/05",l:69},{d:"02/06",l:39},{d:"02/07",l:60},{d:"02/08",l:63},{d:"02/09",l:60},{d:"02/10",l:82},{d:"02/11",l:79},{d:"02/12",l:99}];
-var DEFAULT_BTABLE=[{m:"Respuesta (todas)",y:"24.2%",b:"40-60%",d:"-16 a -36pp",s:0},{m:"Respuesta (reales)",y:"21.6%",b:"40-60%",d:"-18 a -38pp",s:0},{m:"Env\u00EDo de Instagram",y:"27.0%",b:"35-50%",d:"~-8pp",s:0},{m:"Oferta Reuni\u00F3n",y:"12.2%",b:"20-30%",d:"~-8pp",s:0},{m:"Tiempo 1a Resp.",y:"~3 min",b:"<15 min",d:"5x mejor",s:1},{m:"Msgs/Conv.",y:"12.7",b:"10-20",d:"Normal",s:1}];
-var DEFAULT_MEET_BY_TPL_ALL=[{l:"msg_1_yago_sdr_1",v:161,c:C.accent},{l:"msg_1_yago_sdr",v:37,c:C.accent},{l:"msg_1_yago_sdr_br_1",v:28,c:C.accent},{l:"leads_baja_d0_v1",v:15,c:C.accent},{l:"calificados_d0__v3",v:14,c:C.accent},{l:"calificados_d0__v4",v:3,c:C.accent},{l:"calificados_d0__v1__br",v:3,c:C.accent},{l:"es_caso_de_xito",v:3,c:C.purple}];
-var DEFAULT_MEET_BY_TPL_REAL=[{l:"msg_1_yago_sdr_1",v:143,c:C.accent},{l:"msg_1_yago_sdr",v:33,c:C.accent},{l:"msg_1_yago_sdr_br_1",v:28,c:C.accent},{l:"calificados_d0__v3",v:13,c:C.accent},{l:"leads_baja_d0_v1",v:13,c:C.accent},{l:"calificados_d0__v1__br",v:3,c:C.accent},{l:"es_caso_de_xito",v:3,c:C.purple}];
-var DEFAULT_HEADER={totalContactados:1116,leadsPerDay:112,dateRange:"02/03 \u2013 02/12",autoReplyCount:29,realesCount:241,esRate:"25.3",esResp:237,esTotal:935,ptRate:"18.2",ptResp:33,ptTotal:181};
-// Note: ES/PT counts based on MSG1 template language detection
 
 var tplCol={MSG1:"#2563EB",MSG2a:"#7C3AED",MSG2b:"#7C3AED",MSG2c:"#D97706",MSG3:"#0891B2",MSG4:"#EA580C"};
 var tplNm={MSG1:"MSG 1 \u2014 Yago SDR (D+0)",MSG2a:"MSG 2a \u2014 Sin WA (D+1)",MSG2b:"MSG 2b \u2014 Caso de \u00C9xito (D+1)",MSG2c:"Emprende Show (Broadcast)",MSG3:"MSG 3 \u2014 Value Nudge (D+3)",MSG4:"MSG 4 \u2014 Quick Audit (D+5)"};
@@ -610,6 +569,7 @@ export default function Dashboard(){
   const [gruposCrossRef,setGruposCrossRef]=useState(null);
   const [gruposDateFrom,setGruposDateFrom]=useState("");
   const [gruposDateTo,setGruposDateTo]=useState("");
+  const [gruposPreset,setGruposPreset]=useState("este_mes");
   const [gruposError,setGruposError]=useState(null);
 
   // CRM (HubSpot) tab state
@@ -683,6 +643,7 @@ export default function Dashboard(){
   const [adsData,setAdsData]=useState(null);
   const [adsInited,setAdsInited]=useState(false);
   const [adsModal,setAdsModal]=useState(null);
+  const [adsPreset,setAdsPreset]=useState("este_mes");
 
   // Comparison state
   const [compareEnabled,setCompareEnabled]=useState(false);
@@ -733,6 +694,12 @@ export default function Dashboard(){
     if(isAuthenticated&&!crmInited&&!crmLoading&&!crmError){initCrm();}
   },[isAuthenticated]);
 
+  // Memoize extractHubSpotPhones — computed once when crmContacts changes
+  var crmPhoneMap=useMemo(function(){
+    if(!crmContacts||crmContacts.length===0) return {};
+    return extractHubSpotPhones(crmContacts);
+  },[crmContacts]);
+
   // Compute meeting phones when CRM data is loaded
   useEffect(function(){
     if(crmMeetings.length>0&&crmContacts.length>0){
@@ -744,7 +711,7 @@ export default function Dashboard(){
   // Re-process inbound data when crmContacts arrives after inbound was already loaded
   useEffect(function(){
     if((section==="inbound"||section==="resumen")&&inboundRawRows&&crmContacts.length>0){
-      var merged=Object.assign({},inboundHsPhones||{},extractHubSpotPhones(crmContacts));
+      var merged=Object.assign({},inboundHsPhones||{},crmPhoneMap);
       if(Object.keys(merged).length>0){
         var filtered=filterThreadsByDate(inboundRawRows,dateFrom,dateTo);
         var result=processInboundThreads(filtered,regionFilter,lifecyclePhonesData,merged);
@@ -812,7 +779,7 @@ export default function Dashboard(){
       // CRM meetings in prev period for confirmed count (filtered by SDR owners + region)
       var prevConfirmed=0;var prevRealizadas=0;
       if(crmMeetings.length>0&&crmContacts.length>0){
-        var _prevSdrNames=["pablo","martin","gabriel","rafaela","sebastian"];
+        var _prevSdrNames=["pablo","martin","gabriel","rafaela","sebastian","eduardo"];
         var _prevBrNames=["rafaela"];
         var _prevSdrIds={};var _prevBrIds={};var _prevLatamIds={};
         var _prevOwKeys=Object.keys(crmOwnerMap);
@@ -929,8 +896,7 @@ export default function Dashboard(){
       setLoadError(null);
       try{
         var since=getFirstOfMonth();
-        var threads=await loadOutboundThreads(since);
-        var stats=await fetchResponseStatsCached(since);
+        var [threads,stats]=await Promise.all([loadOutboundThreads(since),fetchResponseStatsCached(since)]);
         setResponseStats(stats);
         setRawRows(threads);
         outboundSinceRef.current=since;
@@ -996,7 +962,7 @@ export default function Dashboard(){
         inboundSinceRef.current=neededSince;
         setInboundRawRows(threads);
         var hp=Object.assign({},inboundHsPhones||{});
-        if(crmContacts.length>0) Object.assign(hp,extractHubSpotPhones(crmContacts));
+        if(crmContacts.length>0) Object.assign(hp,crmPhoneMap);
         var filtered=filterThreadsByDate(threads,dateFrom,dateTo);
         var result=processInboundThreads(filtered,regionFilter,lifecyclePhonesData,Object.keys(hp).length>0?hp:null);
         if(section!=="resumen") applyResult(result);
@@ -1281,7 +1247,7 @@ export default function Dashboard(){
       loadPipelinesFromDb(),
       loadOwnersFromDb()
     ]);
-    console.log("[CRM] DB load done. Meetings:",meetingsRes.length,"Deals:",dealsRes.length,"Leads:",leadsRes.length);
+    console.log("[CRM] DB load done. Meetings:",meetingsRes.length,"Deals:",dealsRes.length,"Leads:",leadsRes.length,"Owners:",Object.keys(ownerMap).length);
     var contactIdSet={};
     for(var i=0;i<meetingsRes.length;i++){
       var assoc=meetingsRes[i].associations&&meetingsRes[i].associations.contacts&&meetingsRes[i].associations.contacts.results;
@@ -1802,7 +1768,7 @@ export default function Dashboard(){
     // Helper: merge inboundHsPhones + crmContacts phones
     function mergePhones(hsPhones){
       var merged=Object.assign({},hsPhones||{});
-      if(crmContacts.length>0){Object.assign(merged,extractHubSpotPhones(crmContacts));}
+      if(crmContacts.length>0){Object.assign(merged,crmPhoneMap);}
       return Object.keys(merged).length>0?merged:null;
     }
     if(inboundRawRows){
@@ -1814,21 +1780,15 @@ export default function Dashboard(){
       }
     }else{
       setInboundLoading(true);setInboundLoadStep(1);
-      loadInboundThreads(getFirstOfMonth()).then(function(threads){
-        setInboundLoadStep(2);
-        return loadLifecyclePhones().catch(function(e){console.warn("Lifecycle phones query failed:",e);return {};}).then(function(sp){return [threads,sp];});
-      }).then(function(all){
+      Promise.all([
+        loadInboundThreads(getFirstOfMonth()),
+        loadLifecyclePhones().catch(function(e){console.warn("Lifecycle phones query failed:",e);return {};})
+      ]).then(function(all){
         setInboundLoadStep(3);
         var inbThreads=all[0];var sp=all[1];
         setInboundRawRows(inbThreads);
         inboundSinceRef.current=getFirstOfMonth();
         setLifecyclePhonesData(sp);
-        if(!isResumen){
-          var hp=mergePhones(inboundHsPhones);
-          var filtered2=filterThreadsByDate(inbThreads,dateFrom,dateTo);
-          var result2=processInboundThreads(filtered2,regionFilter,sp,hp);
-          applyResult(result2);
-        }
         // HubSpot phone match — targeted search for inbound phones only
         if(!inboundHsPhones){
           setInboundLoadStep(4);
@@ -1836,9 +1796,10 @@ export default function Dashboard(){
           for(var ip=0;ip<inbThreads.length;ip++){if(inbThreads[ip].phone_number)inbPhones.push(inbThreads[ip].phone_number);}
           loadContactPhoneMatches(inbPhones).then(function(fetchedHp){
             var merged=Object.assign({},fetchedHp);
-            if(crmContacts.length>0){Object.assign(merged,extractHubSpotPhones(crmContacts));}
+            if(crmContacts.length>0){Object.assign(merged,crmPhoneMap);}
             var hp2=Object.keys(merged).length>0?merged:null;
             setInboundHsPhones(hp2);
+            // Process once with all deps ready
             if(!isResumen){
               var f2=filterThreadsByDate(inbThreads,dateFrom,dateTo);
               var r2=processInboundThreads(f2,regionFilter,sp,hp2);
@@ -1847,6 +1808,13 @@ export default function Dashboard(){
           }).catch(function(e){console.warn("HubSpot phones fetch failed:",e);})
           .finally(function(){setInboundLoading(false);setInboundLoadStep(0);});
         }else{
+          // All deps already available — process once
+          if(!isResumen){
+            var hp=mergePhones(inboundHsPhones);
+            var filtered2=filterThreadsByDate(inbThreads,dateFrom,dateTo);
+            var result2=processInboundThreads(filtered2,regionFilter,sp,hp);
+            applyResult(result2);
+          }
           setInboundLoading(false);setInboundLoadStep(0);
         }
       }).catch(function(e){
@@ -1894,6 +1862,23 @@ export default function Dashboard(){
   function onClickFilter(){setHsDetailDay(null);applyDateFilter(dateFrom,dateTo);}
   function clearDateFilter(){setDateFrom("");setDateTo("");applyDateFilter("","");}
   function onRegionChange(e){var v=e.target.value;setRegionFilter(v);if(section==="inbound"&&inboundRawRows){var filtered=filterThreadsByDate(inboundRawRows,dateFrom,dateTo);var result=processInboundThreads(filtered,v,lifecyclePhonesData,inboundHsPhones);applyResult(result);}else if(section==="outbound"&&rawRows){var filtered2=filterThreadsByDate(rawRows,dateFrom,dateTo);var result2=processOutboundThreads(filtered2,templateConfig,v);applyResult(result2);}}
+
+  // Memoize resumen outbound/inbound processing to avoid recomputing on every render
+  var resumenOutLeads=useMemo(function(){
+    if(!rawRows) return [];
+    var _resLang=resumenRegionFilter==="br"?"pt":resumenRegionFilter==="latam"?"es":"all";
+    var filtOut=filterThreadsByDate(rawRows,dateFrom,dateTo);
+    var outResult=processOutboundThreads(filtOut,templateConfig,_resLang);
+    return outResult.MEETINGS||[];
+  },[rawRows,dateFrom,dateTo,templateConfig,resumenRegionFilter]);
+
+  var resumenInbLeads=useMemo(function(){
+    if(!inboundRawRows) return [];
+    var _resLang=resumenRegionFilter==="br"?"pt":resumenRegionFilter==="latam"?"es":"all";
+    var filtInb=filterThreadsByDate(inboundRawRows,dateFrom,dateTo);
+    var inbResult=processInboundThreads(filtInb,_resLang,lifecyclePhonesData,inboundHsPhones);
+    return inbResult.MEETINGS||[];
+  },[inboundRawRows,dateFrom,dateTo,resumenRegionFilter,lifecyclePhonesData,inboundHsPhones]);
 
   var mk=mode===0?"all":"real";var d=dataD[mk];var funnel=mode===0?funnelAll:funnelReal;var mbt=mode===0?meetByTplAll:meetByTplReal;
   var _jsFiltTc=headerInfo.esTotal+headerInfo.ptTotal;
@@ -1948,15 +1933,27 @@ export default function Dashboard(){
         <option value="pt">Brasil (PT)</option>
       </select>
       <div style={{width:1,height:24,background:C.border}}/>
-      <div style={{display:"flex",alignItems:"center",gap:6}}>
-        <span style={{fontSize:12,color:C.muted}}>De</span>
-        <input type="date" value={dateFrom} onChange={onDateFromChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
-      </div>
-      <div style={{display:"flex",alignItems:"center",gap:6}}>
-        <span style={{fontSize:12,color:C.muted}}>Hasta</span>
-        <input type="date" value={dateTo} onChange={onDateToChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
-      </div>
-      <button onClick={onClickFilter} style={{background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"6px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Filtrar</button>
+      <select value={resumenPreset} onChange={function(e){var k=e.target.value;setResumenPreset(k);if(k!=="custom"){var r=resolvePreset(k);setDateFrom(r.from);setDateTo(r.to);applyDateFilter(r.from,r.to);}}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
+        <option value="hoy">Hoy</option>
+        <option value="ayer">Ayer</option>
+        <option value="esta_semana">Esta Semana</option>
+        <option value="este_mes">Este Mes</option>
+        <option value="ultimos_7">{"\u00DA"}lt. 7d</option>
+        <option value="ultimos_30">{"\u00DA"}lt. 30d</option>
+        <option value="mes_pasado">Mes Pasado</option>
+        <option value="custom">Personalizado</option>
+      </select>
+      {resumenPreset==="custom" && <>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:12,color:C.muted}}>De</span>
+          <input type="date" value={dateFrom} onChange={onDateFromChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:12,color:C.muted}}>Hasta</span>
+          <input type="date" value={dateTo} onChange={onDateToChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+        </div>
+        <button onClick={onClickFilter} style={{background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"6px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Filtrar</button>
+      </>}
       <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6}}>{tc} leads</span>
       {_compareToggle}
     </div>);
@@ -1967,23 +1964,17 @@ export default function Dashboard(){
         <option value="pt">Brasil (PT)</option>
       </select>
       <div style={{width:1,height:24,background:C.border}}/>
-      <div style={{display:"flex",alignItems:"center",gap:6}}>
-        <span style={{fontSize:12,color:C.muted}}>De</span>
-        <input type="date" value={dateFrom} onChange={onDateFromChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
-      </div>
-      <div style={{display:"flex",alignItems:"center",gap:6}}>
-        <span style={{fontSize:12,color:C.muted}}>Hasta</span>
-        <input type="date" value={dateTo} onChange={onDateToChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
-      </div>
-      <button onClick={onClickFilter} style={{background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"6px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Filtrar</button>
-      <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6}}>{tc} leads</span>
-      {_compareToggle}
-    </div>);
-    if(section==="hubspot"&&subTab==="analytics"){
-      var _dealOwnerIds={};
-      for(var _doi=0;_doi<crmDeals.length;_doi++){var _doId=crmDeals[_doi].properties&&crmDeals[_doi].properties.hubspot_owner_id;if(_doId)_dealOwnerIds[_doId]=true;}
-      var _dealOwnerList=Object.keys(_dealOwnerIds).sort(function(a,b){return(crmOwnerMap[a]||a).localeCompare(crmOwnerMap[b]||b);});
-      return (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+      <select value={resumenPreset} onChange={function(e){var k=e.target.value;setResumenPreset(k);if(k!=="custom"){var r=resolvePreset(k);setDateFrom(r.from);setDateTo(r.to);applyDateFilter(r.from,r.to);}}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
+        <option value="hoy">Hoy</option>
+        <option value="ayer">Ayer</option>
+        <option value="esta_semana">Esta Semana</option>
+        <option value="este_mes">Este Mes</option>
+        <option value="ultimos_7">{"\u00DA"}lt. 7d</option>
+        <option value="ultimos_30">{"\u00DA"}lt. 30d</option>
+        <option value="mes_pasado">Mes Pasado</option>
+        <option value="custom">Personalizado</option>
+      </select>
+      {resumenPreset==="custom" && <>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           <span style={{fontSize:12,color:C.muted}}>De</span>
           <input type="date" value={dateFrom} onChange={onDateFromChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
@@ -1992,6 +1983,36 @@ export default function Dashboard(){
           <span style={{fontSize:12,color:C.muted}}>Hasta</span>
           <input type="date" value={dateTo} onChange={onDateToChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
         </div>
+        <button onClick={onClickFilter} style={{background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"6px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Filtrar</button>
+      </>}
+      <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6}}>{tc} leads</span>
+      {_compareToggle}
+    </div>);
+    if(section==="hubspot"&&subTab==="analytics"){
+      var _dealOwnerIds={};
+      for(var _doi=0;_doi<crmDeals.length;_doi++){var _doId=crmDeals[_doi].properties&&crmDeals[_doi].properties.hubspot_owner_id;if(_doId)_dealOwnerIds[_doId]=true;}
+      var _dealOwnerList=Object.keys(_dealOwnerIds).sort(function(a,b){return(crmOwnerMap[a]||a).localeCompare(crmOwnerMap[b]||b);});
+      return (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+        <select value={resumenPreset} onChange={function(e){var k=e.target.value;setResumenPreset(k);if(k!=="custom"){var r=resolvePreset(k);setDateFrom(r.from);setDateTo(r.to);}}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
+          <option value="hoy">Hoy</option>
+          <option value="ayer">Ayer</option>
+          <option value="esta_semana">Esta Semana</option>
+          <option value="este_mes">Este Mes</option>
+          <option value="ultimos_7">{"\u00DA"}lt. 7d</option>
+          <option value="ultimos_30">{"\u00DA"}lt. 30d</option>
+          <option value="mes_pasado">Mes Pasado</option>
+          <option value="custom">Personalizado</option>
+        </select>
+        {resumenPreset==="custom" && <>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <span style={{fontSize:12,color:C.muted}}>De</span>
+            <input type="date" value={dateFrom} onChange={onDateFromChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <span style={{fontSize:12,color:C.muted}}>Hasta</span>
+            <input type="date" value={dateTo} onChange={onDateToChange} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+          </div>
+        </>}
         <div style={{width:1,height:24,background:C.border}}/>
         <div style={{display:"flex",alignItems:"center",gap:4}}>
           {["all","720627716","833703951"].map(function(pv){
@@ -2039,30 +2060,28 @@ export default function Dashboard(){
         if(key==="hoy"){from=_rFmt(today);}
         else if(key==="ayer"){var y=new Date(today);y.setDate(y.getDate()-1);from=_rFmt(y);to=_rFmt(y);}
         else if(key==="esta_semana"){var ws=new Date(today);var dow=ws.getDay()||7;ws.setDate(ws.getDate()-(dow-1));from=_rFmt(ws);}
-        else if(key==="semana_pasada"){var ws2=new Date(today);var dow2=ws2.getDay()||7;ws2.setDate(ws2.getDate()-(dow2-1)-7);var we=new Date(ws2);we.setDate(we.getDate()+6);from=_rFmt(ws2);to=_rFmt(we);}
         else if(key==="este_mes"){from=today.getFullYear()+"-"+String(today.getMonth()+1).padStart(2,"0")+"-01";var emEnd=new Date(today.getFullYear(),today.getMonth()+1,0);to=_rFmt(emEnd);}
         else if(key==="mes_pasado"){var pm=new Date(today.getFullYear(),today.getMonth()-1,1);var pmEnd=new Date(today.getFullYear(),today.getMonth(),0);from=_rFmt(pm);to=_rFmt(pmEnd);}
-        else if(key==="todo"){setHsReunionDatePreset("todo");setHsReunionDateFrom("");setHsReunionDateTo("");return;}
+        else if(key==="ultimos_7"){var d7=new Date(today);d7.setDate(d7.getDate()-6);from=_rFmt(d7);}
+        else if(key==="ultimos_30"){var d30=new Date(today);d30.setDate(d30.getDate()-29);from=_rFmt(d30);}
         else if(key==="custom"){setHsReunionDatePreset("custom");return;}
         setHsReunionDatePreset(key);setHsReunionDateFrom(from);setHsReunionDateTo(to);
       }
-      var _rPresets=[{k:"hoy",l:"Hoy"},{k:"ayer",l:"Ayer"},{k:"esta_semana",l:"Esta semana"},{k:"semana_pasada",l:"Semana pasada"},{k:"este_mes",l:"Este mes"},{k:"mes_pasado",l:"Mes pasado"},{k:"todo",l:"Todo"},{k:"custom",l:"Personalizado"}];
+      var _rPresets=[{k:"hoy",l:"Hoy"},{k:"ayer",l:"Ayer"},{k:"esta_semana",l:"Esta Semana"},{k:"este_mes",l:"Este Mes"},{k:"ultimos_7",l:"\u00DAlt. 7d"},{k:"ultimos_30",l:"\u00DAlt. 30d"},{k:"mes_pasado",l:"Mes Pasado"},{k:"custom",l:"Personalizado"}];
       var _rFuenteOpts=[{v:"Outbound",c:C.green},{v:"Inbound",c:C.cyan},{v:"Directo",c:C.muted}];
       var _rHasActive=hsReunionOwnerFilter.length>0||hsReunionTypeFilter.length>0||hsReunionOutcomeFilter.length>0||hsReunionPrioridadFilter.length>0||hsReunionRegistroPlgFilter||hsReunionFuenteFilter.length>0;
       function _rClearAll(){setHsReunionOwnerFilter([]);setHsReunionTypeFilter([]);setHsReunionOutcomeFilter([]);setHsReunionPrioridadFilter([]);setHsReunionRegistroPlgFilter(false);setHsReunionFuenteFilter([]);}
       return (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-        {/* Fecha chip */}
-        <div style={{position:"relative"}}>
-          <button onClick={function(e){e.stopPropagation();setHsReunionDropOpen(hsReunionDropOpen==="date"?"":"date");}} style={{background:hsReunionDatePreset!=="todo"?C.accent:C.rowAlt,color:hsReunionDatePreset!=="todo"?"#fff":C.sub,border:"1px solid "+(hsReunionDatePreset!=="todo"?C.accent:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,minWidth:110,textAlign:"left"}}>{"Fecha: "+((_rPresets.find(function(p){return p.k===hsReunionDatePreset;})||{}).l||"Todo")} &#9662;</button>
-          {hsReunionDropOpen==="date" && <div onClick={function(e){e.stopPropagation();}} style={{position:"absolute",top:"100%",left:0,marginTop:4,background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:6,zIndex:999,minWidth:170,boxShadow:"0 4px 16px rgba(0,0,0,0.15)"}}>
-            {_rPresets.map(function(p){
-              var active=hsReunionDatePreset===p.k;
-              return <label key={p.k} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",cursor:"pointer",borderRadius:6,fontSize:12,fontWeight:600,color:active?C.accent:C.text,background:active?C.rowAlt:"transparent"}} onClick={function(){_rApplyPreset(p.k);if(p.k!=="custom")setHsReunionDropOpen("");}}>
-                {active&&<span style={{fontSize:10,fontWeight:900}}>&#10003;</span>}{p.l}
-              </label>;
-            })}
-          </div>}
-        </div>
+        <select value={hsReunionDatePreset} onChange={function(e){_rApplyPreset(e.target.value);}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
+          <option value="hoy">Hoy</option>
+          <option value="ayer">Ayer</option>
+          <option value="esta_semana">Esta Semana</option>
+          <option value="este_mes">Este Mes</option>
+          <option value="ultimos_7">{"\u00DA"}lt. 7d</option>
+          <option value="ultimos_30">{"\u00DA"}lt. 30d</option>
+          <option value="mes_pasado">Mes Pasado</option>
+          <option value="custom">Personalizado</option>
+        </select>
         {hsReunionDatePreset==="custom" && <>
           <input type="date" value={hsReunionDateFrom} onChange={function(e){setHsReunionDateFrom(e.target.value);}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:12,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
           <span style={{fontSize:12,color:C.muted}}>a</span>
@@ -2156,7 +2175,7 @@ export default function Dashboard(){
         {/* Limpiar filtros */}
         {_rHasActive && <button onClick={_rClearAll} style={{background:"transparent",border:"1px solid "+C.red+"44",borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:font,color:C.red,transition:"all 0.15s ease"}}>{"\u2715 Limpiar filtros"}</button>}
         {/* Date range + refresh + compare */}
-        {hsReunionDatePreset!=="custom"&&hsReunionDatePreset!=="todo"&&hsReunionDateFrom && <span style={{fontSize:11,color:C.muted,background:C.rowAlt,padding:"3px 8px",borderRadius:6,fontFamily:mono,marginLeft:"auto"}}>{hsReunionDateFrom}{hsReunionDateTo&&hsReunionDateTo!==hsReunionDateFrom?" → "+hsReunionDateTo:""}</span>}
+        {hsReunionDatePreset!=="custom"&&hsReunionDateFrom && <span style={{fontSize:11,color:C.muted,background:C.rowAlt,padding:"3px 8px",borderRadius:6,fontFamily:mono,marginLeft:"auto"}}>{hsReunionDateFrom}{hsReunionDateTo&&hsReunionDateTo!==hsReunionDateFrom?" → "+hsReunionDateTo:""}</span>}
         {crmRefreshing && <span style={{fontSize:12,color:C.orange,fontWeight:600,display:"flex",alignItems:"center",gap:6}}><span style={{width:12,height:12,border:"2px solid "+C.orange,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>Actualizando...</span>}
         {_compareToggle}
       </div>);
@@ -2366,24 +2385,13 @@ export default function Dashboard(){
 
       {/* ============ RESUMEN SECTION ============ */}
       {section==="resumen" && (function(){
-        var _resLang=resumenRegionFilter==="br"?"pt":resumenRegionFilter==="latam"?"es":"all";
-        // --- Outbound leads ---
-        var outLeads=[];
-        if(rawRows){
-          var filtOut=filterThreadsByDate(rawRows,dateFrom,dateTo);
-          var outResult=processOutboundThreads(filtOut,templateConfig,_resLang);
-          outLeads=outResult.MEETINGS||[];
-        }
+        // --- Outbound leads (memoized — clone to avoid mutating cached objects) ---
+        var outLeads=resumenOutLeads.map(function(l){return Object.assign({},l);});
         var outTc=outLeads.length;
         var outOferta=outLeads.filter(function(l){return l.ml;}).length;
 
-        // --- Inbound leads ---
-        var inbLeads=[];
-        if(inboundRawRows){
-          var filtInb=filterThreadsByDate(inboundRawRows,dateFrom,dateTo);
-          var inbResult=processInboundThreads(filtInb,_resLang,lifecyclePhonesData,inboundHsPhones);
-          inbLeads=inbResult.MEETINGS||[];
-        }
+        // --- Inbound leads (memoized — clone to avoid mutating cached objects) ---
+        var inbLeads=resumenInbLeads.map(function(l){return Object.assign({},l);});
         var inbTc=inbLeads.length;
         var inbOferta=inbLeads.filter(function(l){return l.ml;}).length;
 
@@ -2397,7 +2405,7 @@ export default function Dashboard(){
         var allLeads=outLeads.concat(inbLeads);
 
         // --- CRM meetings filtered by date + SDR owners + region ---
-        var _sdrNames=["pablo","martin","gabriel","rafaela","sebastian"];
+        var _sdrNames=["pablo","martin","gabriel","rafaela","sebastian","eduardo"];
         var _brNames=["rafaela"];
         var _sdrOwnerIds={};var _brOwnerIds={};var _latamOwnerIds={};
         var _owKeys=Object.keys(crmOwnerMap);
@@ -2565,8 +2573,47 @@ export default function Dashboard(){
                 // --- Yago outcome stats (from confirmed leads cross-matched with CRM) ---
         var yagoOutcomeCounts={};var yagoOutcomeLeads={};var yagoOutcomeMeetings={};var yagoMeetToLead={};
         for(var _yoi=0;_yoi<confirmedArr.length;_yoi++){var _yl=confirmedArr[_yoi];var _ylp=(_yl.p||"").replace(/\D/g,"");var _ylMeeting=null;if(_ylp){_ylMeeting=fPhToMeeting[_ylp]||(_ylp.length>11&&fPhToMeeting[_ylp.slice(-11)])||(_ylp.length>10&&fPhToMeeting[_ylp.slice(-10)])||(_ylp.length>9&&fPhToMeeting[_ylp.slice(-9)])||(_ylp.length>8&&fPhToMeeting[_ylp.slice(-8)])||null;}if(!_ylMeeting&&_yl.hid){_ylMeeting=fIdToMeeting[_yl.hid]||null;}var _yoKey=_ylMeeting?getOutcomeStatus(_ylMeeting):"UNKNOWN";yagoOutcomeCounts[_yoKey]=(yagoOutcomeCounts[_yoKey]||0)+1;if(!yagoOutcomeLeads[_yoKey])yagoOutcomeLeads[_yoKey]=[];yagoOutcomeLeads[_yoKey].push(_yl);if(_ylMeeting){if(!yagoOutcomeMeetings[_yoKey])yagoOutcomeMeetings[_yoKey]=[];yagoOutcomeMeetings[_yoKey].push(_ylMeeting);if(!yagoMeetToLead[_ylMeeting.id])yagoMeetToLead[_ylMeeting.id]=_yl;}}
+        var _yagoAllRaw=[];var _yamSeen={};Object.keys(yagoOutcomeMeetings).forEach(function(k){var arr=yagoOutcomeMeetings[k];for(var i=0;i<arr.length;i++){if(!_yamSeen[arr[i].id]){_yamSeen[arr[i].id]=true;_yagoAllRaw.push(arr[i]);}}});
+        var yagoAllMeetings=_yagoAllRaw.filter(function(m){var oid=m.properties&&m.properties.hubspot_owner_id;return oid&&_sdrOwnerIds[oid];});
+        // Recompute Yago outcome stats from owner-filtered meetings
+        var _filtYagoOC={};var _filtYagoOL={};var _filtYagoOM={};var _filtYagoML={};
+        for(var _fyi=0;_fyi<yagoAllMeetings.length;_fyi++){var _fym=yagoAllMeetings[_fyi];var _fyoc=getOutcomeStatus(_fym);_filtYagoOC[_fyoc]=(_filtYagoOC[_fyoc]||0)+1;if(!_filtYagoOM[_fyoc])_filtYagoOM[_fyoc]=[];_filtYagoOM[_fyoc].push(_fym);var _fyl=yagoMeetToLead[_fym.id];if(_fyl){if(!_filtYagoOL[_fyoc])_filtYagoOL[_fyoc]=[];_filtYagoOL[_fyoc].push(_fyl);}}
+        yagoOutcomeCounts=_filtYagoOC;yagoOutcomeLeads=_filtYagoOL;yagoOutcomeMeetings=_filtYagoOM;
         var yagoOutcomeData=Object.keys(yagoOutcomeCounts).sort(function(a,b){return yagoOutcomeCounts[b]-yagoOutcomeCounts[a];}).map(function(k){return{name:k,count:yagoOutcomeCounts[k],color:outcomeColor[k]||C.muted};});
-        var yagoAllMeetings=[];var _yamSeen={};Object.keys(yagoOutcomeMeetings).forEach(function(k){var arr=yagoOutcomeMeetings[k];for(var i=0;i<arr.length;i++){if(!_yamSeen[arr[i].id]){_yamSeen[arr[i].id]=true;yagoAllMeetings.push(arr[i]);}}});
+
+        // --- Yago meetings daily stacked chart data ---
+        var _yOutcomeKeys=["SCHEDULED","RETRASADA","CANCELED","RESCHEDULED","NO CALIFICADA","NO_SHOW","COMPLETED"];
+        var _yOutcomeLabels={COMPLETED:"Completadas",SCHEDULED:"Agendadas",NO_SHOW:"No asisti\u00F3",CANCELED:"Canceladas",RESCHEDULED:"Reagendadas","NO CALIFICADA":"No Calificada",RETRASADA:"Retrasadas"};
+        // By meeting start date
+        var yagoDailyMap={};var yagoMeetByDay={};
+        // By creation date
+        var yagoCreatedMap={};var yagoMeetByCreated={};
+        for(var _ydi=0;_ydi<yagoAllMeetings.length;_ydi++){
+          var _ym=yagoAllMeetings[_ydi];var _ymp=_ym.properties||{};
+          var _ymoc=getOutcomeStatus(_ym);
+          // By start time
+          var _ymst=_ymp.hs_meeting_start_time;
+          if(_ymst){
+            var _ymkey=_ymst.slice(0,10);
+            if(!yagoDailyMap[_ymkey]){var _yrow={date:_ymkey};for(var _yki=0;_yki<_yOutcomeKeys.length;_yki++)_yrow[_yOutcomeKeys[_yki]]=0;yagoDailyMap[_ymkey]=_yrow;}
+            if(yagoDailyMap[_ymkey][_ymoc]===undefined)yagoDailyMap[_ymkey][_ymoc]=0;
+            yagoDailyMap[_ymkey][_ymoc]++;
+            if(!yagoMeetByDay[_ymkey])yagoMeetByDay[_ymkey]=[];yagoMeetByDay[_ymkey].push(_ym);
+          }
+          // By creation date
+          var _ymcd=_ymp.hs_createdate||_ym.createdAt;
+          if(_ymcd){
+            var _yckey=_ymcd.slice(0,10);
+            if(!yagoCreatedMap[_yckey]){var _ycrow={date:_yckey};for(var _yci=0;_yci<_yOutcomeKeys.length;_yci++)_ycrow[_yOutcomeKeys[_yci]]=0;yagoCreatedMap[_yckey]=_ycrow;}
+            if(yagoCreatedMap[_yckey][_ymoc]===undefined)yagoCreatedMap[_yckey][_ymoc]=0;
+            yagoCreatedMap[_yckey][_ymoc]++;
+            if(!yagoMeetByCreated[_yckey])yagoMeetByCreated[_yckey]=[];yagoMeetByCreated[_yckey].push(_ym);
+          }
+        }
+        var yagoDailyChartData=Object.keys(yagoDailyMap).sort().map(function(k){return yagoDailyMap[k];});
+        var yagoCreatedChartData=Object.keys(yagoCreatedMap).sort().map(function(k){return yagoCreatedMap[k];});
+        var handleYagoBarClick=function(data){var day=(data.payload||data).date;var mts=yagoMeetByDay[day];if(mts&&mts.length>0)setRealizadasModalData({title:"\u{1F4C5} Reuniones Yago "+day+" ("+mts.length+")",meetings:mts,leads:allLeads,meetToLead:yagoMeetToLead});};
+        var handleYagoCreatedBarClick=function(data){var day=(data.payload||data).date;var mts=yagoMeetByCreated[day];if(mts&&mts.length>0)setRealizadasModalData({title:"\u{1F4C5} Reuniones creadas "+day+" ("+mts.length+")",meetings:mts,leads:allLeads,meetToLead:yagoMeetToLead});};
 
         var handleFunnelBarClick=function(data,dataKey){var day=(data.payload||data).d;var leads=[];var title="";if(dataKey==="ofertas"){leads=(funnelOfertaByDay[day]||[]).map(function(l){var lp=(l.p||"").replace(/\D/g,"");var isConf=false;if(lp){isConf=!!(fPhToDay[lp]||(lp.length>11&&fPhToDay[lp.slice(-11)])||(lp.length>10&&fPhToDay[lp.slice(-10)])||(lp.length>9&&fPhToDay[lp.slice(-9)])||(lp.length>8&&fPhToDay[lp.slice(-8)]));}if(!isConf&&l.hid&&fIdToDay[l.hid])isConf=true;return Object.assign({},l,{_confirmed:isConf});});title="\u{1F4C5} Ofertadas "+day;}else if(dataKey==="confirmadas"){leads=funnelConfByDay[day]||[];title="\u2705 Agendadas "+day;}else if(dataKey==="realizadas"){leads=funnelRealByDay[day]||[];title="\u2705 Realizadas "+day;}if(leads.length>0)setChartDayModalData({title:title,leads:leads,tagContext:dataKey==="ofertas"?"ofertadas":"agendadas"});};
         var dailyFunnelAll=Object.values(dayMap2).sort(function(a,b){return (a._sort||0)-(b._sort||0);});
@@ -2661,6 +2708,48 @@ export default function Dashboard(){
               }) : <div style={{fontSize:12,color:C.muted,padding:8,textAlign:"center"}}>Sin datos de HubSpot</div>}
             </Cd>
           </div>
+
+          {/* Charts: Reuniones Yago por Fecha de Creación + Fecha de Reunión */}
+          {(yagoDailyChartData.length>0||yagoCreatedChartData.length>0) && <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:24}}>
+            {yagoCreatedChartData.length>0 && <Cd><Sec>Por Fecha de Creaci{"\u00F3"}n ({yagoAllMeetings.length})</Sec>
+              <div style={{fontSize:11,color:C.muted,marginBottom:4,marginTop:-4}}>Click en una barra para ver las reuniones</div>
+              <div style={{height:280}}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={yagoCreatedChartData} margin={{left:-15,right:5,top:5,bottom:0}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                    <XAxis dataKey="date" tick={{fontSize:10,fill:C.muted}} tickFormatter={function(v){var pp=v.split("-");return pp[2]+"/"+pp[1];}}/>
+                    <YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
+                    <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}} labelFormatter={function(v){var pp=v.split("-");return pp[2]+"/"+pp[1]+"/"+pp[0];}}/>
+                    <Legend wrapperStyle={{fontSize:11}}/>
+                    {_yOutcomeKeys.map(function(oc){
+                      var hasAny=false;for(var ci=0;ci<yagoCreatedChartData.length;ci++){if(yagoCreatedChartData[ci][oc]>0){hasAny=true;break;}}
+                      if(!hasAny)return null;
+                      return <Bar key={oc} dataKey={oc} name={_yOutcomeLabels[oc]||oc} fill={outcomeColor[oc]||C.muted} stackId="created" radius={0} cursor="pointer" onClick={handleYagoCreatedBarClick}/>;
+                    }).filter(Boolean)}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </Cd>}
+            {yagoDailyChartData.length>0 && <Cd><Sec>Por Fecha de Reuni{"\u00F3"}n ({yagoAllMeetings.length})</Sec>
+              <div style={{fontSize:11,color:C.muted,marginBottom:4,marginTop:-4}}>Click en una barra para ver las reuniones</div>
+              <div style={{height:280}}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={yagoDailyChartData} margin={{left:-15,right:5,top:5,bottom:0}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                    <XAxis dataKey="date" tick={{fontSize:10,fill:C.muted}} tickFormatter={function(v){var pp=v.split("-");return pp[2]+"/"+pp[1];}}/>
+                    <YAxis tick={{fontSize:11,fill:C.muted}} allowDecimals={false}/>
+                    <Tooltip contentStyle={{background:C.card,border:"1px solid "+C.border,borderRadius:8,fontSize:13,color:C.text}} labelFormatter={function(v){var pp=v.split("-");return pp[2]+"/"+pp[1]+"/"+pp[0];}}/>
+                    <Legend wrapperStyle={{fontSize:11}}/>
+                    {_yOutcomeKeys.map(function(oc){
+                      var hasAny=false;for(var ci=0;ci<yagoDailyChartData.length;ci++){if(yagoDailyChartData[ci][oc]>0){hasAny=true;break;}}
+                      if(!hasAny)return null;
+                      return <Bar key={oc} dataKey={oc} name={_yOutcomeLabels[oc]||oc} fill={outcomeColor[oc]||C.muted} stackId="start" radius={0} cursor="pointer" onClick={handleYagoBarClick}/>;
+                    }).filter(Boolean)}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </Cd>}
+          </div>}
 
           {/* Chart: Leads por Día stacked */}
           {dailyLeads.length>0 && <Cd style={{marginBottom:24}}><Sec>Leads por D{"\u00ED"}a (Outbound + Inbound)</Sec>
@@ -3821,9 +3910,21 @@ export default function Dashboard(){
             <select value={gruposSelectedCampaign||""} onChange={function(e){var v=e.target.value;setGruposSelectedCampaign(v);loadGruposData(v,gruposDateFrom,gruposDateTo);}} style={{fontSize:13,fontWeight:600,padding:"8px 12px",borderRadius:10,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer",minWidth:200}}>
               {gruposCampaigns.map(function(c){var cid=c.campaign_id||c.id;return <option key={cid} value={cid}>{c.name||c.title||("Campa\u00F1a "+cid)}</option>;})}
             </select>
-            <input type="date" value={gruposDateFrom} onChange={function(e){setGruposDateFrom(e.target.value);}} style={{fontSize:13,padding:"8px 10px",borderRadius:10,border:"1px solid "+C.border,background:C.rowBg,fontFamily:font,color:C.text}}/>
-            <span style={{color:C.muted,fontSize:13}}>a</span>
-            <input type="date" value={gruposDateTo} onChange={function(e){setGruposDateTo(e.target.value);}} style={{fontSize:13,padding:"8px 10px",borderRadius:10,border:"1px solid "+C.border,background:C.rowBg,fontFamily:font,color:C.text}}/>
+            <select value={gruposPreset} onChange={function(e){var k=e.target.value;setGruposPreset(k);if(k!=="custom"){var r=resolvePreset(k);setGruposDateFrom(r.from);setGruposDateTo(r.to);}}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
+              <option value="hoy">Hoy</option>
+              <option value="ayer">Ayer</option>
+              <option value="esta_semana">Esta Semana</option>
+              <option value="este_mes">Este Mes</option>
+              <option value="ultimos_7">{"\u00DA"}lt. 7d</option>
+              <option value="ultimos_30">{"\u00DA"}lt. 30d</option>
+              <option value="mes_pasado">Mes Pasado</option>
+              <option value="custom">Personalizado</option>
+            </select>
+            {gruposPreset==="custom" && <>
+              <input type="date" value={gruposDateFrom} onChange={function(e){setGruposDateFrom(e.target.value);}} style={{fontSize:13,padding:"8px 10px",borderRadius:10,border:"1px solid "+C.border,background:C.rowBg,fontFamily:font,color:C.text}}/>
+              <span style={{color:C.muted,fontSize:13}}>a</span>
+              <input type="date" value={gruposDateTo} onChange={function(e){setGruposDateTo(e.target.value);}} style={{fontSize:13,padding:"8px 10px",borderRadius:10,border:"1px solid "+C.border,background:C.rowBg,fontFamily:font,color:C.text}}/>
+            </>}
             <button onClick={function(){if(gruposSelectedCampaign)loadGruposData(gruposSelectedCampaign,gruposDateFrom,gruposDateTo);}} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Filtrar</button>
             <button onClick={function(){if(gruposSelectedCampaign)loadGruposCrossReference(gruposSelectedCampaign,gruposDateFrom,gruposDateTo);}} style={{background:C.purple,color:"#fff",border:"none",borderRadius:10,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Cruzar con Yago</button>
           </div>
@@ -5112,7 +5213,17 @@ export default function Dashboard(){
 
           {/* Header bar */}
           <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:18,flexWrap:"wrap"}}>
-            <input type="month" value={growthMonth} onChange={function(e){setGrowthMonth(e.target.value);setAdsInited(false);}} style={{padding:"8px 14px",border:"1px solid "+C.border,borderRadius:10,fontSize:14,fontFamily:font,background:C.inputBg,color:C.text,outline:"none"}}/>
+            <select value={adsPreset} onChange={function(e){var k=e.target.value;setAdsPreset(k);if(k==="custom")return;var r=resolvePreset(k);var parts=r.from.split("-");setGrowthMonth(parts[0]+"-"+parts[1]);setAdsInited(false);}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
+              <option value="hoy">Hoy</option>
+              <option value="ayer">Ayer</option>
+              <option value="esta_semana">Esta Semana</option>
+              <option value="este_mes">Este Mes</option>
+              <option value="ultimos_7">{"\u00DA"}lt. 7d</option>
+              <option value="ultimos_30">{"\u00DA"}lt. 30d</option>
+              <option value="mes_pasado">Mes Pasado</option>
+              <option value="custom">Personalizado</option>
+            </select>
+            {adsPreset==="custom" && <input type="month" value={growthMonth} onChange={function(e){setGrowthMonth(e.target.value);setAdsInited(false);}} style={{padding:"8px 14px",border:"1px solid "+C.border,borderRadius:10,fontSize:14,fontFamily:font,background:C.inputBg,color:C.text,outline:"none"}}/>}
             <button onClick={function(){setAdsInited(false);initAds();}} disabled={adsLoading} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"8px 20px",fontSize:13,fontWeight:700,cursor:adsLoading?"wait":"pointer",fontFamily:font,opacity:adsLoading?0.6:1}}>Actualizar</button>
             {_compareToggle}
           </div>
@@ -5295,7 +5406,12 @@ export default function Dashboard(){
           {/* Header bar */}
           {(function(){
             var _gdPresets=[
+              {k:"hoy",l:"Hoy"},
+              {k:"ayer",l:"Ayer"},
+              {k:"esta_semana",l:"Esta Semana"},
               {k:"este_mes",l:"Este mes"},
+              {k:"ultimos_7",l:"\u00DAlt. 7d"},
+              {k:"ultimos_30",l:"\u00DAlt. 30d"},
               {k:"mes_pasado",l:"Mes pasado"},
               {k:"custom",l:"Personalizado"}
             ];
@@ -5310,6 +5426,12 @@ export default function Dashboard(){
                 setGrowthDatePreset("mes_pasado");setGrowthCustomFrom("");setGrowthCustomTo("");setGrowthMonth(m2);setGrowthInited(false);setGrowthDateDropOpen(false);
               }else if(key==="custom"){
                 setGrowthDatePreset("custom");setGrowthDateDropOpen(false);
+              }else{
+                var r=resolvePreset(key);
+                setGrowthDatePreset(key);setGrowthCustomFrom(r.from);setGrowthCustomTo(r.to);
+                var _fp=r.from.split("-");setGrowthMonth(_fp[0]+"-"+_fp[1]);
+                setGrowthInited(false);setGrowthDateDropOpen(false);
+                initGrowth(null,r.from,r.to);
               }
             }
             function _applyCustomRange(){
@@ -5329,21 +5451,16 @@ export default function Dashboard(){
               _dateHint=growthCustomFrom+(growthCustomTo&&growthCustomTo!==growthCustomFrom?" \u2192 "+growthCustomTo:"");
             }
             return <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18,flexWrap:"wrap"}}>
-              <div style={{position:"relative"}}>
-                <button onClick={function(e){e.stopPropagation();setGrowthDateDropOpen(!growthDateDropOpen);}} style={{background:C.inputBg,color:C.text,border:"1px solid "+C.border,borderRadius:10,padding:"8px 16px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font,minWidth:150,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>
-                  <span>{_presetLabel}</span>
-                  {_dateHint && <span style={{fontSize:12,color:C.muted,fontWeight:500}}>{_dateHint}</span>}
-                  <span style={{marginLeft:"auto",fontSize:10}}>{"\u25BE"}</span>
-                </button>
-                {growthDateDropOpen && <div onClick={function(e){e.stopPropagation();}} style={{position:"absolute",top:"100%",left:0,marginTop:4,background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:8,zIndex:999,minWidth:200,boxShadow:"0 4px 16px rgba(0,0,0,0.15)"}}>
-                  {_gdPresets.map(function(p){
-                    var active=growthDatePreset===p.k;
-                    return <div key={p.k} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",cursor:"pointer",borderRadius:8,fontSize:13,fontWeight:600,color:active?C.accent:C.text,background:active?C.rowAlt:"transparent"}} onClick={function(){_applyGrowthPreset(p.k);}} onMouseEnter={function(e){if(!active)e.currentTarget.style.background=C.rowAlt;}} onMouseLeave={function(e){if(!active)e.currentTarget.style.background="transparent";}}>
-                      {active&&<span style={{fontSize:10,fontWeight:900}}>{"\u2713"}</span>}{p.l}
-                    </div>;
-                  })}
-                </div>}
-              </div>
+              <select value={growthDatePreset} onChange={function(e){_applyGrowthPreset(e.target.value);}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
+                <option value="hoy">Hoy</option>
+                <option value="ayer">Ayer</option>
+                <option value="esta_semana">Esta Semana</option>
+                <option value="este_mes">Este Mes</option>
+                <option value="ultimos_7">{"\u00DA"}lt. 7d</option>
+                <option value="ultimos_30">{"\u00DA"}lt. 30d</option>
+                <option value="mes_pasado">Mes Pasado</option>
+                <option value="custom">Personalizado</option>
+              </select>
               {growthDatePreset==="custom" && <>
                 <input type="date" value={growthCustomFrom} onChange={function(e){setGrowthCustomFrom(e.target.value);}} style={{padding:"8px 12px",border:"1px solid "+C.border,borderRadius:10,fontSize:13,fontFamily:mono,color:C.text,background:C.inputBg,outline:"none"}}/>
                 <span style={{fontSize:13,color:C.muted}}>a</span>
@@ -5446,6 +5563,8 @@ export default function Dashboard(){
                 else if(key==="semana_pasada"){var ws2=new Date(today);var dow2=ws2.getDay()||7;ws2.setDate(ws2.getDate()-(dow2-1)-7);var we=new Date(ws2);we.setDate(we.getDate()+6);from=fmtD(ws2);to=fmtD(we);}
                 else if(key==="este_mes"){from=today.getFullYear()+"-"+String(today.getMonth()+1).padStart(2,"0")+"-01";var gemEnd=new Date(today.getFullYear(),today.getMonth()+1,0);to=fmtD(gemEnd);}
                 else if(key==="mes_pasado"){var pm=new Date(today.getFullYear(),today.getMonth()-1,1);var pmEnd=new Date(today.getFullYear(),today.getMonth(),0);from=fmtD(pm);to=fmtD(pmEnd);}
+                else if(key==="ultimos_7"){var d7=new Date(today);d7.setDate(d7.getDate()-6);from=fmtD(d7);}
+                else if(key==="ultimos_30"){var d30=new Date(today);d30.setDate(d30.getDate()-29);from=fmtD(d30);}
                 else if(key==="todo"){from="";to="";setGrowthChartDatePreset("todo");setGrowthChartDateFrom("");setGrowthChartDateTo("");return;}
                 else if(key==="custom"){setGrowthChartDatePreset("custom");return;}
                 setGrowthChartDatePreset(key);setGrowthChartDateFrom(from);setGrowthChartDateTo(to);
@@ -5480,7 +5599,7 @@ export default function Dashboard(){
               }
               var chartData=Object.keys(buckets).sort().map(function(k){var row={period:k};var t=0;for(var pi=0;pi<allPrioKeys.length;pi++){var v=buckets[k][allPrioKeys[pi]]||0;row[allPrioKeys[pi]]=v;if(visiblePrio.indexOf(allPrioKeys[pi])>=0)t+=v;}row._total=t;return row;});
               function formatLabel(v){if(growthChartGranularity==="monthly"){var pp=v.split("-");return pp[1]+"/"+pp[0];}var pp=v.split("-");return pp[2]+"/"+pp[1];}
-              var presets=[{k:"hoy",l:"Hoy"},{k:"ayer",l:"Ayer"},{k:"esta_semana",l:"Esta semana"},{k:"semana_pasada",l:"Semana pasada"},{k:"este_mes",l:"Este mes"},{k:"mes_pasado",l:"Mes pasado"},{k:"todo",l:"Todo"},{k:"custom",l:"Personalizado"}];
+              var presets=[{k:"hoy",l:"Hoy"},{k:"ayer",l:"Ayer"},{k:"esta_semana",l:"Esta semana"},{k:"ultimos_7",l:"\u00DAlt. 7d"},{k:"ultimos_30",l:"\u00DAlt. 30d"},{k:"este_mes",l:"Este mes"},{k:"mes_pasado",l:"Mes pasado"},{k:"todo",l:"Todo"},{k:"custom",l:"Personalizado"}];
               var granOpts=[{k:"daily",l:"Diario"},{k:"weekly",l:"Semanal"},{k:"monthly",l:"Mensual"}];
               var regionOpts=[{k:"all",l:"Todos"},{k:"latam",l:"LATAM"},{k:"brasil",l:"Brasil"}];
               var totalFiltered=0;for(var ci=0;ci<chartData.length;ci++)for(var pi=0;pi<visiblePrio.length;pi++)totalFiltered+=chartData[ci][visiblePrio[pi]]||0;
@@ -5490,23 +5609,21 @@ export default function Dashboard(){
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16,flexWrap:"wrap"}}>
                   {/* Date preset */}
                   <span style={{fontSize:12,color:C.muted,fontWeight:700}}>Fecha:</span>
-                  <div style={{position:"relative"}}>
-                    <button onClick={function(e){e.stopPropagation();setGrowthChartDropOpen(growthChartDropOpen==="date"?"":"date");}} style={{background:growthChartDatePreset!=="todo"?C.accent:C.rowAlt,color:growthChartDatePreset!=="todo"?"#fff":C.sub,border:"1px solid "+(growthChartDatePreset!=="todo"?C.accent:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,minWidth:110,textAlign:"left"}}>{(presets.find(function(p){return p.k===growthChartDatePreset;})||{}).l||"Todo"} &#9662;</button>
-                    {growthChartDropOpen==="date" && <div onClick={function(e){e.stopPropagation();}} style={{position:"absolute",top:"100%",left:0,marginTop:4,background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:6,zIndex:999,minWidth:170,boxShadow:"0 4px 16px rgba(0,0,0,0.15)"}}>
-                      {presets.map(function(p){
-                        var active=growthChartDatePreset===p.k;
-                        return <label key={p.k} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",cursor:"pointer",borderRadius:6,fontSize:12,fontWeight:600,color:active?C.accent:C.text,background:active?C.rowAlt:"transparent"}} onClick={function(){applyChartPreset(p.k);if(p.k!=="custom")setGrowthChartDropOpen("");}}>
-                          {active&&<span style={{fontSize:10,fontWeight:900}}>&#10003;</span>}{p.l}
-                        </label>;
-                      })}
-                    </div>}
-                  </div>
+                  <select value={growthChartDatePreset} onChange={function(e){applyChartPreset(e.target.value);}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
+                    <option value="hoy">Hoy</option>
+                    <option value="ayer">Ayer</option>
+                    <option value="esta_semana">Esta Semana</option>
+                    <option value="este_mes">Este Mes</option>
+                    <option value="ultimos_7">{"\u00DA"}lt. 7d</option>
+                    <option value="ultimos_30">{"\u00DA"}lt. 30d</option>
+                    <option value="mes_pasado">Mes Pasado</option>
+                    <option value="custom">Personalizado</option>
+                  </select>
                   {growthChartDatePreset==="custom" && <>
                     <input type="date" value={growthChartDateFrom} onChange={function(e){setGrowthChartDateFrom(e.target.value);}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:12,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
                     <span style={{fontSize:12,color:C.muted}}>a</span>
                     <input type="date" value={growthChartDateTo} onChange={function(e){setGrowthChartDateTo(e.target.value);}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:12,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
                   </>}
-                  {growthChartDatePreset!=="custom"&&growthChartDatePreset!=="todo"&&growthChartDateFrom && <span style={{fontSize:11,color:C.muted,background:C.rowAlt,padding:"3px 8px",borderRadius:6,fontFamily:mono}}>{growthChartDateFrom}{growthChartDateTo&&growthChartDateTo!==growthChartDateFrom?" \u2192 "+growthChartDateTo:""}</span>}
                   <div style={{width:1,height:20,background:C.border}}/>
                   {/* Granularity */}
                   <div style={{display:"flex",gap:4}}>
