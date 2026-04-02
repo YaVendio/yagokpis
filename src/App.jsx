@@ -603,6 +603,8 @@ export default function Dashboard(){
   const [hsDealDropOpen,setHsDealDropOpen]=useState("");
   const [hsDetailDeals,setHsDetailDeals]=useState(null);
   const [posthogOrgsModal,setPosthogOrgsModal]=useState(null);
+  const [showSalesGoalsEditor,setShowSalesGoalsEditor]=useState(false);
+  const [salesGoals,setSalesGoals]=useState({});
 
   // Email (Brevo) tab state
   const [emailLoading,setEmailLoading]=useState(false);
@@ -1300,6 +1302,8 @@ export default function Dashboard(){
       var fresh=await fetchHubSpotFresh();
       applyCrmData(fresh);setCrmInited(true);
       console.log("[CRM] Done. Meetings:",fresh.meetings.length,"Contacts:",fresh.contacts.length,"Deals:",fresh.deals.length,"Leads:",fresh.leads.length);
+      var _sgMonth=new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0");
+      loadSalesGoals(_sgMonth);
       // Trigger incremental sync in background (server-side)
       setTimeout(triggerIncrementalSync, 10000);
     }catch(e){console.error("[CRM] Error:",e);setCrmError(e.message);}
@@ -1407,6 +1411,33 @@ export default function Dashboard(){
   }
 
   var BRASIL_OWNER_IDS=["79360573","90341767","90336971"];
+  var VENDEDORES=[
+    {id:"79360573",name:"Rafaela"},
+    {id:"90341767",name:"Gabriel M."},
+    {id:"89419731",name:"Gabriel A."},
+    {id:"90336971",name:"Eduardo"},
+    {id:"89419847",name:"Martin"},
+    {id:"80566583",name:"Pablo"}
+  ];
+  async function loadSalesGoals(month){
+    try{
+      var res=await retryQuery(function(){return supabase.from("sales_goals").select("*").eq("month",month);});
+      var rows=(res&&res.data)||[];
+      var map={};
+      for(var i=0;i<rows.length;i++){map[rows[i].owner_id]={deals:Number(rows[i].deals_goal)||0,revenue:Number(rows[i].revenue_goal)||0};}
+      setSalesGoals(map);
+    }catch(e){console.warn("[SalesGoals] load error:",e);}
+  }
+  async function saveSalesGoals(newGoals){
+    var month=growthMonth||new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0");
+    var rows=[];
+    for(var i=0;i<VENDEDORES.length;i++){
+      var v=VENDEDORES[i];var g=newGoals[v.id]||{deals:0,revenue:0};
+      rows.push({month:month,owner_id:v.id,owner_name:v.name,deals_goal:g.deals||0,revenue_goal:g.revenue||0,updated_at:new Date().toISOString()});
+    }
+    try{await supabase.from("sales_goals").upsert(rows,{onConflict:"month,owner_id"});setSalesGoals(newGoals);setShowSalesGoalsEditor(false);}
+    catch(e){console.error("[SalesGoals] save error:",e);}
+  }
   var SOURCE_COLORS={"PAID_SOCIAL":C.accent,"DIRECT_TRAFFIC":C.purple,"ORGANIC_SEARCH":C.green,"REFERRALS":C.cyan,"OFFLINE":C.orange,"OTHER_CAMPAIGNS":C.pink,"EMAIL_MARKETING":C.yellow,"ORGANIC_SOCIAL":C.red,"PAID_SEARCH":"#6366F1"};
 
   async function initGrowth(monthOverride,customFromStr,customToStr){
@@ -2042,6 +2073,7 @@ export default function Dashboard(){
         </div>
         {crmRefreshing && <span style={{fontSize:12,color:C.orange,fontWeight:600,display:"flex",alignItems:"center",gap:6}}><span style={{width:12,height:12,border:"2px solid "+C.orange,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>Actualizando...</span>}
         {_compareToggle}
+        <div style={{marginLeft:"auto"}}><button onClick={function(){setShowSalesGoalsEditor(true);}} title="Configurar metas de vendedores" style={{background:"transparent",border:"1px solid "+C.border,borderRadius:8,padding:"5px 8px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:16,lineHeight:1,transition:"all 0.15s"}} onMouseEnter={function(e){e.currentTarget.style.borderColor=C.accent;e.currentTarget.style.color=C.accent;}} onMouseLeave={function(e){e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.muted;}}>&#9881;</button></div>
       </div>);
     }
     if(section==="hubspot"&&subTab==="reuniones"){
@@ -4311,6 +4343,55 @@ export default function Dashboard(){
             <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12}}>
               <span style={{fontSize:12,color:C.purple,fontWeight:700,background:C.lPurple,padding:"4px 12px",borderRadius:6}}>{filteredDeals.length} negocios</span>
             </div>
+            {/* Metas por Vendedor */}
+            {(function(){
+              var hasAnyGoal=false;
+              for(var gi=0;gi<VENDEDORES.length;gi++){if(salesGoals[VENDEDORES[gi].id]&&(salesGoals[VENDEDORES[gi].id].deals>0||salesGoals[VENDEDORES[gi].id].revenue>0)){hasAnyGoal=true;break;}}
+              if(!hasAnyGoal)return null;
+              var vendColors=[C.purple,C.green,C.cyan,C.orange,C.accent,C.pink];
+              return (<Cd style={{marginBottom:22}}>
+                <Sec>Metas por Vendedor</Sec>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:16}}>
+                  {VENDEDORES.map(function(v,vi){
+                    var goal=salesGoals[v.id]||{deals:0,revenue:0};
+                    if(goal.deals===0&&goal.revenue===0)return null;
+                    var vDeals=filteredDeals.filter(function(d){return d.properties&&d.properties.hubspot_owner_id===v.id&&d.properties.hs_is_closed_won==="true";});
+                    var vRevenue=0;for(var ri=0;ri<vDeals.length;ri++)vRevenue+=parseFloat(vDeals[ri].properties.amount)||0;
+                    var dealsPct=goal.deals>0?Math.min((vDeals.length/goal.deals)*100,100):0;
+                    var revPct=goal.revenue>0?Math.min((vRevenue/goal.revenue)*100,100):0;
+                    var vc=vendColors[vi%vendColors.length];
+                    return (<div key={v.id} style={{background:C.rowBg,borderRadius:14,padding:"18px 20px",border:"1px solid "+C.border}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10}}>
+                          <div style={{width:36,height:36,borderRadius:10,background:vc+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:900,color:vc}}>{v.name.charAt(0)}</div>
+                          <div><div style={{fontSize:15,fontWeight:800,color:C.text}}>{v.name}</div><div style={{fontSize:11,color:C.muted}}>{crmOwnerMap[v.id]||""}</div></div>
+                        </div>
+                      </div>
+                      {goal.deals>0 && (<div style={{marginBottom:12}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+                          <span style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:0.5}}>Deals Won</span>
+                          <span style={{fontSize:14,fontWeight:900,fontFamily:mono,color:vc}}>{vDeals.length}<span style={{color:C.muted,fontWeight:600}}> / {goal.deals}</span></span>
+                        </div>
+                        <div style={{height:8,background:C.border+"44",borderRadius:4,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:dealsPct+"%",background:dealsPct>=100?"linear-gradient(90deg,"+C.green+","+C.green+"cc)":"linear-gradient(90deg,"+vc+","+vc+"cc)",borderRadius:4,transition:"width 0.5s ease"}}/>
+                        </div>
+                        <div style={{fontSize:11,color:dealsPct>=100?C.green:C.muted,fontWeight:700,marginTop:4,textAlign:"right"}}>{dealsPct.toFixed(0)}%</div>
+                      </div>)}
+                      {goal.revenue>0 && (<div>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+                          <span style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:0.5}}>Receita</span>
+                          <span style={{fontSize:14,fontWeight:900,fontFamily:mono,color:vc}}>${vRevenue.toLocaleString(undefined,{maximumFractionDigits:0})}<span style={{color:C.muted,fontWeight:600}}> / ${goal.revenue.toLocaleString(undefined,{maximumFractionDigits:0})}</span></span>
+                        </div>
+                        <div style={{height:8,background:C.border+"44",borderRadius:4,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:revPct+"%",background:revPct>=100?"linear-gradient(90deg,"+C.green+","+C.green+"cc)":"linear-gradient(90deg,"+vc+","+vc+"cc)",borderRadius:4,transition:"width 0.5s ease"}}/>
+                        </div>
+                        <div style={{fontSize:11,color:revPct>=100?C.green:C.muted,fontWeight:700,marginTop:4,textAlign:"right"}}>{revPct.toFixed(0)}%</div>
+                      </div>)}
+                    </div>);
+                  })}
+                </div>
+              </Cd>);
+            })()}
             {/* A. KPI Cards */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:22}}>
               <Cd style={{border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
@@ -4567,6 +4648,49 @@ export default function Dashboard(){
                   })}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>;
+      })()}
+
+      {/* Sales Goals Editor Modal */}
+      {showSalesGoalsEditor && (function(){
+        var _sgMonth=growthMonth||new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0");
+        function onSaveSalesGoals(){
+          var newG={};
+          for(var i=0;i<VENDEDORES.length;i++){
+            var v=VENDEDORES[i];
+            var dEl=document.getElementById("sg-d-"+v.id);
+            var rEl=document.getElementById("sg-r-"+v.id);
+            newG[v.id]={deals:parseInt(dEl?dEl.value:0)||0,revenue:parseFloat(rEl?rEl.value:0)||0};
+          }
+          saveSalesGoals(newG);
+        }
+        return <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#00000066",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={function(e){if(e.target===e.currentTarget)setShowSalesGoalsEditor(false);}}>
+          <div style={{background:C.card,borderRadius:16,padding:28,width:520,maxWidth:"90vw",boxShadow:"0 20px 60px #00000033",maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{fontSize:18,fontWeight:800,color:C.text,marginBottom:6}}>Configurar Metas de Vendedores</div>
+            <div style={{fontSize:13,color:C.muted,marginBottom:20}}>Mes: <strong>{_sgMonth}</strong></div>
+            <div style={{display:"flex",flexDirection:"column",gap:16}}>
+              {VENDEDORES.map(function(v){
+                var cur=salesGoals[v.id]||{deals:0,revenue:0};
+                return <div key={v.id} style={{background:C.rowBg,borderRadius:12,padding:"14px 16px",border:"1px solid "+C.border}}>
+                  <div style={{fontSize:14,fontWeight:800,color:C.text,marginBottom:10}}>{v.name}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                    <div>
+                      <label style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:0.5}}>Deals Won</label>
+                      <input id={"sg-d-"+v.id} type="number" defaultValue={cur.deals} style={{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:14,fontFamily:mono,background:C.inputBg,color:C.text,marginTop:4,boxSizing:"border-box"}}/>
+                    </div>
+                    <div>
+                      <label style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:0.5}}>Receita ($)</label>
+                      <input id={"sg-r-"+v.id} type="number" defaultValue={cur.revenue} style={{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:14,fontFamily:mono,background:C.inputBg,color:C.text,marginTop:4,boxSizing:"border-box"}}/>
+                    </div>
+                  </div>
+                </div>;
+              })}
+            </div>
+            <div style={{display:"flex",gap:12,marginTop:20,justifyContent:"flex-end"}}>
+              <button onClick={function(){setShowSalesGoalsEditor(false);}} style={{background:C.rowAlt,color:C.muted,border:"1px solid "+C.border,borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Cancelar</button>
+              <button onClick={onSaveSalesGoals} style={{background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font}}>Guardar</button>
             </div>
           </div>
         </div>;
