@@ -845,12 +845,12 @@ export default function Dashboard(){
     var prevMonth=getPrevMonth(growthMonth);
     var parts=prevMonth.split("-");var year=parseInt(parts[0]);var mo=parseInt(parts[1])-1;
     var firstDay=new Date(year,mo,1);var nextMonth=new Date(year,mo+1,1);var lastDay=new Date(year,mo+1,0);
-    var BRASIL_OID="79360573";
+    var BRASIL_OIDS=["79360573","90341767","90336971"];
     fetchGrowthLeads(firstDay.toISOString(),"808581652").then(function(leads){
       var monthEnd=new Date(year,mo+1,0,23,59,59,999);
       var filtered=leads.filter(function(l){var props=l.properties||{};var cd=props.createdate||props.hs_createdate||l.createdAt;if(!cd)return false;var d=toGMT5(new Date(cd));return d>=firstDay&&d<=monthEnd;});
       var latam=[];var brasil=[];
-      for(var i=0;i<filtered.length;i++){var oid=(filtered[i]._contactProps&&filtered[i]._contactProps.hubspot_owner_id)||"";if(oid===BRASIL_OID)brasil.push(filtered[i]);else latam.push(filtered[i]);}
+      for(var i=0;i<filtered.length;i++){var oid=(filtered[i]._contactProps&&filtered[i]._contactProps.hubspot_owner_id)||"";if(BRASIL_OIDS.indexOf(oid)>=0)brasil.push(filtered[i]);else latam.push(filtered[i]);}
       function countPqls(arr){var n=0;for(var j=0;j<arr.length;j++){var p=(arr[j]._contactProps&&arr[j]._contactProps.prioridad_plg)||"";var lo=p.toLowerCase();if(lo==="alta"||lo==="media"||lo==="m\u00E9dia")n++;}return n;}
       setPrevGrowthData({latamSignups:latam.length,brasilSignups:brasil.length,latamPqls:countPqls(latam),brasilPqls:countPqls(brasil)});
     }).catch(function(e){console.warn("[PrevGrowth] Error:",e);setPrevGrowthData(null);});
@@ -1406,7 +1406,7 @@ export default function Dashboard(){
     finally{setEmailLoading(false);}
   }
 
-  var BRASIL_OWNER_ID="79360573";
+  var BRASIL_OWNER_IDS=["79360573","90341767","90336971"];
   var SOURCE_COLORS={"PAID_SOCIAL":C.accent,"DIRECT_TRAFFIC":C.purple,"ORGANIC_SEARCH":C.green,"REFERRALS":C.cyan,"OFFLINE":C.orange,"OTHER_CAMPAIGNS":C.pink,"EMAIL_MARKETING":C.yellow,"ORGANIC_SOCIAL":C.red,"PAID_SEARCH":"#6366F1"};
 
   async function initGrowth(monthOverride,customFromStr,customToStr){
@@ -1516,7 +1516,7 @@ export default function Dashboard(){
       var latamContacts=[];var brasilContacts=[];
       for(var i=0;i<filtered.length;i++){
         var ownerId=(filtered[i]._contactProps&&filtered[i]._contactProps.hubspot_owner_id)||"";
-        if(ownerId===BRASIL_OWNER_ID)brasilContacts.push(filtered[i]);
+        if(BRASIL_OWNER_IDS.indexOf(ownerId)>=0)brasilContacts.push(filtered[i]);
         else latamContacts.push(filtered[i]);
       }
 
@@ -5552,7 +5552,7 @@ export default function Dashboard(){
 
             {/* Chart: Signups por Prioridad */}
             {(function(){
-              var BRASIL_OID="79360573";
+              var BRASIL_OIDS=["79360573","90341767","90336971"];
               var allContacts=growthChartRegion==="latam"?latC:growthChartRegion==="brasil"?braC:latC.concat(braC);
               function fmtD(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
               function applyChartPreset(key){
