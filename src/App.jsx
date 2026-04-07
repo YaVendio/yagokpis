@@ -684,7 +684,7 @@ export default function Dashboard(){
       if(growthDatePreset==="custom"&&growthCustomFrom){initGrowth(null,growthCustomFrom,growthCustomTo);}else{initGrowth();}
     }
     if(section==="ads"&&!adsInited&&!adsLoading&&!adsError){initAds();}
-  },[section,subTab]);
+  },[section,subTab,growthInited]);
 
   // Auto-load inbound data when navigating to inbound, resumen, or hubspot analytics
   useEffect(function(){
