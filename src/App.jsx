@@ -781,21 +781,8 @@ export default function Dashboard(){
       // CRM meetings in prev period for confirmed count (filtered by SDR owners + region)
       var prevConfirmed=0;var prevRealizadas=0;
       if(crmMeetings.length>0&&crmContacts.length>0){
-        var _prevSdrNames=["pablo","martin","gabriel","rafaela","sebastian","eduardo"];
-        var _prevBrNames=["rafaela"];
         var _prevSdrIds={};var _prevBrIds={};var _prevLatamIds={};
-        var _prevOwKeys=Object.keys(crmOwnerMap);
-        for(var _poi=0;_poi<_prevOwKeys.length;_poi++){
-          var _poN=(crmOwnerMap[_prevOwKeys[_poi]]||"").toLowerCase();
-          for(var _psi=0;_psi<_prevSdrNames.length;_psi++){
-            if(_poN.indexOf(_prevSdrNames[_psi])>=0){
-              _prevSdrIds[_prevOwKeys[_poi]]=true;
-              if(_prevBrNames.indexOf(_prevSdrNames[_psi])>=0)_prevBrIds[_prevOwKeys[_poi]]=true;
-              else _prevLatamIds[_prevOwKeys[_poi]]=true;
-              break;
-            }
-          }
-        }
+        for(var _pvi=0;_pvi<VENDEDORES.length;_pvi++){_prevSdrIds[VENDEDORES[_pvi].id]=true;if(BRASIL_OWNER_IDS.indexOf(VENDEDORES[_pvi].id)>=0)_prevBrIds[VENDEDORES[_pvi].id]=true;else _prevLatamIds[VENDEDORES[_pvi].id]=true;}
         var prFD=new Date(prev.from+"T00:00:00");var prTD=new Date(prev.to+"T23:59:59");
         var prFiltM=crmMeetings.filter(function(m){
           var oid=m.properties&&m.properties.hubspot_owner_id;
@@ -2437,21 +2424,8 @@ export default function Dashboard(){
         var allLeads=outLeads.concat(inbLeads);
 
         // --- CRM meetings filtered by date + SDR owners + region ---
-        var _sdrNames=["pablo","martin","gabriel","rafaela","sebastian","eduardo"];
-        var _brNames=["rafaela"];
         var _sdrOwnerIds={};var _brOwnerIds={};var _latamOwnerIds={};
-        var _owKeys=Object.keys(crmOwnerMap);
-        for(var _oki=0;_oki<_owKeys.length;_oki++){
-          var _owN=(crmOwnerMap[_owKeys[_oki]]||"").toLowerCase();
-          for(var _sni=0;_sni<_sdrNames.length;_sni++){
-            if(_owN.indexOf(_sdrNames[_sni])>=0){
-              _sdrOwnerIds[_owKeys[_oki]]=true;
-              if(_brNames.indexOf(_sdrNames[_sni])>=0)_brOwnerIds[_owKeys[_oki]]=true;
-              else _latamOwnerIds[_owKeys[_oki]]=true;
-              break;
-            }
-          }
-        }
+        for(var _vi=0;_vi<VENDEDORES.length;_vi++){_sdrOwnerIds[VENDEDORES[_vi].id]=true;if(BRASIL_OWNER_IDS.indexOf(VENDEDORES[_vi].id)>=0)_brOwnerIds[VENDEDORES[_vi].id]=true;else _latamOwnerIds[VENDEDORES[_vi].id]=true;}
         var filtCrmMeetings=crmMeetings.filter(function(m){
           var oid=m.properties&&m.properties.hubspot_owner_id;
           if(!oid||!_sdrOwnerIds[oid])return false;
