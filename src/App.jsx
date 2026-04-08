@@ -1576,11 +1576,11 @@ export default function Dashboard(){
         filtered[pi]._contactProps._source=phSrc||hsSrc||"UNKNOWN";
       }
 
-      // Split by region using associated contact's hubspot_owner_id
+      // Split by region using associated contact's country field
       var latamContacts=[];var brasilContacts=[];
       for(var i=0;i<filtered.length;i++){
-        var ownerId=(filtered[i]._contactProps&&filtered[i]._contactProps.hubspot_owner_id)||"";
-        if(BRASIL_OWNER_IDS.indexOf(ownerId)>=0)brasilContacts.push(filtered[i]);
+        var country=(filtered[i]._contactProps&&filtered[i]._contactProps.country)||"";
+        if(country.toLowerCase()==="brazil")brasilContacts.push(filtered[i]);
         else latamContacts.push(filtered[i]);
       }
 

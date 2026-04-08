@@ -568,7 +568,7 @@ export async function fetchGrowthLeads(sinceIso, pipelineId) {
           var inputs = batch.map(function(id) { return { id: id }; });
           return callHubSpot("/crm/v3/objects/contacts/batch/read", null, {
             inputs: inputs,
-            properties: ["prioridad_plg", "email"]
+            properties: ["prioridad_plg", "email", "country"]
           }).catch(function(e) {
             console.warn("[HS Growth] Contact batch read error:", e.message);
             return { results: [] };
@@ -579,7 +579,7 @@ export async function fetchGrowthLeads(sinceIso, pipelineId) {
           if (cResults[cri].results) {
             for (var cr = 0; cr < cResults[cri].results.length; cr++) {
               var contact = cResults[cri].results[cr];
-              contactMap[contact.id] = { prioridad_plg: (contact.properties && contact.properties.prioridad_plg) || "", email: (contact.properties && contact.properties.email) || "" };
+              contactMap[contact.id] = { prioridad_plg: (contact.properties && contact.properties.prioridad_plg) || "", email: (contact.properties && contact.properties.email) || "", country: (contact.properties && contact.properties.country) || "" };
             }
           }
         }
@@ -606,6 +606,7 @@ export async function fetchGrowthLeads(sinceIso, pipelineId) {
       createdate: lp.createdate || lp.hs_createdate || "",
       phone: lp.numero_de_telefono || "",
       industria: lp.industria || "",
+      country: (contactData && contactData.country) || "",
     };
   }
 
