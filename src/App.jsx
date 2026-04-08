@@ -19,6 +19,7 @@ function getLastOfMonth(){var d=new Date(new Date().getFullYear(),new Date().get
 function getCrmSinceDate(){var d=new Date(new Date().getFullYear(),new Date().getMonth()-1,1);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01";}
 
 function toGMT5(date){var d=new Date(date);d.setTime(d.getTime()+(d.getTimezoneOffset()*60000)-(5*3600000));return d;}
+function utcToLocalDate(isoStr){var d=new Date(isoStr);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
 
 var font="'Source Sans 3', sans-serif";
 var mono="'JetBrains Mono', monospace";
@@ -2608,7 +2609,7 @@ export default function Dashboard(){
           // By start time
           var _ymst=_ymp.hs_meeting_start_time;
           if(_ymst){
-            var _ymkey=_ymst.slice(0,10);
+            var _ymkey=utcToLocalDate(_ymst);
             if(!yagoDailyMap[_ymkey]){var _yrow={date:_ymkey};for(var _yki=0;_yki<_yOutcomeKeys.length;_yki++)_yrow[_yOutcomeKeys[_yki]]=0;yagoDailyMap[_ymkey]=_yrow;}
             if(yagoDailyMap[_ymkey][_ymoc]===undefined)yagoDailyMap[_ymkey][_ymoc]=0;
             yagoDailyMap[_ymkey][_ymoc]++;
@@ -2617,7 +2618,7 @@ export default function Dashboard(){
           // By creation date
           var _ymcd=_ymp.hs_createdate||_ym.createdAt;
           if(_ymcd){
-            var _yckey=_ymcd.slice(0,10);
+            var _yckey=utcToLocalDate(_ymcd);
             if(!yagoCreatedMap[_yckey]){var _ycrow={date:_yckey};for(var _yci=0;_yci<_yOutcomeKeys.length;_yci++)_ycrow[_yOutcomeKeys[_yci]]=0;yagoCreatedMap[_yckey]=_ycrow;}
             if(yagoCreatedMap[_yckey][_ymoc]===undefined)yagoCreatedMap[_yckey][_ymoc]=0;
             yagoCreatedMap[_yckey][_ymoc]++;
@@ -4881,7 +4882,7 @@ export default function Dashboard(){
         for(var di=0;di<sorted.length;di++){
           var dst=sorted[di].properties&&sorted[di].properties.hs_meeting_start_time;
           if(!dst)continue;
-          var dkey=dst.slice(0,10);
+          var dkey=utcToLocalDate(dst);
           if(!dailyMap[dkey]){var row={date:dkey};for(var oki=0;oki<outcomeKeys.length;oki++)row[outcomeKeys[oki]]=0;dailyMap[dkey]=row;}
           var doc=rGetOutcomeStatus(sorted[di]);
           if(dailyMap[dkey][doc]===undefined)dailyMap[dkey][doc]=0;
@@ -4896,7 +4897,7 @@ export default function Dashboard(){
         for(var dci=0;dci<filteredMeetings.length;dci++){
           var dcst=filteredMeetings[dci].properties&&filteredMeetings[dci].properties.hs_createdate;
           if(!dcst)continue;
-          var dckey=dcst.slice(0,10);
+          var dckey=utcToLocalDate(dcst);
           if(!dailyCreatedMap[dckey])dailyCreatedMap[dckey]={date:dckey,count:0};
           dailyCreatedMap[dckey].count++;
           if(!createdByDay[dckey])createdByDay[dckey]=[];
