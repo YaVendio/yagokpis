@@ -517,6 +517,7 @@ export default function Dashboard(){
   const outboundSinceRef=useRef(getFirstOfMonth());
   const inboundSinceRef=useRef(getFirstOfMonth());
   const crmLoadingRef=useRef(false);
+  const crmSinceRef=useRef(getCrmSinceDate());
   const outboundLoadingRef=useRef(false);
 
   const [meetings,setMeetings]=useState([]);
@@ -1231,12 +1232,13 @@ export default function Dashboard(){
 
   // --- CRM (HubSpot) tab functions ---
   var CRM_SINCE=getCrmSinceDate();
-  async function fetchHubSpotFresh(){
-    console.log("[CRM] Loading from Supabase since",CRM_SINCE,"(parallel)...");
+  async function fetchHubSpotFresh(sinceDate){
+    var since=sinceDate||CRM_SINCE;
+    console.log("[CRM] Loading from Supabase since",since,"(parallel)...");
     var [meetingsRes,dealsRes,leadsRes,pipelines,ownerMap]=await Promise.all([
-      loadMeetingsFromDb(CRM_SINCE),
-      loadDealsFromDb(CRM_SINCE),
-      loadLeadsFromDb(CRM_SINCE,"808581652"),
+      loadMeetingsFromDb(since),
+      loadDealsFromDb(since),
+      loadLeadsFromDb(since,"808581652"),
       loadPipelinesFromDb(),
       loadOwnersFromDb()
     ]);
@@ -1291,6 +1293,7 @@ export default function Dashboard(){
     try{
       // Load directly from Supabase tables (server-synced)
       var fresh=await fetchHubSpotFresh();
+      crmSinceRef.current=CRM_SINCE;
       applyCrmData(fresh);setCrmInited(true);
       console.log("[CRM] Done. Meetings:",fresh.meetings.length,"Contacts:",fresh.contacts.length,"Deals:",fresh.deals.length,"Leads:",fresh.leads.length);
       var _sgMonth=new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0");
@@ -1300,6 +1303,31 @@ export default function Dashboard(){
     }catch(e){console.error("[CRM] Error:",e);setCrmError(e.message);}
     finally{setCrmLoading(false);crmLoadingRef.current=false;}
   }
+
+  // Lazy range extender for CRM: re-fetch when date filters need data older than loaded
+  useEffect(function(){
+    if(!crmInited||crmLoadingRef.current) return;
+    var neededSince=null;
+    // Check Reuniones tab date filter
+    if(hsReunionDateFrom&&hsReunionDateFrom<crmSinceRef.current) neededSince=hsReunionDateFrom;
+    // Check Resumen/Analytics tab date filter
+    if(dateFrom&&dateFrom<crmSinceRef.current){
+      if(!neededSince||dateFrom<neededSince) neededSince=dateFrom;
+    }
+    if(!neededSince) return;
+    // Pad to first of that month
+    neededSince=neededSince.substring(0,7)+"-01";
+    if(neededSince>=crmSinceRef.current) return;
+    console.log("[CRM] Extending range from",crmSinceRef.current,"to",neededSince);
+    crmLoadingRef.current=true;
+    setCrmLoading(true);setCrmError(null);
+    fetchHubSpotFresh(neededSince).then(function(fresh){
+      crmSinceRef.current=neededSince;
+      applyCrmData(fresh);
+      console.log("[CRM] Extended. Meetings:",fresh.meetings.length,"Deals:",fresh.deals.length);
+    }).catch(function(e){console.error("[CRM] Extend error:",e);setCrmError(e.message);})
+    .finally(function(){setCrmLoading(false);crmLoadingRef.current=false;});
+  },[hsReunionDateFrom,dateFrom,crmInited]);
 
   async function loadCrmCrossReference(){
     setCrmCrossLoading(true);setCrmError(null);
