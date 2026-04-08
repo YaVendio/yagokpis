@@ -980,6 +980,8 @@ export default function Dashboard(){
     try{
       await queryMetabase("SELECT 1");
       resetAuthGuard();
+      outboundLoadingRef.current=false;
+      crmLoadingRef.current=false;
       setLoadError(null);
       setDbLoading(true);
       setCrmInited(false);

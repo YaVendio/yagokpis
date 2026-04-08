@@ -7,7 +7,7 @@ export async function queryMetabase(sql) {
   try {
     return await withRetry(function () { return _invokeMetabase(sql, password); });
   } catch (e) {
-    if (e._status === 401) { dispatchAuthRequired(); throw new Error("Unauthorized"); }
+    if (e._status === 401) { if (password) dispatchAuthRequired(); throw new Error("Unauthorized"); }
     throw e;
   }
 }
