@@ -996,6 +996,45 @@ export default function Dashboard(){
     }finally{setLoginLoading(false);}
   }
 
+  // Lazy range extender for CRM: re-fetch when date filters need data older than loaded
+  useEffect(function(){
+    if(!crmInited||crmLoadingRef.current) return;
+    var neededSince=null;
+    if(hsReunionDateFrom&&hsReunionDateFrom<crmSinceRef.current) neededSince=hsReunionDateFrom;
+    if(dateFrom&&dateFrom<crmSinceRef.current){
+      if(!neededSince||dateFrom<neededSince) neededSince=dateFrom;
+    }
+    if(!neededSince) return;
+    neededSince=neededSince.substring(0,7)+"-01";
+    if(neededSince>=crmSinceRef.current) return;
+    console.log("[CRM] Extending range from",crmSinceRef.current,"to",neededSince);
+    crmLoadingRef.current=true;
+    setCrmLoading(true);setCrmError(null);
+    fetchHubSpotFresh(neededSince).then(function(fresh){
+      crmSinceRef.current=neededSince;
+      applyCrmData(fresh);
+      console.log("[CRM] Extended. Meetings:",fresh.meetings.length,"Deals:",fresh.deals.length);
+    }).catch(function(e){console.error("[CRM] Extend error:",e);setCrmError(e.message);})
+    .finally(function(){setCrmLoading(false);crmLoadingRef.current=false;});
+  },[hsReunionDateFrom,dateFrom,crmInited]);
+
+  // Memoize resumen outbound/inbound processing to avoid recomputing on every render
+  var resumenOutLeads=useMemo(function(){
+    if(!rawRows) return [];
+    var _resLang=resumenRegionFilter==="br"?"pt":resumenRegionFilter==="latam"?"es":"all";
+    var filtOut=filterThreadsByDate(rawRows,dateFrom,dateTo);
+    var outResult=processOutboundThreads(filtOut,templateConfig,_resLang);
+    return outResult.MEETINGS||[];
+  },[rawRows,dateFrom,dateTo,templateConfig,resumenRegionFilter]);
+
+  var resumenInbLeads=useMemo(function(){
+    if(!inboundRawRows) return [];
+    var _resLang=resumenRegionFilter==="br"?"pt":resumenRegionFilter==="latam"?"es":"all";
+    var filtInb=filterThreadsByDate(inboundRawRows,dateFrom,dateTo);
+    var inbResult=processInboundThreads(filtInb,_resLang,lifecyclePhonesData,inboundHsPhones);
+    return inbResult.MEETINGS||[];
+  },[inboundRawRows,dateFrom,dateTo,resumenRegionFilter,lifecyclePhonesData,inboundHsPhones]);
+
   if(!isAuthenticated) return (
     <div style={{background:C.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:font}}>
       <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
@@ -1303,31 +1342,6 @@ export default function Dashboard(){
     }catch(e){console.error("[CRM] Error:",e);setCrmError(e.message);}
     finally{setCrmLoading(false);crmLoadingRef.current=false;}
   }
-
-  // Lazy range extender for CRM: re-fetch when date filters need data older than loaded
-  useEffect(function(){
-    if(!crmInited||crmLoadingRef.current) return;
-    var neededSince=null;
-    // Check Reuniones tab date filter
-    if(hsReunionDateFrom&&hsReunionDateFrom<crmSinceRef.current) neededSince=hsReunionDateFrom;
-    // Check Resumen/Analytics tab date filter
-    if(dateFrom&&dateFrom<crmSinceRef.current){
-      if(!neededSince||dateFrom<neededSince) neededSince=dateFrom;
-    }
-    if(!neededSince) return;
-    // Pad to first of that month
-    neededSince=neededSince.substring(0,7)+"-01";
-    if(neededSince>=crmSinceRef.current) return;
-    console.log("[CRM] Extending range from",crmSinceRef.current,"to",neededSince);
-    crmLoadingRef.current=true;
-    setCrmLoading(true);setCrmError(null);
-    fetchHubSpotFresh(neededSince).then(function(fresh){
-      crmSinceRef.current=neededSince;
-      applyCrmData(fresh);
-      console.log("[CRM] Extended. Meetings:",fresh.meetings.length,"Deals:",fresh.deals.length);
-    }).catch(function(e){console.error("[CRM] Extend error:",e);setCrmError(e.message);})
-    .finally(function(){setCrmLoading(false);crmLoadingRef.current=false;});
-  },[hsReunionDateFrom,dateFrom,crmInited]);
 
   async function loadCrmCrossReference(){
     setCrmCrossLoading(true);setCrmError(null);
@@ -1912,23 +1926,6 @@ export default function Dashboard(){
   function onClickFilter(){setHsDetailDay(null);applyDateFilter(dateFrom,dateTo);}
   function clearDateFilter(){setDateFrom("");setDateTo("");applyDateFilter("","");}
   function onRegionChange(e){var v=e.target.value;setRegionFilter(v);if(section==="inbound"&&inboundRawRows){var filtered=filterThreadsByDate(inboundRawRows,dateFrom,dateTo);var result=processInboundThreads(filtered,v,lifecyclePhonesData,inboundHsPhones);applyResult(result);}else if(section==="outbound"&&rawRows){var filtered2=filterThreadsByDate(rawRows,dateFrom,dateTo);var result2=processOutboundThreads(filtered2,templateConfig,v);applyResult(result2);}}
-
-  // Memoize resumen outbound/inbound processing to avoid recomputing on every render
-  var resumenOutLeads=useMemo(function(){
-    if(!rawRows) return [];
-    var _resLang=resumenRegionFilter==="br"?"pt":resumenRegionFilter==="latam"?"es":"all";
-    var filtOut=filterThreadsByDate(rawRows,dateFrom,dateTo);
-    var outResult=processOutboundThreads(filtOut,templateConfig,_resLang);
-    return outResult.MEETINGS||[];
-  },[rawRows,dateFrom,dateTo,templateConfig,resumenRegionFilter]);
-
-  var resumenInbLeads=useMemo(function(){
-    if(!inboundRawRows) return [];
-    var _resLang=resumenRegionFilter==="br"?"pt":resumenRegionFilter==="latam"?"es":"all";
-    var filtInb=filterThreadsByDate(inboundRawRows,dateFrom,dateTo);
-    var inbResult=processInboundThreads(filtInb,_resLang,lifecyclePhonesData,inboundHsPhones);
-    return inbResult.MEETINGS||[];
-  },[inboundRawRows,dateFrom,dateTo,resumenRegionFilter,lifecyclePhonesData,inboundHsPhones]);
 
   var mk=mode===0?"all":"real";var d=dataD[mk];var funnel=mode===0?funnelAll:funnelReal;var mbt=mode===0?meetByTplAll:meetByTplReal;
   var _jsFiltTc=headerInfo.esTotal+headerInfo.ptTotal;
