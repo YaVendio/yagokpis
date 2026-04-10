@@ -40,6 +40,67 @@ const LEAD_PROPS = [
 const DEAL_PIPELINES = ["720627716", "833703951"];
 const LEAD_PIPELINE = "808581652";
 
+/**
+ * Cleanup: reads all IDs from a Supabase table, batch-verifies them against
+ * HubSpot, and deletes any that no longer exist. Processes up to 1000 at a time.
+ */
+async function cleanupDeleted(
+  supabase: any,
+  table: string,
+  objectType: string,
+  label: string,
+): Promise<number> {
+  // Get all IDs from Supabase (paginate past 1000-row limit)
+  const allDbIds: string[] = [];
+  let from = 0;
+  const pageSize = 1000;
+  while (true) {
+    const { data } = await supabase.from(table).select("id").range(from, from + pageSize - 1);
+    if (!data || data.length === 0) break;
+    for (const r of data) allDbIds.push(r.id);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  console.log(`[cleanup] ${label}: ${allDbIds.length} records in DB, batch-verifying...`);
+
+  // Batch read from HubSpot (100 per request, 3 concurrent)
+  const confirmedDeleted: string[] = [];
+  const chunks: string[][] = [];
+  for (let i = 0; i < allDbIds.length; i += 100) {
+    chunks.push(allDbIds.slice(i, i + 100));
+  }
+  for (let ci = 0; ci < chunks.length; ci += 3) {
+    const group = chunks.slice(ci, ci + 3);
+    const results = await Promise.all(
+      group.map((batch) =>
+        hsPost(`/crm/v3/objects/${objectType}/batch/read`, {
+          inputs: batch.map(id => ({ id })),
+          properties: ["hs_createdate"],
+        }).catch(() => ({ results: [] }))
+      )
+    );
+    for (let gi = 0; gi < group.length; gi++) {
+      const batch = group[gi];
+      const found = new Set((results[gi]?.results || []).map((r: any) => String(r.id)));
+      for (const id of batch) {
+        if (!found.has(id)) confirmedDeleted.push(id);
+      }
+    }
+  }
+
+  if (confirmedDeleted.length > 0) {
+    for (let i = 0; i < confirmedDeleted.length; i += 100) {
+      await supabase.from(table).delete().in("id", confirmedDeleted.slice(i, i + 100));
+    }
+    console.log(`[cleanup] ${label}: cleaned ${confirmedDeleted.length} deleted records`);
+  } else {
+    console.log(`[cleanup] ${label}: all records valid`);
+  }
+
+  return confirmedDeleted.length;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -53,6 +114,23 @@ Deno.serve(async (req: Request) => {
   }
 
   const supabase = getSupabaseAdmin();
+
+  // Cleanup mode: lightweight pass that only removes deleted records
+  if (mode === "cleanup") {
+    console.log("[cleanup] Starting cleanup pass...");
+    const counts: Record<string, number> = {};
+    try {
+      counts.meetings_cleaned = await cleanupDeleted(supabase, "hs_meetings", "meetings", "meetings");
+      counts.contacts_cleaned = await cleanupDeleted(supabase, "hs_contacts", "contacts", "contacts");
+      counts.deals_cleaned = await cleanupDeleted(supabase, "hs_deals", "deals", "deals");
+      console.log("[cleanup] done:", counts);
+      return new Response(JSON.stringify({ ok: true, counts }), { headers: corsHeaders });
+    } catch (e) {
+      console.error("[cleanup] error:", e);
+      return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500, headers: corsHeaders });
+    }
+  }
+
   const isIncremental = mode === "incremental";
   const syncType = isIncremental ? "incremental" : "full";
 

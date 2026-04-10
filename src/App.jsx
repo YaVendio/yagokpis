@@ -2100,9 +2100,9 @@ export default function Dashboard(){
       </div>);
     }
     if(section==="hubspot"&&subTab==="reuniones"){
-      var _rOutcomeColor={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:"#94A3B8",RESCHEDULED:C.cyan,"NO CALIFICADA":C.pink,RETRASADA:C.orange,UNKNOWN:C.muted};
-      var _rOutcomeLabels={COMPLETED:"Completadas",SCHEDULED:"Agendadas",NO_SHOW:"No asisti\u00f3",CANCELED:"Canceladas",RESCHEDULED:"Reagendadas","NO CALIFICADA":"No Calificada",RETRASADA:"Retrasadas"};
-      var _rOutcomeKeys=["SCHEDULED","RETRASADA","CANCELED","RESCHEDULED","NO CALIFICADA","NO_SHOW","COMPLETED"];
+      var _rOutcomeColor={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:"#94A3B8",RESCHEDULED:C.cyan,"NO CALIFICADA":C.pink,UNKNOWN:C.muted};
+      var _rOutcomeLabels={COMPLETED:"Completadas",SCHEDULED:"Agendadas",NO_SHOW:"No asisti\u00f3",CANCELED:"Canceladas",RESCHEDULED:"Reagendadas","NO CALIFICADA":"No Calificada",UNKNOWN:"Sin estado"};
+      var _rOutcomeKeys=["SCHEDULED","UNKNOWN","CANCELED","RESCHEDULED","NO CALIFICADA","NO_SHOW","COMPLETED"];
       var _rOwnerIds={};for(var _roi=0;_roi<crmMeetings.length;_roi++){var _roid=crmMeetings[_roi].properties&&crmMeetings[_roi].properties.hubspot_owner_id;if(_roid)_rOwnerIds[_roid]=true;}
       var _rOwnerList=Object.keys(_rOwnerIds).map(function(id){return{id:id,name:crmOwnerMap[id]||id};}).sort(function(a,b){return a.name.localeCompare(b.name);});
       var _rTypeIds={};for(var _rti=0;_rti<crmMeetings.length;_rti++){var _rtv=crmMeetings[_rti].properties&&crmMeetings[_rti].properties.hs_activity_type;if(_rtv)_rTypeIds[_rtv]=true;}
@@ -2266,7 +2266,6 @@ export default function Dashboard(){
       }
       function rmStatus(m){
         var oc=m.properties&&m.properties.hs_meeting_outcome||"UNKNOWN";
-        if(oc==="SCHEDULED"||oc==="UNKNOWN"){var st=m.properties&&m.properties.hs_meeting_start_time;if(st&&new Date(st)<_now)return "RETRASADA";}
         return oc;
       }
       // Build phone sets for Fuente classification
@@ -2278,7 +2277,7 @@ export default function Dashboard(){
       function rmFuente(m){var ct=rmGetContact(m);var isOut=rmMatchPhone(_rmOutSet,ct);var isIn=rmMatchPhone(_rmInSet,ct);m._cross=isOut&&isIn;if(isIn)return"Inbound";if(isOut)return"Outbound";return"Directo";}
       var _rmMeetToLead=realizadasModalData.meetToLead||{};
       var _rmSelLead=realizadasModalData._selLead||null;
-      var outcomeColor2={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:"#94A3B8",RESCHEDULED:C.cyan,RETRASADA:C.orange,UNKNOWN:C.muted};
+      var outcomeColor2={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:"#94A3B8",RESCHEDULED:C.cyan,UNKNOWN:C.muted};
       if(_rmSelLead) return <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#00000044",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:20,animation:"fadeInModal 0.2s ease-out"}} onClick={function(){setRealizadasModalData(null);}}>
         <div style={{background:C.card,borderRadius:20,padding:28,maxWidth:880,width:"100%",maxHeight:"92vh",boxShadow:"0 25px 60px #00000025",animation:"scaleInModal 0.2s ease-out"}} onClick={function(e){e.stopPropagation();}}>
           <ConvView lead={_rmSelLead} onBack={function(){setRealizadasModalData(Object.assign({},realizadasModalData,{_selLead:null}));}} crmContacts={crmContacts}/>
@@ -2309,7 +2308,7 @@ export default function Dashboard(){
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:6}}>
                       <span style={{fontWeight:700,fontSize:15,color:C.text}}>{p.hs_meeting_title||"Sin t\u00EDtulo"}</span>
-                      <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:sColor+"18",color:sColor}}>{status}</span>
+                      <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:sColor+"18",color:sColor}}>{status==="UNKNOWN"?"Sin estado":status}</span>
                       <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:_rmCanClr+"18",color:_rmCanClr}}>{_rmCan}</span>
                       {m._cross && <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:6,background:C.purple+"18",color:C.purple}}>CRUZADO</span>}
                       {p.hs_activity_type && <span style={{fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:6,background:C.rowAlt,color:C.muted}}>{p.hs_activity_type}</span>}
@@ -2536,8 +2535,8 @@ export default function Dashboard(){
 
         // --- Outcome stats ---
         var _now=new Date();
-        var outcomeColor={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:"#94A3B8",RESCHEDULED:C.cyan,"NO CALIFICADA":C.pink,RETRASADA:C.orange,UNKNOWN:C.muted};
-        function getOutcomeStatus(m){var oc=m.properties&&m.properties.hs_meeting_outcome||"UNKNOWN";if(oc==="SCHEDULED"||oc==="UNKNOWN"){var mst=m.properties&&m.properties.hs_meeting_start_time;if(mst&&new Date(mst)<_now)return "RETRASADA";}return oc;}
+        var outcomeColor={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:"#94A3B8",RESCHEDULED:C.cyan,"NO CALIFICADA":C.pink,UNKNOWN:C.muted};
+        function getOutcomeStatus(m){var oc=m.properties&&m.properties.hs_meeting_outcome||"UNKNOWN";return oc;}
         var outcomeCounts={};var outcomeMeetings={};
         var primeraOnly=filtCrmMeetings;
         for(var mi=0;mi<primeraOnly.length;mi++){
@@ -2546,7 +2545,8 @@ export default function Dashboard(){
           if(!outcomeMeetings[oc])outcomeMeetings[oc]=[];
           outcomeMeetings[oc].push(primeraOnly[mi]);
         }
-        var outcomeData=Object.keys(outcomeCounts).sort(function(a,b){return outcomeCounts[b]-outcomeCounts[a];}).map(function(k){return {name:k,count:outcomeCounts[k],color:outcomeColor[k]||C.muted};});
+        var _outcomeLabels2={COMPLETED:"Completadas",SCHEDULED:"Agendadas",NO_SHOW:"No asisti\u00F3",CANCELED:"Canceladas",RESCHEDULED:"Reagendadas","NO CALIFICADA":"No Calificada",UNKNOWN:"Sin estado"};
+        var outcomeData=Object.keys(outcomeCounts).sort(function(a,b){return outcomeCounts[b]-outcomeCounts[a];}).map(function(k){return {name:k,label:_outcomeLabels2[k]||k,count:outcomeCounts[k],color:outcomeColor[k]||C.muted};});
 
         // --- Daily chart data (Leads por Día stacked Out+In) ---
         var dayMap={};var outLeadsByDay={};var inbLeadsByDay={};
@@ -2624,8 +2624,8 @@ export default function Dashboard(){
         var yagoOutcomeData=Object.keys(yagoOutcomeCounts).sort(function(a,b){return yagoOutcomeCounts[b]-yagoOutcomeCounts[a];}).map(function(k){return{name:k,count:yagoOutcomeCounts[k],color:outcomeColor[k]||C.muted};});
 
         // --- Yago meetings daily stacked chart data ---
-        var _yOutcomeKeys=["SCHEDULED","RETRASADA","CANCELED","RESCHEDULED","NO CALIFICADA","NO_SHOW","COMPLETED"];
-        var _yOutcomeLabels={COMPLETED:"Completadas",SCHEDULED:"Agendadas",NO_SHOW:"No asisti\u00F3",CANCELED:"Canceladas",RESCHEDULED:"Reagendadas","NO CALIFICADA":"No Calificada",RETRASADA:"Retrasadas"};
+        var _yOutcomeKeys=["SCHEDULED","UNKNOWN","CANCELED","RESCHEDULED","NO CALIFICADA","NO_SHOW","COMPLETED"];
+        var _yOutcomeLabels={COMPLETED:"Completadas",SCHEDULED:"Agendadas",NO_SHOW:"No asisti\u00F3",CANCELED:"Canceladas",RESCHEDULED:"Reagendadas","NO CALIFICADA":"No Calificada",UNKNOWN:"Sin estado"};
         // By meeting start date
         var yagoDailyMap={};var yagoMeetByDay={};
         // By creation date
@@ -2740,13 +2740,13 @@ export default function Dashboard(){
           {/* Outcome distribution: Yago + All */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:24}}>
             <Cd><Sec>Agendadas por Yago ({confirmedCount})</Sec>
-              {yagoOutcomeData.length>0 ? yagoOutcomeData.map(function(o,i){var maxC=yagoOutcomeData[0].count||1;var w2=Math.max((o.count/maxC)*100,3);
-                return (<div key={"y"+i} onClick={function(){var yMeetings=yagoOutcomeMeetings[o.name]||[];var yLeads=yagoOutcomeLeads[o.name]||[];if(yMeetings.length>0)setRealizadasModalData({title:o.name+" - Agendadas por Yago ("+yMeetings.length+")",meetings:yMeetings,leads:allLeads,meetToLead:yagoMeetToLead,outcomeFilter:o.name});else if(yLeads.length>0)setChartDayModalData({title:o.name+" - Agendadas por Yago ("+yLeads.length+")",leads:yLeads,tagContext:"agendadas"});}} style={{marginBottom:6,borderRadius:6,padding:"3px 6px",cursor:"pointer",transition:"background 0.15s ease"}} onMouseEnter={function(e){e.currentTarget.style.background=C.rowAlt;}} onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:12,fontWeight:600,color:o.color}}>{o.name}</span><span style={{fontSize:13,fontWeight:800,fontFamily:mono}}>{o.count}</span></div><div style={{height:14,background:C.rowAlt,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:w2+"%",background:o.color,borderRadius:4,opacity:0.7,transition:"width 0.4s ease"}}/></div></div>);
+              {yagoOutcomeData.length>0 ? yagoOutcomeData.map(function(o,i){var maxC=yagoOutcomeData[0].count||1;var w2=Math.max((o.count/maxC)*100,3);var _lbl=_yOutcomeLabels[o.name]||o.name;
+                return (<div key={"y"+i} onClick={function(){var yMeetings=yagoOutcomeMeetings[o.name]||[];var yLeads=yagoOutcomeLeads[o.name]||[];if(yMeetings.length>0)setRealizadasModalData({title:_lbl+" - Agendadas por Yago ("+yMeetings.length+")",meetings:yMeetings,leads:allLeads,meetToLead:yagoMeetToLead,outcomeFilter:o.name});else if(yLeads.length>0)setChartDayModalData({title:_lbl+" - Agendadas por Yago ("+yLeads.length+")",leads:yLeads,tagContext:"agendadas"});}} style={{marginBottom:6,borderRadius:6,padding:"3px 6px",cursor:"pointer",transition:"background 0.15s ease"}} onMouseEnter={function(e){e.currentTarget.style.background=C.rowAlt;}} onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:12,fontWeight:600,color:o.color}}>{_lbl}</span><span style={{fontSize:13,fontWeight:800,fontFamily:mono}}>{o.count}</span></div><div style={{height:14,background:C.rowAlt,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:w2+"%",background:o.color,borderRadius:4,opacity:0.7,transition:"width 0.4s ease"}}/></div></div>);
               }) : <div style={{fontSize:12,color:C.muted,padding:8,textAlign:"center"}}>Sin datos de Yago</div>}
             </Cd>
             <Cd><Sec>Todas las Reuniones ({primeraOnly.length})</Sec>
               {outcomeData.length>0 ? outcomeData.map(function(o,i){var maxC=outcomeData[0].count||1;var w2=Math.max((o.count/maxC)*100,3);
-                return (<div key={"a"+i} onClick={function(){var meetings=outcomeMeetings[o.name]||[];if(meetings.length>0)setRealizadasModalData({title:o.name+" ("+meetings.length+")",meetings:meetings,leads:allLeads,meetToLead:yagoMeetToLead,outcomeFilter:o.name});}} style={{marginBottom:6,cursor:"pointer",borderRadius:6,padding:"3px 6px",transition:"background 0.15s ease"}} onMouseEnter={function(e){e.currentTarget.style.background=C.rowAlt;}} onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:12,fontWeight:600,color:o.color}}>{o.name}</span><span style={{fontSize:13,fontWeight:800,fontFamily:mono}}>{o.count}</span></div><div style={{height:14,background:C.rowAlt,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:w2+"%",background:o.color,borderRadius:4,opacity:0.7,transition:"width 0.4s ease"}}/></div></div>);
+                return (<div key={"a"+i} onClick={function(){var meetings=outcomeMeetings[o.name]||[];if(meetings.length>0)setRealizadasModalData({title:(o.label||o.name)+" ("+meetings.length+")",meetings:meetings,leads:allLeads,meetToLead:yagoMeetToLead,outcomeFilter:o.name});}} style={{marginBottom:6,cursor:"pointer",borderRadius:6,padding:"3px 6px",transition:"background 0.15s ease"}} onMouseEnter={function(e){e.currentTarget.style.background=C.rowAlt;}} onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:12,fontWeight:600,color:o.color}}>{o.label||o.name}</span><span style={{fontSize:13,fontWeight:800,fontFamily:mono}}>{o.count}</span></div><div style={{height:14,background:C.rowAlt,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:w2+"%",background:o.color,borderRadius:4,opacity:0.7,transition:"width 0.4s ease"}}/></div></div>);
               }) : <div style={{fontSize:12,color:C.muted,padding:8,textAlign:"center"}}>Sin datos de HubSpot</div>}
             </Cd>
           </div>
@@ -4313,7 +4313,6 @@ export default function Dashboard(){
           for(var i=0;i<meetings.length;i++){
             var mp=meetings[i].properties||{};
             var outcome=mp.hs_meeting_outcome||"UNKNOWN";
-            if((outcome==="SCHEDULED"||outcome==="UNKNOWN")&&mp.hs_meeting_start_time&&new Date(mp.hs_meeting_start_time)<_sNow)outcome="RETRASADA";
             var assoc=meetings[i].associations&&meetings[i].associations.contacts&&meetings[i].associations.contacts.results;
             var src="UNKNOWN";var canal="Directo";
             if(assoc&&assoc.length>0){var ct=contactMap[assoc[0].id];if(ct){if(ct.properties&&ct.properties.hs_analytics_source)src=ct.properties.hs_analytics_source;canal=classifyCanal(ct,pSets);}}
@@ -4327,7 +4326,7 @@ export default function Dashboard(){
           var srcKeys=Object.keys(srcTotals).sort(function(a,b){return srcTotals[b]-srcTotals[a];});
           srcKeys.forEach(function(s){nodeIndex[s]=nodeNames.length;nodeNames.push(sourceLabels[s]||s);});
           ["Outbound","Inbound","Directo"].forEach(function(cn){nodeIndex["canal_"+cn]=nodeNames.length;nodeNames.push(cn);});
-          var outcomeKeys=["COMPLETED","SCHEDULED","RETRASADA","NO_SHOW","CANCELED","RESCHEDULED"];
+          var outcomeKeys=["COMPLETED","SCHEDULED","UNKNOWN","NO_SHOW","CANCELED","RESCHEDULED"];
           outcomeKeys.forEach(function(o){var exists=false;srcKeys.forEach(function(s){Object.keys(srcCanal[s]).forEach(function(cn){if(srcCanal[s][cn][o])exists=true;});});if(exists){nodeIndex["out_"+o]=nodeNames.length;nodeNames.push(o);}});
           srcKeys.forEach(function(s){Object.keys(srcCanal[s]).forEach(function(cn){Object.keys(srcCanal[s][cn]).forEach(function(o){if(nodeIndex["out_"+o]===undefined){nodeIndex["out_"+o]=nodeNames.length;nodeNames.push(o);}});});});
           var nodes=nodeNames.map(function(n){
@@ -4335,7 +4334,7 @@ export default function Dashboard(){
             if(canalColors[n])fill=canalColors[n];
             if(n==="COMPLETED")fill=C.green;if(n==="NO_SHOW")fill=C.red;
             if(n==="CANCELED")fill=C.yellow;if(n==="RESCHEDULED")fill=C.orange;
-            if(n==="SCHEDULED")fill=C.accent;if(n==="RETRASADA")fill="#e67e22";
+            if(n==="SCHEDULED")fill=C.accent;if(n==="UNKNOWN"||n==="Sin estado")fill=C.muted;
             return{name:n,fill:fill};
           });
           var links=[];
@@ -4710,10 +4709,10 @@ export default function Dashboard(){
       })()}
 
       {section==="hubspot" && subTab==="reuniones" && (function(){
-        var outcomeColor={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:"#94A3B8",RESCHEDULED:C.cyan,"NO CALIFICADA":C.pink,RETRASADA:C.orange,UNKNOWN:C.muted};
-        var outcomeLabels={COMPLETED:"Completadas",SCHEDULED:"Agendadas",NO_SHOW:"No asistió",CANCELED:"Canceladas",RESCHEDULED:"Reagendadas","NO CALIFICADA":"No Calificada",RETRASADA:"Retrasadas"};
-        var outcomeKeys=["SCHEDULED","RETRASADA","CANCELED","RESCHEDULED","NO CALIFICADA","NO_SHOW","COMPLETED"];
-        var outcomePriority={COMPLETED:6,RETRASADA:5,SCHEDULED:5,RESCHEDULED:4,NO_SHOW:3,CANCELED:2,"NO CALIFICADA":1,UNKNOWN:0};
+        var outcomeColor={COMPLETED:C.green,SCHEDULED:C.accent,NO_SHOW:C.red,CANCELED:"#94A3B8",RESCHEDULED:C.cyan,"NO CALIFICADA":C.pink,UNKNOWN:C.muted};
+        var outcomeLabels={COMPLETED:"Completadas",SCHEDULED:"Agendadas",NO_SHOW:"No asistió",CANCELED:"Canceladas",RESCHEDULED:"Reagendadas","NO CALIFICADA":"No Calificada",UNKNOWN:"Sin estado"};
+        var outcomeKeys=["SCHEDULED","UNKNOWN","CANCELED","RESCHEDULED","NO CALIFICADA","NO_SHOW","COMPLETED"];
+        var outcomePriority={COMPLETED:6,SCHEDULED:5,RESCHEDULED:4,NO_SHOW:3,CANCELED:2,"NO CALIFICADA":1,UNKNOWN:0};
 
         // Deduplicate meetings: group by start_time + title + first associated contact id, keep best outcome
         var dedupMap={};
@@ -4840,7 +4839,7 @@ export default function Dashboard(){
 
         // Outcome status helper
         var _rNow=new Date();
-        function rGetOutcomeStatus(m){var oc=m.properties&&m.properties.hs_meeting_outcome||"UNKNOWN";if(oc==="SCHEDULED"||oc==="UNKNOWN"){var mst=m.properties&&m.properties.hs_meeting_start_time;if(mst&&new Date(mst)<_rNow)return "RETRASADA";}return oc;}
+        function rGetOutcomeStatus(m){var oc=m.properties&&m.properties.hs_meeting_outcome||"UNKNOWN";return oc;}
 
         // Filter by Prioridad PLG (from associated contact, multi-select)
         if(hsReunionPrioridadFilter.length>0){
@@ -4873,7 +4872,7 @@ export default function Dashboard(){
         // Save pre-outcome filtered list for KPI cards (so cards always show full counts)
         var preOutcomeFiltered=filteredMeetings;
 
-        // Filter meetings by outcome (multi-select, with RETRASADA support)
+        // Filter meetings by outcome (multi-select)
         if(hsReunionOutcomeFilter.length>0){
           var outcomeSet={};for(var ofi=0;ofi<hsReunionOutcomeFilter.length;ofi++)outcomeSet[hsReunionOutcomeFilter[ofi]]=true;
           filteredMeetings=filteredMeetings.filter(function(m){
@@ -4890,13 +4889,15 @@ export default function Dashboard(){
 
         // Stats per outcome from ALL meetings (before outcome filter) for KPI cards
         var kpiStats={};var kpiTotal=preOutcomeFiltered.length;
+        var kpiRetrasadas=0;
         for(var ki=0;ki<preOutcomeFiltered.length;ki++){
           var koc=rGetOutcomeStatus(preOutcomeFiltered[ki]);
           if(!kpiStats[koc])kpiStats[koc]=0;
           kpiStats[koc]++;
+          if(koc==="SCHEDULED"){var _kst=preOutcomeFiltered[ki].properties&&preOutcomeFiltered[ki].properties.hs_meeting_start_time;if(_kst&&new Date(_kst)<_rNow)kpiRetrasadas++;}
         }
 
-        // Stats per outcome (RETRASADA-aware) from filtered list (for chart legend etc)
+        // Stats per outcome from filtered list (for chart legend etc)
         var outcomeStats={};
         for(var si=0;si<sorted.length;si++){
           var soc=rGetOutcomeStatus(sorted[si]);
@@ -4976,11 +4977,12 @@ export default function Dashboard(){
               {outcomeKeys.map(function(oc){
                 var cnt=kpiStats[oc]||0;if(cnt===0&&oc!=="COMPLETED"&&oc!=="SCHEDULED")return null;
                 var clr=outcomeColor[oc]||C.muted;
-                var _isSelOc=hsReunionOutcomeFilter.length===1&&hsReunionOutcomeFilter[0]===oc;
-                return <Cd key={oc} onClick={function(){setHsReunionOutcomeFilter(_isSelOc?[]:[oc]);}} style={{textAlign:"center",padding:"14px 10px",border:_isSelOc?"2px solid "+clr:"1px solid "+(hsReunionOutcomeFilter.length>0?C.border:clr+"33"),cursor:"pointer",transition:"all 0.15s ease"}}>
+                var _isActive=hsReunionOutcomeFilter.indexOf(oc)>=0;
+                return <Cd key={oc} onClick={function(){setHsReunionOutcomeFilter(function(prev){var idx=prev.indexOf(oc);if(idx>=0){var n=prev.slice();n.splice(idx,1);return n;}return prev.concat([oc]);});}} style={{textAlign:"center",padding:"14px 10px",border:_isActive?"2px solid "+clr:"1px solid "+(hsReunionOutcomeFilter.length>0?C.border:clr+"33"),cursor:"pointer",transition:"all 0.15s ease",background:_isActive?"linear-gradient(135deg, "+C.card+" 0%, "+clr+"11 100%)":C.card}}>
                   <div style={{fontSize:11,fontWeight:700,color:clr,textTransform:"uppercase",letterSpacing:0.5}}>{outcomeLabels[oc]||oc}</div>
                   <div style={{display:"flex",alignItems:"baseline",justifyContent:"center",gap:4,marginTop:4}}><span style={{fontSize:28,fontWeight:900,fontFamily:mono,color:clr}}>{cnt}</span>{compareEnabled&&_rPrevStats[oc]!==undefined&&<DeltaBadge current={cnt} previous={_rPrevStats[oc]}/>}</div>
                   <div style={{fontSize:11,color:C.muted,marginTop:2}}>{kpiTotal>0?(cnt/kpiTotal*100).toFixed(1):0}%</div>
+                  {oc==="SCHEDULED"&&kpiRetrasadas>0&&<div style={{fontSize:10,color:C.orange,fontWeight:700,marginTop:4}}>{kpiRetrasadas} retrasada{kpiRetrasadas>1?"s":""}</div>}
                 </Cd>;
               }).filter(Boolean)}
             </div>);
