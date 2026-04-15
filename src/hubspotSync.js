@@ -50,6 +50,7 @@ function adaptMeeting(r) {
       hs_meeting_outcome: r.hs_meeting_outcome,
       hs_activity_type: r.hs_activity_type,
       hs_meeting_title: r.hs_meeting_title,
+      hs_meeting_source: r.hs_meeting_source,
       hs_meeting_start_time: r.hs_meeting_start_time
     },
     associations: {

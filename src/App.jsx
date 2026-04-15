@@ -597,6 +597,8 @@ export default function Dashboard(){
   const [hsReunionPrioridadFilter,setHsReunionPrioridadFilter]=useState([]);
   const [hsReunionRegistroPlgFilter,setHsReunionRegistroPlgFilter]=useState(false);
   const [hsReunionFuenteFilter,setHsReunionFuenteFilter]=useState([]);
+  const [hsReunionTitleFilter,setHsReunionTitleFilter]=useState([]);
+  const [hsReunionLinkSearch,setHsReunionLinkSearch]=useState("");
   const [hsReunionDropOpen,setHsReunionDropOpen]=useState("");
   const [hsDetailDay,setHsDetailDay]=useState(null);
   const [hsDealPipelineFilter,setHsDealPipelineFilter]=useState("all");
@@ -2107,8 +2109,11 @@ export default function Dashboard(){
       var _rOwnerList=Object.keys(_rOwnerIds).map(function(id){return{id:id,name:crmOwnerMap[id]||id};}).sort(function(a,b){return a.name.localeCompare(b.name);});
       var _rTypeIds={};for(var _rti=0;_rti<crmMeetings.length;_rti++){var _rtv=crmMeetings[_rti].properties&&crmMeetings[_rti].properties.hs_activity_type;if(_rtv)_rTypeIds[_rtv]=true;}
       var _rTypeList=Object.keys(_rTypeIds).sort();
+      var _rTitleIds={};for(var _rli=0;_rli<crmMeetings.length;_rli++){var _rlv=crmMeetings[_rli].properties&&crmMeetings[_rli].properties.hs_meeting_title;if(_rlv)_rTitleIds[_rlv]=true;}
+      var _rTitleList=Object.keys(_rTitleIds).sort();
       function _rToggleOwner(id){setHsReunionOwnerFilter(function(prev){var idx=prev.indexOf(id);if(idx>=0){var n=prev.slice();n.splice(idx,1);return n;}return prev.concat([id]);});}
       function _rToggleType(val){setHsReunionTypeFilter(function(prev){var idx=prev.indexOf(val);if(idx>=0){var n=prev.slice();n.splice(idx,1);return n;}return prev.concat([val]);});}
+      function _rToggleTitle(val){setHsReunionTitleFilter(function(prev){var idx=prev.indexOf(val);if(idx>=0){var n=prev.slice();n.splice(idx,1);return n;}return prev.concat([val]);});}
       function _rFmt(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
       function _rApplyPreset(key){
         var today=new Date();var from="";var to=_rFmt(today);
@@ -2124,8 +2129,8 @@ export default function Dashboard(){
       }
       var _rPresets=[{k:"hoy",l:"Hoy"},{k:"ayer",l:"Ayer"},{k:"esta_semana",l:"Esta Semana"},{k:"este_mes",l:"Este Mes"},{k:"ultimos_7",l:"\u00DAlt. 7d"},{k:"ultimos_30",l:"\u00DAlt. 30d"},{k:"mes_pasado",l:"Mes Pasado"},{k:"custom",l:"Personalizado"}];
       var _rFuenteOpts=[{v:"Outbound",c:C.green},{v:"Inbound",c:C.cyan},{v:"Directo",c:C.muted}];
-      var _rHasActive=hsReunionOwnerFilter.length>0||hsReunionTypeFilter.length>0||hsReunionOutcomeFilter.length>0||hsReunionPrioridadFilter.length>0||hsReunionRegistroPlgFilter||hsReunionFuenteFilter.length>0;
-      function _rClearAll(){setHsReunionOwnerFilter([]);setHsReunionTypeFilter([]);setHsReunionOutcomeFilter([]);setHsReunionPrioridadFilter([]);setHsReunionRegistroPlgFilter(false);setHsReunionFuenteFilter([]);}
+      var _rHasActive=hsReunionOwnerFilter.length>0||hsReunionTypeFilter.length>0||hsReunionOutcomeFilter.length>0||hsReunionPrioridadFilter.length>0||hsReunionRegistroPlgFilter||hsReunionFuenteFilter.length>0||hsReunionTitleFilter.length>0;
+      function _rClearAll(){setHsReunionOwnerFilter([]);setHsReunionTypeFilter([]);setHsReunionOutcomeFilter([]);setHsReunionPrioridadFilter([]);setHsReunionRegistroPlgFilter(false);setHsReunionFuenteFilter([]);setHsReunionTitleFilter([]);}
       return (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
         <select value={hsReunionDatePreset} onChange={function(e){_rApplyPreset(e.target.value);}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
           <option value="hoy">Hoy</option>
@@ -2159,6 +2164,25 @@ export default function Dashboard(){
             </div>
           </div>}
         </div>
+        {/* Link chip */}
+        {_rTitleList.length>0 && <div style={{position:"relative"}}>
+          <button onClick={function(e){e.stopPropagation();var nv=hsReunionDropOpen==="link"?"":"link";setHsReunionDropOpen(nv);if(!nv)setHsReunionLinkSearch("");}} style={{background:hsReunionTitleFilter.length>0?C.orange:C.rowAlt,color:hsReunionTitleFilter.length>0?"#fff":C.sub,border:"1px solid "+(hsReunionTitleFilter.length>0?C.orange:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,minWidth:90,textAlign:"left"}}>{"Link: "+(hsReunionTitleFilter.length===0?"Todos":hsReunionTitleFilter.length===1?(hsReunionTitleFilter[0].length>25?hsReunionTitleFilter[0].slice(0,25)+"...":hsReunionTitleFilter[0]):hsReunionTitleFilter.length+" selec.")} &#9662;</button>
+          {hsReunionDropOpen==="link" && (function(){var _linkQ=hsReunionLinkSearch.toLowerCase();var _linkFiltered=_linkQ?_rTitleList.filter(function(t){return t.toLowerCase().indexOf(_linkQ)>=0;}):_rTitleList;return <div onClick={function(e){e.stopPropagation();}} style={{position:"absolute",top:"100%",left:0,marginTop:4,background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:6,zIndex:999,minWidth:260,maxHeight:340,display:"flex",flexDirection:"column",boxShadow:"0 4px 16px rgba(0,0,0,0.15)"}}>
+            <input type="text" value={hsReunionLinkSearch} onChange={function(e){setHsReunionLinkSearch(e.target.value);}} onClick={function(e){e.stopPropagation();}} placeholder="Buscar link..." autoFocus style={{padding:"6px 10px",border:"1px solid "+C.border,borderRadius:6,fontSize:12,fontFamily:font,color:C.text,background:C.rowBg,outline:"none",marginBottom:4,width:"100%",boxSizing:"border-box"}}/>
+            <div style={{overflowY:"auto",flex:1,maxHeight:260}}>
+            {_linkFiltered.map(function(tv){
+              var active=hsReunionTitleFilter.indexOf(tv)>=0;
+              return <label key={tv} title={tv} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",cursor:"pointer",borderRadius:6,fontSize:12,fontWeight:600,color:C.text,background:active?C.rowAlt:"transparent"}} onClick={function(e){e.stopPropagation();_rToggleTitle(tv);}}>
+                <span style={{width:16,height:16,borderRadius:4,border:"2px solid "+(active?C.orange:C.border),background:active?C.orange:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{active&&<span style={{color:"#fff",fontSize:10,fontWeight:900}}>&#10003;</span>}</span>
+                <span style={{maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tv}</span>
+              </label>;
+            })}
+            </div>
+            <div style={{borderTop:"1px solid "+C.border,marginTop:4,paddingTop:4}}>
+              <button onClick={function(){setHsReunionTitleFilter([]);setHsReunionLinkSearch("");setHsReunionDropOpen("");}} style={{background:"transparent",border:"none",color:C.muted,fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 8px",fontFamily:font,width:"100%",textAlign:"left"}}>Limpiar</button>
+            </div>
+          </div>;}())}
+        </div>}
         {/* Propietario chip */}
         <div style={{position:"relative"}}>
           <button onClick={function(e){e.stopPropagation();setHsReunionDropOpen(hsReunionDropOpen==="owner"?"":"owner");}} style={{background:hsReunionOwnerFilter.length>0?C.purple:C.rowAlt,color:hsReunionOwnerFilter.length>0?"#fff":C.sub,border:"1px solid "+(hsReunionOwnerFilter.length>0?C.purple:C.border),borderRadius:8,padding:"5px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,minWidth:90,textAlign:"left"}}>{"Propietario: "+(hsReunionOwnerFilter.length===0?"Todos":hsReunionOwnerFilter.length===1?(crmOwnerMap[hsReunionOwnerFilter[0]]||hsReunionOwnerFilter[0]):hsReunionOwnerFilter.length+" selec.")} &#9662;</button>
@@ -4869,6 +4893,16 @@ export default function Dashboard(){
           });
         }
 
+        // Filter by Link (meeting title)
+        if(hsReunionTitleFilter.length>0){
+          var titleSet={};
+          for(var tlfi=0;tlfi<hsReunionTitleFilter.length;tlfi++)titleSet[hsReunionTitleFilter[tlfi]]=true;
+          filteredMeetings=filteredMeetings.filter(function(m){
+            var mt=m.properties&&m.properties.hs_meeting_title;
+            return mt&&titleSet[mt];
+          });
+        }
+
         // Save pre-outcome filtered list for KPI cards (so cards always show full counts)
         var preOutcomeFiltered=filteredMeetings;
 
@@ -5060,6 +5094,7 @@ export default function Dashboard(){
                       <th style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>Tipo</th>
                       <th style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>Resultado</th>
                       <th style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>Fuente</th>
+                      <th style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>Origen</th>
                       <th style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:C.muted,fontSize:11,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border}}>Propietario</th>
                     </tr>
                   </thead>
@@ -5084,10 +5119,11 @@ export default function Dashboard(){
                         <td style={{padding:"8px 12px",color:C.sub,fontSize:12}}>{p.hs_activity_type||"\u2014"}</td>
                         <td style={{padding:"8px 12px"}}><span style={{background:oc+"18",color:oc,padding:"3px 10px",borderRadius:6,fontSize:11,fontWeight:700}}>{outcomeLabels[_tblOc]||_tblOc}</span></td>
                         {(function(){var canal=getCanalForMeeting(m);var canalClr=canal==="Outbound"?C.green:canal==="Inbound"?C.cyan:C.muted;return <td style={{padding:"8px 12px"}}><span style={{background:canalClr+"18",color:canalClr,padding:"3px 10px",borderRadius:6,fontSize:11,fontWeight:700}}>{canal}</span>{m._cross&&<span style={{background:C.purple+"18",color:C.purple,padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:700,marginLeft:4}}>CRUZADO</span>}</td>;})()}
+                        {(function(){var src=p.hs_meeting_source||"";var srcLabel=src==="MEETINGS_PUBLIC"?"HubSpot":src==="CRM_UI"?"Manual":src==="BIDIRECTIONAL_SYNC"?"Google":src==="BIDIRECTIONAL_API"?"Cal.com":"—";var srcClr=src==="MEETINGS_PUBLIC"?C.orange:src==="CRM_UI"?C.muted:src==="BIDIRECTIONAL_SYNC"?C.cyan:src==="BIDIRECTIONAL_API"?C.purple:C.muted;return <td style={{padding:"8px 12px"}}><span style={{background:srcClr+"18",color:srcClr,padding:"3px 10px",borderRadius:6,fontSize:11,fontWeight:700}}>{srcLabel}</span></td>;})()}
                         <td style={{padding:"8px 12px",color:C.sub,fontSize:12}}>{crmOwnerMap[p.hubspot_owner_id]||p.hubspot_owner_id||"\u2014"}</td>
                       </tr>;
                     })}
-                    {sorted.length===0 && <tr><td colSpan={9} style={{padding:20,textAlign:"center",color:C.muted,fontSize:13}}>No hay reuniones{(hsReunionOwnerFilter.length>0||hsReunionTypeFilter.length>0||hsReunionDateFrom||hsReunionDateTo)?" con los filtros seleccionados":""}</td></tr>}
+                    {sorted.length===0 && <tr><td colSpan={10} style={{padding:20,textAlign:"center",color:C.muted,fontSize:13}}>No hay reuniones{(hsReunionOwnerFilter.length>0||hsReunionTypeFilter.length>0||hsReunionDateFrom||hsReunionDateTo)?" con los filtros seleccionados":""}</td></tr>}
                   </tbody>
                 </table>
               </div>
