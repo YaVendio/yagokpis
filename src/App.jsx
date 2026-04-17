@@ -3029,7 +3029,11 @@ export default function Dashboard(){
               qPeriodPhones=getMeetingContactPhones(qFiltM,crmContacts);
             }
             var qContactIdIdx=qFiltM?getMeetingContactIds(qFiltM):{};
-            var qActualMeet=0;var qConfirmedArr=[];
+            var qActualMeet=0;var qConfirmedArr=[];var qConfMeetings=[];var qMeetToLead={};var _qcmS={};
+            var _qCPh={};
+            for(var _qcci=0;_qcci<crmContacts.length;_qcci++){var _qcc=crmContacts[_qcci];var _qcps=[];if(_qcc.properties){if(_qcc.properties.phone){var _qcp1=_qcc.properties.phone.replace(/\D/g,"");if(_qcp1)_qcps.push(_qcp1);}if(_qcc.properties.mobilephone){var _qcp2=_qcc.properties.mobilephone.replace(/\D/g,"");if(_qcp2)_qcps.push(_qcp2);}if(_qcc.properties.hs_whatsapp_phone_number){var _qcp3=_qcc.properties.hs_whatsapp_phone_number.replace(/\D/g,"");if(_qcp3)_qcps.push(_qcp3);}}if(_qcps.length>0)_qCPh[_qcc.id]=_qcps;}
+            var _qPhM={};var _qIdM={};
+            if(qFiltM){for(var _qmi=0;_qmi<qFiltM.length;_qmi++){var _qm=qFiltM[_qmi];var _qmA=_qm.associations&&_qm.associations.contacts&&_qm.associations.contacts.results;if(!_qmA)continue;for(var _qai2=0;_qai2<_qmA.length;_qai2++){var _qaId=_qmA[_qai2].id;_qIdM[_qaId]=_qm;var _qaPh=_qCPh[_qaId];if(_qaPh){for(var _qpi=0;_qpi<_qaPh.length;_qpi++){var _qop=_qaPh[_qpi];_qPhM[_qop]=_qm;if(_qop.length>11)_qPhM[_qop.slice(-11)]=_qm;if(_qop.length>10)_qPhM[_qop.slice(-10)]=_qm;if(_qop.length>9)_qPhM[_qop.slice(-9)]=_qm;if(_qop.length>8)_qPhM[_qop.slice(-8)]=_qm;}}}}}
             if(qPeriodPhones){
               var qPhIdx={};var qMpK=Object.keys(qPeriodPhones);
               for(var qpi=0;qpi<qMpK.length;qpi++){var qpd=qMpK[qpi];qPhIdx[qpd]=true;if(qpd.length>11)qPhIdx[qpd.slice(-11)]=true;if(qpd.length>10)qPhIdx[qpd.slice(-10)]=true;if(qpd.length>9)qPhIdx[qpd.slice(-9)]=true;if(qpd.length>8)qPhIdx[qpd.slice(-8)]=true;}
@@ -3046,7 +3050,13 @@ export default function Dashboard(){
                   else if(qOlP.length>8&&qPhIdx[qOlP.slice(-8)])qMatched=true;
                 }
                 if(!qMatched&&qOlLead.hid&&qContactIdIdx[qOlLead.hid])qMatched=true;
-                if(qMatched){qActualMeet++;qConfirmedArr.push(qOfertaLeads[qai]);}
+                if(qMatched){
+                  qActualMeet++;qConfirmedArr.push(qOfertaLeads[qai]);
+                  var _qclm=null;
+                  if(qOlP){_qclm=_qPhM[qOlP]||(qOlP.length>11&&_qPhM[qOlP.slice(-11)])||(qOlP.length>10&&_qPhM[qOlP.slice(-10)])||(qOlP.length>9&&_qPhM[qOlP.slice(-9)])||(qOlP.length>8&&_qPhM[qOlP.slice(-8)])||null;}
+                  if(!_qclm&&qOlLead.hid)_qclm=_qIdM[qOlLead.hid]||null;
+                  if(_qclm){if(!_qcmS[_qclm.id]){_qcmS[_qclm.id]=true;qConfMeetings.push(_qclm);}if(!qMeetToLead[_qclm.id])qMeetToLead[_qclm.id]=qOlLead;}
+                }
               }
             }
             // Qualified leads that received meeting link but did NOT book
@@ -3094,7 +3104,7 @@ export default function Dashboard(){
               <div style={{fontSize:11,color:C.pink,fontWeight:700,marginTop:6}}>{"\u{1F4C5} Ver contactos \u2192"}</div>
               {qPeriodPhones&&qNotBookedCount>0&&<div onClick={function(e){e.stopPropagation();var nbTagged=qNotBookedArr.map(function(l){return Object.assign({},l,{_confirmed:false});});setChartDayModalData({title:"\u274C Calificados que NO agendaron reuni\u00F3n ("+qNotBookedCount+")",leads:nbTagged,tagContext:"ofertadas"});}} style={{fontSize:11,color:"#e67e22",fontWeight:700,marginTop:4,borderTop:"1px solid "+C.border,paddingTop:4,cursor:"pointer"}}>{"\u{1F50D} Ver "+qNotBookedCount+" que no agendaron \u2192"}</div>}
             </Cd>
-            <Cd onClick={function(){if(qFiltM&&qFiltM.length>0){setRealizadasModalData({title:"\u2705 Reuniones Agendadas - Calificados ("+qFiltM.length+")",meetings:qFiltM,leads:qMeetings});}}} style={{position:"relative",cursor:qPeriodPhones&&qActualMeet>0?"pointer":"default",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
+            <Cd onClick={function(){if(qConfMeetings.length>0){setRealizadasModalData({title:"\u2705 Reuniones Agendadas - Calificados ("+qActualMeet+")",meetings:qConfMeetings,leads:qMeetings,meetToLead:qMeetToLead});}}} style={{position:"relative",cursor:qPeriodPhones&&qActualMeet>0?"pointer":"default",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u2705"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u2705"}</div>
