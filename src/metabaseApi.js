@@ -860,6 +860,154 @@ export async function fetchResponseStatsCached(since) {
   return stats;
 }
 
+// ========== LIFECYCLES SCREEN ==========
+
+// Enumerate distinct active lifecycles (flow_id with recent executions).
+// Joins lifecycle_flows for the human-readable internal_name.
+// Returns [{ flow_id, flow_name, is_active, total_sent, last_sent, n_templates, n_leads, n_steps }]
+export async function fetchActiveLifecycles(since) {
+  var query =
+    "SELECT\n" +
+    "    le.flow_id,\n" +
+    "    lf.internal_name AS flow_name,\n" +
+    "    lf.is_active,\n" +
+    "    COUNT(*) AS total_sent,\n" +
+    "    MAX(le.sent_at) AS last_sent,\n" +
+    "    COUNT(DISTINCT le.template_id) AS n_templates,\n" +
+    "    COUNT(DISTINCT le.phone_number) AS n_leads,\n" +
+    "    COUNT(DISTINCT le.step_id) AS n_steps\n" +
+    "FROM lifecycle_executions le\n" +
+    "LEFT JOIN lifecycle_flows lf ON lf.id = le.flow_id\n" +
+    "WHERE le.sent_at >= '" + since + "'\n" +
+    "  AND le.flow_id IS NOT NULL\n" +
+    "GROUP BY le.flow_id, lf.internal_name, lf.is_active\n" +
+    "ORDER BY total_sent DESC";
+
+  var result = await queryMetabase(query);
+  var colIdx = {};
+  for (var i = 0; i < result.columns.length; i++) colIdx[result.columns[i]] = i;
+  var out = [];
+  for (var j = 0; j < result.results.length; j++) {
+    var row = result.results[j];
+    out.push({
+      flow_id: row[colIdx["flow_id"]],
+      flow_name: row[colIdx["flow_name"]] || null,
+      is_active: !!row[colIdx["is_active"]],
+      total_sent: Number(row[colIdx["total_sent"]]) || 0,
+      last_sent: row[colIdx["last_sent"]] || null,
+      n_templates: Number(row[colIdx["n_templates"]]) || 0,
+      n_leads: Number(row[colIdx["n_leads"]]) || 0,
+      n_steps: Number(row[colIdx["n_steps"]]) || 0,
+    });
+  }
+  return out;
+}
+
+// Per-template stats for one lifecycle (flow_id): sent, replied, avg_reply_seconds,
+// opt_outs, sent_24h, last_sent, step_order. Join thread via execution_id.
+// Returns [{ template_id, template_name, step_order, sent, sent_24h, last_sent,
+//            replied, avg_reply_seconds, opt_outs }]
+export async function fetchLifecycleTemplateStats(flowId, since) {
+  var fid = parseInt(flowId);
+  if (isNaN(fid)) throw new Error("Invalid flow_id");
+  var query =
+    "WITH exec_threads AS (\n" +
+    "    SELECT\n" +
+    "        le.template_id,\n" +
+    "        le.template_name,\n" +
+    "        lfs.step_order,\n" +
+    "        le.sent_at,\n" +
+    "        t.\"values\"->'messages' AS msgs\n" +
+    "    FROM lifecycle_executions le\n" +
+    "    LEFT JOIN lifecycle_flow_steps lfs ON lfs.id = le.step_id\n" +
+    "    LEFT JOIN thread t ON (t.metadata->>'execution_id') = le.id::text\n" +
+    "    WHERE le.flow_id = " + fid + "\n" +
+    "      AND le.sent_at >= '" + since + "'\n" +
+    "),\n" +
+    "enriched AS (\n" +
+    "    SELECT\n" +
+    "        template_id, template_name, step_order, sent_at,\n" +
+    "        (SELECT (m.val #>> '{additional_kwargs,metadata,timestamp}')::numeric\n" +
+    "         FROM jsonb_array_elements(msgs) WITH ORDINALITY AS m(val, idx)\n" +
+    "         WHERE m.val->>'type' = 'human' ORDER BY m.idx LIMIT 1) AS first_human_ts,\n" +
+    "        (SELECT lower(COALESCE(m.val->>'content', ''))\n" +
+    "         FROM jsonb_array_elements(msgs) WITH ORDINALITY AS m(val, idx)\n" +
+    "         WHERE m.val->>'type' = 'human' ORDER BY m.idx LIMIT 1) AS first_human_content,\n" +
+    "        (SELECT count(*) FROM jsonb_array_elements(COALESCE(msgs, '[]'::jsonb)) m2 WHERE m2->>'type' = 'human') AS human_count\n" +
+    "    FROM exec_threads\n" +
+    ")\n" +
+    "SELECT\n" +
+    "    template_id, template_name,\n" +
+    "    MIN(step_order) AS step_order,\n" +
+    "    COUNT(*) AS sent,\n" +
+    "    COUNT(*) FILTER (WHERE sent_at > now() - interval '24 hours') AS sent_24h,\n" +
+    "    MAX(sent_at) AS last_sent,\n" +
+    "    COUNT(*) FILTER (WHERE human_count > 0) AS replied,\n" +
+    "    AVG(first_human_ts - EXTRACT(EPOCH FROM sent_at))\n" +
+    "      FILTER (WHERE first_human_ts IS NOT NULL\n" +
+    "              AND (first_human_ts - EXTRACT(EPOCH FROM sent_at)) BETWEEN 0 AND 604800) AS avg_reply_seconds,\n" +
+    "    COUNT(*) FILTER (WHERE first_human_content IS NOT NULL\n" +
+    "      AND first_human_content ~ '(^|[^[:alpha:]])(baja|stop|parar|pare|salir|cancelar|desinscribir|desuscribir|no molestar|n[\u00e3a]o quero|sair|descadastrar|remover)([^[:alpha:]]|$)') AS opt_outs\n" +
+    "FROM enriched\n" +
+    "WHERE template_id IS NOT NULL\n" +
+    "GROUP BY template_id, template_name\n" +
+    "ORDER BY sent DESC";
+
+  var result = await queryMetabase(query);
+  var colIdx = {};
+  for (var i = 0; i < result.columns.length; i++) colIdx[result.columns[i]] = i;
+  var out = [];
+  for (var j = 0; j < result.results.length; j++) {
+    var row = result.results[j];
+    out.push({
+      template_id: row[colIdx["template_id"]],
+      template_name: row[colIdx["template_name"]] || "",
+      step_order: row[colIdx["step_order"]] != null ? Number(row[colIdx["step_order"]]) : null,
+      sent: Number(row[colIdx["sent"]]) || 0,
+      sent_24h: Number(row[colIdx["sent_24h"]]) || 0,
+      last_sent: row[colIdx["last_sent"]] || null,
+      replied: Number(row[colIdx["replied"]]) || 0,
+      avg_reply_seconds: row[colIdx["avg_reply_seconds"]] != null ? Number(row[colIdx["avg_reply_seconds"]]) : null,
+      opt_outs: Number(row[colIdx["opt_outs"]]) || 0,
+    });
+  }
+  return out;
+}
+
+// Per-template hourly send buckets over the last N hours (default 24).
+// Returns { [template_id]: [{ bucket: iso, sent: n }, ...] }
+export async function fetchLifecycleTemplateTimeseries(flowId, hours) {
+  var fid = parseInt(flowId);
+  if (isNaN(fid)) throw new Error("Invalid flow_id");
+  var h = parseInt(hours) || 24;
+  var query =
+    "SELECT\n" +
+    "    template_id,\n" +
+    "    date_trunc('hour', sent_at) AS bucket,\n" +
+    "    COUNT(*) AS sent\n" +
+    "FROM lifecycle_executions\n" +
+    "WHERE flow_id = " + fid + "\n" +
+    "  AND sent_at > now() - interval '" + h + " hours'\n" +
+    "  AND template_id IS NOT NULL\n" +
+    "GROUP BY template_id, bucket\n" +
+    "ORDER BY template_id, bucket";
+
+  var result = await queryMetabase(query);
+  var colIdx = {};
+  for (var i = 0; i < result.columns.length; i++) colIdx[result.columns[i]] = i;
+  var byTpl = {};
+  for (var j = 0; j < result.results.length; j++) {
+    var row = result.results[j];
+    var tid = row[colIdx["template_id"]];
+    if (!byTpl[tid]) byTpl[tid] = [];
+    byTpl[tid].push({
+      bucket: row[colIdx["bucket"]],
+      sent: Number(row[colIdx["sent"]]) || 0,
+    });
+  }
+  return byTpl;
+}
+
 export async function fetchAdsThreads(since, until) {
   var query =
     "WITH first_human AS (\n" +

@@ -4,6 +4,8 @@ import { parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
 import { processOutboundThreads, processInboundThreads } from "./threadProcessor";
 import { fetchThreads, fetchInboundThreads, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats, fetchResponseStatsCached, fetchAdsThreads, fetchInboundCached, fetchLifecyclePhonesCached } from "./metabaseApi";
 import { loadOutboundThreads, loadInboundThreads, loadLifecyclePhones, loadActivatedPhones, loadThreadMessages, loadAllTemplateNames } from "./metabaseSync";
+import { loadLifecycles, loadLifecycleDetail } from "./lifecyclesSync";
+import { computeTemplateMeetingStats } from "./templateMeetingStats";
 import { supabase, retryQuery } from "./supabase";
 import InfoTip from "./components/InfoTip";
 import TIPS from "./tooltips";
@@ -521,7 +523,7 @@ export default function Dashboard(){
 
   var _brevoIcon=<svg width="18" height="18" viewBox="0 0 24 24" fill="#0B996E"><path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zM7.2 4.8h5.747c2.34 0 3.895 1.406 3.895 3.516 0 1.022-.348 1.862-1.09 2.588C17.189 11.812 18 13.22 18 14.785c0 2.86-2.64 5.016-6.164 5.016H7.199v-15zm2.085 1.952v5.537h.07c.233-.432.858-.796 2.249-1.226 2.039-.659 3.037-1.52 3.037-2.655 0-.998-.766-1.656-1.924-1.656H9.285zm4.87 5.266c-.766.385-1.67.748-2.76 1.11-1.229.387-2.11 1.386-2.11 2.407v2.315h2.365c2.387 0 4.149-1.34 4.149-3.155 0-1.067-.625-2.087-1.645-2.677z"/></svg>;
   var _hubspotIcon=<svg width="18" height="18" viewBox="0 0 24 24" fill="#FF7A59"><path d="M18.164 7.93V5.084a2.198 2.198 0 001.267-1.978v-.067A2.2 2.2 0 0017.238.845h-.067a2.2 2.2 0 00-2.193 2.193v.067a2.196 2.196 0 001.252 1.973l.013.006v2.852a6.22 6.22 0 00-2.969 1.31l.012-.01-7.828-6.095A2.497 2.497 0 104.3 4.656l-.012.006 7.697 5.991a6.176 6.176 0 00-1.038 3.446c0 1.343.425 2.588 1.147 3.607l-.013-.02-2.342 2.343a1.968 1.968 0 00-.58-.095h-.002a2.033 2.033 0 102.033 2.033 1.978 1.978 0 00-.1-.595l.005.014 2.317-2.317a6.247 6.247 0 104.782-11.134l-.036-.005zm-.964 9.378a3.206 3.206 0 113.215-3.207v.002a3.206 3.206 0 01-3.207 3.207z"/></svg>;
-  const SECTIONS={resumen:{label:"Geral",icon:"\uD83D\uDCCA",subTabs:[]},outbound:{label:"Outbound",icon:"\uD83C\uDFAF",subTabs:["resumen","engagement","templates"]},inbound:{label:"Inbound",icon:"\uD83D\uDCE5",subTabs:["resumen","engagement"]},ads:{label:"Ads",icon:"\uD83D\uDCE2",subTabs:[]},canales:{label:"Canales",icon:"\uD83D\uDCE1",subTabs:["grupos"]},hubspot:{label:"HubSpot",icon:_hubspotIcon,subTabs:["analytics","reuniones"]},brevo:{label:"Brevo",icon:_brevoIcon,subTabs:[]},growth:{label:"Marketing",icon:"\uD83D\uDCC8",subTabs:["resumen"]}};
+  const SECTIONS={resumen:{label:"Geral",icon:"\uD83D\uDCCA",subTabs:[]},outbound:{label:"Outbound",icon:"\uD83C\uDFAF",subTabs:["resumen","engagement","templates"]},inbound:{label:"Inbound",icon:"\uD83D\uDCE5",subTabs:["resumen","engagement"]},lifecycles:{label:"Lifecycles",icon:"\uD83D\uDD04",subTabs:[]},ads:{label:"Ads",icon:"\uD83D\uDCE2",subTabs:[]},hubspot:{label:"HubSpot",icon:_hubspotIcon,subTabs:["analytics","reuniones"]},brevo:{label:"Brevo",icon:_brevoIcon,subTabs:[]},growth:{label:"Marketing",icon:"\uD83D\uDCC8",subTabs:["resumen"]}};
   function parseRoute(){var parts=window.location.pathname.replace(/^\/+|\/+$/g,"").split("/");var sec=parts[0]||"resumen";var sub=parts[1]||"";if(!SECTIONS[sec])return{section:"resumen",subTab:""};var info=SECTIONS[sec];if(info.subTabs.length>0&&!sub)sub=info.subTabs[0];if(sub&&info.subTabs.indexOf(sub)<0)sub=info.subTabs[0]||"";return{section:sec,subTab:sub};}
   var _initRoute=parseRoute();
   const [section,setSection]=useState(_initRoute.section);
@@ -546,6 +548,13 @@ export default function Dashboard(){
   const [lifecyclePhonesData,setLifecyclePhonesData]=useState(null);
   const [activatedPhonesData,setActivatedPhonesData]=useState(null);
   const [activatedModalData,setActivatedModalData]=useState(null);
+  const [lifecyclesList,setLifecyclesList]=useState(null);
+  const [lifecyclesLoading,setLifecyclesLoading]=useState(false);
+  const [lifecyclesError,setLifecyclesError]=useState(null);
+  const [activeFlowId,setActiveFlowId]=useState(null);
+  const [lifecycleDetail,setLifecycleDetail]=useState(null);
+  const [lifecycleDetailLoading,setLifecycleDetailLoading]=useState(false);
+  const [lifecyclesRefreshedAt,setLifecyclesRefreshedAt]=useState(null);
   const outboundSinceRef=useRef(getFirstOfMonth());
   const inboundSinceRef=useRef(getFirstOfMonth());
   const crmLoadingRef=useRef(false);
@@ -721,6 +730,32 @@ export default function Dashboard(){
     }
     if(section==="ads"&&!adsInited&&!adsLoading&&!adsError){initAds();}
   },[section,subTab,growthInited]);
+
+  // Auto-init Lifecycles when section is selected
+  useEffect(function(){
+    if(section!=="lifecycles") return;
+    if(lifecyclesList!==null||lifecyclesLoading) return;
+    setLifecyclesLoading(true);setLifecyclesError(null);
+    loadLifecycles({onRefresh:function(fresh){setLifecyclesList(fresh);}})
+      .then(function(list){
+        setLifecyclesList(list);
+        setLifecyclesRefreshedAt(Date.now());
+        if(list&&list.length>0&&activeFlowId==null){setActiveFlowId(list[0].flow_id);}
+      })
+      .catch(function(e){console.error("[lifecycles] load failed:",e);setLifecyclesError(e.message||"Error cargando lifecycles");})
+      .finally(function(){setLifecyclesLoading(false);});
+  },[section]);
+
+  // Load detail when activeFlowId changes
+  useEffect(function(){
+    if(section!=="lifecycles") return;
+    if(activeFlowId==null) return;
+    setLifecycleDetailLoading(true);
+    loadLifecycleDetail(activeFlowId,{onRefresh:function(fresh){setLifecycleDetail(fresh);}})
+      .then(function(d){setLifecycleDetail(d);})
+      .catch(function(e){console.error("[lifecycles] detail failed:",e);})
+      .finally(function(){setLifecycleDetailLoading(false);});
+  },[activeFlowId,section]);
 
   // Auto-load inbound data when navigating to inbound, resumen, or hubspot analytics
   useEffect(function(){
@@ -2463,7 +2498,7 @@ export default function Dashboard(){
     {/* Sidebar */}
     <nav style={{width:56,minHeight:"100vh",background:C.card,borderRight:"1px solid "+C.border,display:"flex",flexDirection:"column",alignItems:"center",position:"sticky",top:0,height:"100vh",flexShrink:0,paddingTop:12,gap:4,zIndex:10}}>
       <div style={{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg, #2563EB, #7C3AED)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:900,fontSize:16,marginBottom:12,flexShrink:0}}>Y</div>
-      {["resumen","outbound","inbound","ads","canales","growth"].map(function(sk){var s=SECTIONS[sk];var a=section===sk;return <SideBtn key={sk} label={s.label} onClick={function(){navigateTo(sk);}} active={a}>{a&&<div style={{position:"absolute",left:0,top:8,bottom:8,width:3,borderRadius:"0 3px 3px 0",background:C.accent}}/>}{s.icon}</SideBtn>;})}
+      {["resumen","outbound","inbound","lifecycles","ads","growth"].map(function(sk){var s=SECTIONS[sk];var a=section===sk;return <SideBtn key={sk} label={s.label} onClick={function(){navigateTo(sk);}} active={a}>{a&&<div style={{position:"absolute",left:0,top:8,bottom:8,width:3,borderRadius:"0 3px 3px 0",background:C.accent}}/>}{s.icon}</SideBtn>;})}
       <div style={{width:28,height:1,background:C.border,margin:"6px 0",flexShrink:0}}/>
       {["hubspot","brevo"].map(function(sk){var s=SECTIONS[sk];var a=section===sk;return <SideBtn key={sk} label={s.label} onClick={function(){navigateTo(sk);}} active={a}>{a&&<div style={{position:"absolute",left:0,top:8,bottom:8,width:3,borderRadius:"0 3px 3px 0",background:C.accent}}/>}{s.icon}</SideBtn>;})}
       <div style={{flex:1}}/>
@@ -2475,7 +2510,7 @@ export default function Dashboard(){
     <div style={{flex:1,minWidth:0}}>
       {/* Header */}
       <div style={{background:"linear-gradient(135deg, "+C.gradFrom+" 0%, "+C.gradTo+" 100%)",borderBottom:"1px solid "+C.border,padding:"14px 28px",display:"flex",alignItems:"center",gap:14}}>
-        <h1 style={{margin:0,fontSize:20,fontWeight:900}}><span style={{background:"linear-gradient(135deg, #2563EB, #7C3AED)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>YAGO</span> <span style={{color:C.muted,fontWeight:400}}>KPI{"'"}s</span></h1>
+        <h1 style={{margin:0,fontSize:20,fontWeight:900}}><span style={{background:"linear-gradient(135deg, #2563EB, #7C3AED)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>GTM</span> <span style={{color:C.muted,fontWeight:400}}>KPI{"'"}s</span></h1>
         <div style={{width:1,height:24,background:C.border}}/>
         <span style={{fontSize:14,fontWeight:800,color:C.text}}>{_curSec.icon} {_curSec.label}</span>
         <span style={{fontSize:13,color:C.muted,background:C.rowAlt,padding:"4px 10px",borderRadius:6,fontWeight:600}}>{headerInfo.dateRange} {"\u00B7"} {tc} leads</span>
@@ -2491,7 +2526,7 @@ export default function Dashboard(){
 
       {/* Content */}
       <div style={{padding:"24px 28px",maxWidth:1300,margin:"0 auto"}}>
-      {dbLoading && <div style={{background:C.lBlue,border:"1px solid "+C.accent+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center"}}><div style={{width:20,height:20,border:"2px solid "+C.accent+"33",borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.accent}}>Cargando datos outbound...</strong></div></div>}
+      {dbLoading && !rawRows && <div style={{background:C.lBlue,border:"1px solid "+C.accent+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center"}}><div style={{width:20,height:20,border:"2px solid "+C.accent+"33",borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.accent}}>Cargando datos outbound...</strong></div></div>}
       {loadError && <div style={{background:C.lRed,border:"1px solid "+C.red+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center",justifyContent:"space-between"}}><div style={{display:"flex",gap:12,alignItems:"center"}}><div style={{width:24,height:24,borderRadius:"50%",background:C.red+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><span style={{fontSize:14,color:C.red,fontWeight:700}}>!</span></div><div><strong style={{color:C.red}}>Error al cargar datos</strong><div style={{fontSize:12,color:C.muted,marginTop:2}}>{loadError}</div></div></div><button onClick={function(){setLoadError(null);setDbLoading(true);loadOutboundThreads(outboundSinceRef.current).then(function(threads){setRawRows(threads);var filtered=filterThreadsByDate(threads,dateFrom,dateTo);var result=processOutboundThreads(filtered,templateConfig,regionFilter);applyResult(result);setDbLoading(false);}).catch(function(e){setLoadError(e.message||"Error");setDbLoading(false);});}} style={{background:C.red,color:"#fff",border:"none",borderRadius:8,padding:"6px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,flexShrink:0}}>Reintentar</button></div>}
       {crmLoading && <div style={{background:C.lGreen,border:"1px solid "+C.green+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center"}}><div style={{width:20,height:20,border:"2px solid "+C.green+"33",borderTopColor:C.green,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.green}}>Cargando datos CRM...</strong></div></div>}
       {inboundLoading && (function(){var steps=["Conversaciones","Lifecycle","Procesando","HubSpot match"];var pct=inboundLoadStep>0?Math.round((inboundLoadStep/steps.length)*100):0;var lbl=inboundLoadStep>0&&inboundLoadStep<=steps.length?steps[inboundLoadStep-1]:"...";return <div style={{background:C.lPurple,border:"1px solid "+C.purple+"25",borderRadius:12,padding:"12px 18px",marginBottom:20}}><div style={{display:"flex",gap:12,alignItems:"center",marginBottom:8}}><div style={{width:20,height:20,border:"2px solid "+C.purple+"33",borderTopColor:C.purple,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.purple}}>Cargando inbound</strong><span style={{color:C.muted,fontSize:12,marginLeft:8}}>{lbl} ({pct}%)</span></div></div><div style={{background:C.purple+"22",borderRadius:4,height:6,overflow:"hidden"}}><div style={{width:pct+"%",height:"100%",background:C.purple,borderRadius:4,transition:"width 0.4s ease"}}/></div></div>;})()}
@@ -3403,6 +3438,7 @@ export default function Dashboard(){
         var _prevInbTc=_prevIx?(_prevIx.uniqueLeadCount||0):null;
         var _prevInbSignup=_prevIx?(_prevIx.signupLinkCount||0):null;
         var _prevInbMeetings=compareEnabled&&prevInboundData?(prevInboundData.MEETINGS||[]):[];
+        var inbActualMeet=0;
         return (<>
         {ix ? (<>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))",gap:14,marginBottom:22}}>
@@ -3457,7 +3493,7 @@ export default function Dashboard(){
             })()}
             {(function(){
               // Reunión Agendada card for inbound
-              var inbPeriodPhones=null;var inbActualMeet=0;var inbConfirmedArr=[];
+              var inbPeriodPhones=null;inbActualMeet=0;var inbConfirmedArr=[];
               if(crmMeetings.length>0&&crmContacts.length>0){
                 var inbFromD=dateFrom?new Date(dateFrom+"T00:00:00"):null;
                 var inbToD=dateTo?new Date(dateTo+"T23:59:59"):null;
@@ -4106,6 +4142,103 @@ export default function Dashboard(){
           <div style={{fontSize:22,color:C.pink}}>{"\u2192"}</div>
         </div>
       </>);})()}
+
+      {section==="lifecycles" && (function(){
+        var _list=lifecyclesList||[];
+        var _loadingList=lifecyclesLoading&&!lifecyclesList;
+        var _detail=lifecycleDetail;
+        var _tpls=(_detail&&_detail.templates)||[];
+        var _refreshing=lifecyclesLoading||lifecycleDetailLoading;
+        function _fmtAgo(ts){if(!ts)return"\u2014";var diff=Math.floor((Date.now()-ts)/1000);if(diff<60)return"hace "+diff+"s";if(diff<3600)return"hace "+Math.floor(diff/60)+"m";if(diff<86400)return"hace "+Math.floor(diff/3600)+"h";return"hace "+Math.floor(diff/86400)+"d";}
+        function _fmtAvgReply(sec){if(sec==null||isNaN(sec))return"\u2014";if(sec<60)return Math.round(sec)+"s";if(sec<3600)return Math.round(sec/60)+"m";if(sec<86400)return(sec/3600).toFixed(1)+"h";return(sec/86400).toFixed(1)+"d";}
+        function _refresh(){
+          setLifecyclesLoading(true);
+          loadLifecycles({forceRefresh:true})
+            .then(function(list){setLifecyclesList(list);setLifecyclesRefreshedAt(Date.now());})
+            .catch(function(e){setLifecyclesError(e.message||String(e));})
+            .finally(function(){setLifecyclesLoading(false);});
+          if(activeFlowId!=null){
+            setLifecycleDetailLoading(true);
+            loadLifecycleDetail(activeFlowId,{forceRefresh:true})
+              .then(function(d){setLifecycleDetail(d);})
+              .catch(function(e){console.error("[lifecycles] refresh detail:",e);})
+              .finally(function(){setLifecycleDetailLoading(false);});
+          }
+        }
+        var _kpiSent=0,_kpiReplied=0,_kpiOptOut=0,_kpi24h=0;var _wSum=0,_wCount=0;
+        for(var _i=0;_i<_tpls.length;_i++){var _t=_tpls[_i];_kpiSent+=_t.sent||0;_kpiReplied+=_t.replied||0;_kpiOptOut+=_t.opt_outs||0;_kpi24h+=_t.sent_24h||0;if(_t.avg_reply_seconds!=null&&(_t.replied||0)>0){_wSum+=_t.avg_reply_seconds*_t.replied;_wCount+=_t.replied;}}
+        var _kpiAvgReply=_wCount>0?(_wSum/_wCount):null;
+        var _kpiRate=_kpiSent>0?((_kpiReplied/_kpiSent)*100).toFixed(1)+"%":"\u2014";
+        var _tplNamesInFlow={};for(var _tn=0;_tn<_tpls.length;_tn++)if(_tpls[_tn].template_name)_tplNamesInFlow[_tpls[_tn].template_name]=true;
+        var _meetStats=computeTemplateMeetingStats(meetings,{realMode:mode===1,crmMeetingPhones:crmMeetingPhones,templateFilter:function(n){return !!_tplNamesInFlow[n];}});
+        var _kpiBooked=0,_kpiLink=0;for(var _mk in _meetStats){_kpiBooked+=_meetStats[_mk].booked;_kpiLink+=_meetStats[_mk].link;}
+        var _byStep={};for(var _k=0;_k<_tpls.length;_k++){var _so=_tpls[_k].step_order==null?999:_tpls[_k].step_order;if(!_byStep[_so])_byStep[_so]=[];_byStep[_so].push(_tpls[_k]);}
+        var _stepKeys=Object.keys(_byStep).map(Number).sort(function(a,b){return a-b;});
+        return (<>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18,flexWrap:"wrap",gap:12}}>
+            <div>
+              <div style={{fontSize:24,fontWeight:800,color:C.text,display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:26}}>{"\u{1F504}"}</span>Lifecycles</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:4}}>Performance de templates por lifecycle activo (últimos 30 días).</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:12,color:C.muted,fontFamily:mono}}>Actualizado {_fmtAgo(lifecyclesRefreshedAt)}</span>
+              <button onClick={_refresh} disabled={_refreshing} style={{background:_refreshing?C.border:C.accent,color:"#FFF",border:"none",borderRadius:8,padding:"8px 14px",fontSize:13,fontWeight:700,cursor:_refreshing?"not-allowed":"pointer",fontFamily:font,display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:14}}>{_refreshing?"\u23F3":"\u{1F504}"}</span>{_refreshing?"Actualizando...":"Actualizar ahora"}</button>
+            </div>
+          </div>
+          {lifecyclesError && (<Cd style={{background:C.lRed,border:"1px solid "+C.red+"44",marginBottom:14,color:C.red,fontSize:13}}>Error: {lifecyclesError}</Cd>)}
+          {_loadingList ? (<Cd style={{textAlign:"center",padding:40,color:C.muted,fontSize:14}}>Cargando lifecycles...</Cd>) : _list.length===0 ? (<Cd style={{textAlign:"center",padding:40,color:C.muted,fontSize:14}}>Ningún lifecycle activo en los últimos 30 días.</Cd>) : (<>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:20,paddingBottom:14,borderBottom:"1px solid "+C.border+"66"}}>
+              {_list.map(function(lc){var active=lc.flow_id===activeFlowId;var _nm=lc.flow_name||("Flow #"+lc.flow_id);return (<button key={lc.flow_id} onClick={function(){setActiveFlowId(lc.flow_id);}} title={"Flow ID #"+lc.flow_id+(lc.is_active===false?" (inactivo)":"")} style={{background:active?C.accent:C.card,color:active?"#FFF":C.text,border:"1px solid "+(active?C.accent:C.border),borderRadius:10,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font,display:"flex",alignItems:"center",gap:8,transition:"all 0.15s ease",opacity:lc.is_active===false?0.65:1}}><span style={{fontFamily:mono,fontSize:12}}>{_nm}</span><span style={{fontSize:11,fontWeight:600,opacity:0.85,fontFamily:mono}}>{_cS(lc.total_sent)} env · {lc.n_templates} tpl</span></button>);})}
+            </div>
+            {activeFlowId!=null && (lifecycleDetailLoading&&!lifecycleDetail ? (<Cd style={{textAlign:"center",padding:40,color:C.muted,fontSize:14}}>Cargando detalle del lifecycle...</Cd>) : (<>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:12,marginBottom:20}}>
+                <Cd style={{padding:"14px 16px"}}><div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Enviados</div><div style={{fontSize:22,fontWeight:800,color:C.text,fontFamily:mono,marginTop:4}}>{_cS(_kpiSent)}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>+{_kpi24h} en 24h</div></Cd>
+                <Cd style={{padding:"14px 16px"}}><div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Tasa respuesta</div><div style={{fontSize:22,fontWeight:800,color:C.green,fontFamily:mono,marginTop:4}}>{_kpiRate}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{_kpiReplied} respuestas</div></Cd>
+                <Cd style={{padding:"14px 16px"}}><div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Tiempo resp.</div><div style={{fontSize:22,fontWeight:800,color:C.accent,fontFamily:mono,marginTop:4}}>{_fmtAvgReply(_kpiAvgReply)}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>promedio</div></Cd>
+                <Cd style={{padding:"14px 16px"}}><div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Reuniones</div><div style={{fontSize:22,fontWeight:800,color:C.pink,fontFamily:mono,marginTop:4}}>{_kpiBooked}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{_kpiLink} enlaces</div></Cd>
+                <Cd style={{padding:"14px 16px"}}><div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Opt-outs</div><div style={{fontSize:22,fontWeight:800,color:C.red,fontFamily:mono,marginTop:4}}>{_kpiOptOut}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>bajas detectadas</div></Cd>
+                <Cd style={{padding:"14px 16px"}}><div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Templates</div><div style={{fontSize:22,fontWeight:800,color:C.purple,fontFamily:mono,marginTop:4}}>{_tpls.length}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>activos</div></Cd>
+              </div>
+              {_stepKeys.length===0 ? (<Cd style={{textAlign:"center",padding:32,color:C.muted,fontSize:14}}>Sin envíos en este lifecycle.</Cd>) : _stepKeys.map(function(so){
+                var group=_byStep[so].slice().sort(function(a,b){return (b.sent||0)-(a.sent||0);});
+                var sLabel=so===999?"Sin step":"Step "+so;
+                return (<div key={so} style={{marginBottom:22}}>
+                  <div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:1.5,marginBottom:10}}>{sLabel}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:12}}>
+                    {group.map(function(t){
+                      var rateStr=_cR(t.replied||0,t.sent||0);
+                      var rate=parseFloat(rateStr)||0;
+                      var rateCol=rate>=20?C.green:rate>=12?C.yellow:C.red;
+                      var ms=_meetStats[t.template_name]||{link:0,booked:0};
+                      var ts=t.timeseries||[];
+                      var maxTs=0;for(var _ti=0;_ti<ts.length;_ti++)if(ts[_ti].sent>maxTs)maxTs=ts[_ti].sent;
+                      return (<Cd key={t.template_id} style={{padding:14}}>
+                        <div style={{fontSize:13,fontWeight:700,fontFamily:mono,color:C.text,marginBottom:8,wordBreak:"break-word"}}>{t.template_name||("Template #"+t.template_id)}</div>
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:10}}>
+                          <div><div style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>Enviados</div><div style={{fontSize:17,fontWeight:800,color:C.text,fontFamily:mono}}>{_cS(t.sent||0)}</div></div>
+                          <div><div style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>Tasa</div><div style={{fontSize:17,fontWeight:800,color:rateCol,fontFamily:mono}}>{rateStr}</div></div>
+                          <div><div style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>T. resp.</div><div style={{fontSize:17,fontWeight:800,color:C.accent,fontFamily:mono}}>{_fmtAvgReply(t.avg_reply_seconds)}</div></div>
+                        </div>
+                        {ts.length>0 && (<div style={{marginBottom:10}}>
+                          <div style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase",marginBottom:4}}>Envíos 24h ({t.sent_24h||0})</div>
+                          <div style={{display:"flex",alignItems:"flex-end",gap:2,height:28}}>
+                            {ts.map(function(b,bi){var pct=maxTs>0?((b.sent/maxTs)*100):0;return <div key={bi} title={b.bucket+": "+b.sent+" env\u00edos"} style={{flex:1,minWidth:2,height:Math.max(2,pct)+"%",background:C.accent,opacity:0.45+0.55*(pct/100),borderRadius:"2px 2px 0 0"}}/>;})}
+                          </div>
+                        </div>)}
+                        <div style={{display:"flex",gap:10,paddingTop:8,borderTop:"1px solid "+C.border+"44",fontSize:11,flexWrap:"wrap"}}>
+                          <span style={{color:C.muted}}>{"\u{1F4C5}"} <span style={{fontWeight:700,color:C.pink,fontFamily:mono}}>{ms.booked}</span> agend.</span>
+                          <span style={{color:C.muted}}>{"\u{1F517}"} <span style={{fontWeight:700,color:C.pink,fontFamily:mono}}>{ms.link}</span> links</span>
+                          <span style={{color:C.muted,marginLeft:"auto"}}>{"\u{1F6AB}"} <span style={{fontWeight:700,color:C.red,fontFamily:mono}}>{t.opt_outs||0}</span> opt-outs</span>
+                        </div>
+                      </Cd>);
+                    })}
+                  </div>
+                </div>);
+              })}
+            </>))}
+          </>)}
+        </>);
+      })()}
 
       {section==="canales"&&subTab==="grupos" && (<>
         {/* Selector + Filtros */}
