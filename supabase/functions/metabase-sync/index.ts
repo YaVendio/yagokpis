@@ -5,12 +5,12 @@ const METABASE_URL = () => Deno.env.get("METABASE_URL")!;
 const METABASE_API_KEY = () => Deno.env.get("METABASE_API_KEY")!;
 const METABASE_DB_ID = () => Number(Deno.env.get("METABASE_DB_ID"));
 
-async function queryMetabase(sql: string): Promise<{ columns: string[]; results: any[][] }> {
+async function queryMetabase(sql: string, dbIdOverride?: number): Promise<{ columns: string[]; results: any[][] }> {
   const resp = await fetch(METABASE_URL() + "/api/dataset", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": METABASE_API_KEY() },
     body: JSON.stringify({
-      database: METABASE_DB_ID(),
+      database: dbIdOverride ?? METABASE_DB_ID(),
       type: "native",
       native: { query: sql },
       constraints: { "max-results": 2000000, "max-results-bare-rows": 2000000 },
@@ -400,6 +400,37 @@ GROUP BY le.phone_number`;
   return rows.length;
 }
 
+async function syncActivatedPhones(sb: any): Promise<number> {
+  const sql = `SELECT phone, business_activated_at
+    FROM companies
+    WHERE business_activated_at IS NOT NULL
+      AND phone IS NOT NULL`;
+
+  const result = await queryMetabase(sql, 2);
+
+  const rows: any[] = [];
+  const seen = new Set<string>();
+  for (const row of result.results) {
+    if (!row[0] || !row[1]) continue;
+    const clean = String(row[0]).replace(/\D/g, "");
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    rows.push({
+      phone_number: clean,
+      activated_at: row[1],
+      synced_at: new Date().toISOString(),
+    });
+  }
+
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    const { error } = await sb.from("mb_activated_phones").upsert(chunk, { onConflict: "phone_number" });
+    if (error) throw new Error(`Upsert mb_activated_phones chunk ${i}: ${error.message}`);
+  }
+
+  return rows.length;
+}
+
 async function syncResponseStats(sb: any, since: string): Promise<void> {
   const sql = `WITH outbound AS (
     SELECT COUNT(DISTINCT phone_number) AS outbound_total
@@ -588,6 +619,9 @@ Deno.serve(async (req: Request) => {
       } else if (step === "lifecycle") {
         const count = await syncLifecyclePhones(sb);
         result = { lifecycle_phones: count };
+      } else if (step === "activations") {
+        const count = await syncActivatedPhones(sb);
+        result = { activated_phones: count };
       } else if (step === "stats") {
         await syncResponseStats(sb, sinceStr);
         result = { response_stats: "ok" };
@@ -633,6 +667,10 @@ Deno.serve(async (req: Request) => {
     const lcCount = await syncLifecyclePhones(sb);
     details.lifecycle_phones = lcCount;
     console.log(`[metabase-sync] Lifecycle phones: ${lcCount}`);
+
+    const actCount = await syncActivatedPhones(sb);
+    details.activated_phones = actCount;
+    console.log(`[metabase-sync] Activated phones: ${actCount}`);
 
     await syncResponseStats(sb, sinceStr);
     details.response_stats = "ok";

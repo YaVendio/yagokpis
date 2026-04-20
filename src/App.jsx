@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
 import { processOutboundThreads, processInboundThreads } from "./threadProcessor";
 import { fetchThreads, fetchInboundThreads, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats, fetchResponseStatsCached, fetchAdsThreads, fetchInboundCached, fetchLifecyclePhonesCached } from "./metabaseApi";
-import { loadOutboundThreads, loadInboundThreads, loadLifecyclePhones, loadThreadMessages, loadAllTemplateNames } from "./metabaseSync";
+import { loadOutboundThreads, loadInboundThreads, loadLifecyclePhones, loadActivatedPhones, loadThreadMessages, loadAllTemplateNames } from "./metabaseSync";
 import { supabase, retryQuery } from "./supabase";
 import InfoTip from "./components/InfoTip";
 import TIPS from "./tooltips";
@@ -198,6 +198,35 @@ function findContact(phoneMap,leadPhone){
   return null;
 }
 
+function buildActivatedIdx(activatedMap){
+  if(!activatedMap)return null;
+  var idx={};var keys=Object.keys(activatedMap);
+  for(var i=0;i<keys.length;i++){
+    var k=keys[i];var v=activatedMap[k];
+    idx[k]=v;
+    if(k.length>11)idx[k.slice(-11)]=v;
+    if(k.length>10)idx[k.slice(-10)]=v;
+    if(k.length>9)idx[k.slice(-9)]=v;
+    if(k.length>8)idx[k.slice(-8)]=v;
+  }
+  return idx;
+}
+function matchActivated(idx,leadPhone){
+  if(!idx||!leadPhone)return null;
+  var p=leadPhone.replace(/\D/g,"");
+  if(!p)return null;
+  return idx[p]||(p.length>11&&idx[p.slice(-11)])||(p.length>10&&idx[p.slice(-10)])||(p.length>9&&idx[p.slice(-9)])||(p.length>8&&idx[p.slice(-8)])||null;
+}
+function computeActivated(activatedIdx,leads){
+  if(!activatedIdx||!leads)return [];
+  var out=[];
+  for(var i=0;i<leads.length;i++){
+    var actAt=matchActivated(activatedIdx,leads[i].p||"");
+    if(actAt)out.push(Object.assign({},leads[i],{_activatedAt:actAt}));
+  }
+  return out;
+}
+
 function timeAgo(ts){
   if(!ts)return "";
   var d=typeof ts==="number"?new Date(ts):new Date(ts);
@@ -262,6 +291,7 @@ function MeetModal({leads,onClose,mode,title,crmContacts,tagContext}){
                   {l._cross && <Bd color={C.purple}>CRUZADO</Bd>}
                   {l.ml && tagContext!=="ofertadas" && tagContext!=="agendadas" && <Bd color={C.pink}>{"\uD83D\uDCC5"} Ofertada</Bd>}
                   {l._confirmed!==undefined && tagContext!=="agendadas" && <Bd color={l._confirmed?C.green:C.red}>{l._confirmed?"\u2705 Agendada":"\u274C No agend\u00F3"}</Bd>}
+                  {l._activatedAt && <Bd color={C.purple}>{"\uD83D\uDE80 Activ\u00F3 "+(function(){var d=new Date(l._activatedAt);return isNaN(d.getTime())?"":String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear();})()}</Bd>}
                   {l.au && <Bd color={C.red}>AUTO</Bd>}
                 </div>
                 <div style={{fontSize:12,color:C.muted,marginTop:3,display:"flex",flexWrap:"wrap",gap:4}}>
@@ -514,6 +544,8 @@ export default function Dashboard(){
   const [inboundLoadStep,setInboundLoadStep]=useState(0);
   const [inboundRawRows,setInboundRawRows]=useState(null);
   const [lifecyclePhonesData,setLifecyclePhonesData]=useState(null);
+  const [activatedPhonesData,setActivatedPhonesData]=useState(null);
+  const [activatedModalData,setActivatedModalData]=useState(null);
   const outboundSinceRef=useRef(getFirstOfMonth());
   const inboundSinceRef=useRef(getFirstOfMonth());
   const crmLoadingRef=useRef(false);
@@ -1848,13 +1880,15 @@ export default function Dashboard(){
       setInboundLoading(true);setInboundLoadStep(1);
       Promise.all([
         loadInboundThreads(getFirstOfMonth()),
-        loadLifecyclePhones().catch(function(e){console.warn("Lifecycle phones query failed:",e);return {};})
+        loadLifecyclePhones().catch(function(e){console.warn("Lifecycle phones query failed:",e);return {};}),
+        loadActivatedPhones().catch(function(e){console.warn("Activated phones query failed:",e);return {};})
       ]).then(function(all){
         setInboundLoadStep(3);
-        var inbThreads=all[0];var sp=all[1];
+        var inbThreads=all[0];var sp=all[1];var ap=all[2];
         setInboundRawRows(inbThreads);
         inboundSinceRef.current=getFirstOfMonth();
         setLifecyclePhonesData(sp);
+        setActivatedPhonesData(ap);
         // HubSpot phone match — targeted search for inbound phones only
         if(!inboundHsPhones){
           setInboundLoadStep(4);
@@ -2271,6 +2305,7 @@ export default function Dashboard(){
     {showM && <MeetModal leads={meetings.filter(function(l){return l.ml;}).map(function(l){var ph=(l.p||"").replace(/\D/g,"");var mc=crmMeetingPhones&&ph&&(crmMeetingPhones[ph]||crmMeetingPhones[ph.slice(-11)]||crmMeetingPhones[ph.slice(-10)]);return Object.assign({},l,{_confirmed:!!mc});})} mode={mode} onClose={function(){setShowM(false);}} title={"\u{1F4C5} Leads con Oferta de Reuni\u00F3n"} crmContacts={crmContacts} tagContext="ofertadas"/>}
     {showA && <MeetModal leads={meetings} mode={mode} onClose={function(){setShowA(false);}} title={"\u{1F4AC} Todas las Conversaciones"} crmContacts={crmContacts}/>}
     {showConfirmed && <MeetModal leads={confirmedLeads} mode={mode} onClose={function(){setShowConfirmed(false);}} title={"\u2705 Reuniones Agendadas"} crmContacts={crmContacts} tagContext="agendadas"/>}
+    {activatedModalData && <MeetModal leads={activatedModalData.leads} mode={mode} onClose={function(){setActivatedModalData(null);}} title={activatedModalData.title} crmContacts={crmContacts} tagContext="activados"/>}
     {qualModalLeads && <MeetModal leads={qualModalLeads} mode={mode} onClose={function(){setQualModalLeads(null);}} title={qualModalTitle} crmContacts={crmContacts}/>}
     {chartDayModalData && <MeetModal leads={chartDayModalData.leads} mode={mode} onClose={function(){setChartDayModalData(null);}} title={chartDayModalData.title} crmContacts={crmContacts} tagContext={chartDayModalData.tagContext}/>}
     {realizadasModalData && (function(){
@@ -2707,13 +2742,20 @@ export default function Dashboard(){
         var totalConfirmPct=totalOferta>0?((confirmedCount/totalOferta)*100).toFixed(1):"0";
         var realizPct=confirmedCount>0?((realizadas/confirmedCount)*100).toFixed(1):"0";
 
+        // Activación (Resumen main — allLeads)
+        var _resActIdx=buildActivatedIdx(activatedPhonesData);
+        var resActArr=computeActivated(_resActIdx,allLeads);
+        var resActCount=resActArr.length;
+        var resActVsTotal=totalLeads>0?((resActCount/totalLeads)*100).toFixed(1):"0";
+        var resActVsMeet=confirmedCount>0?((resActCount/confirmedCount)*100).toFixed(1):"0";
+
         return (<>
           {/* CRM loading indicator */}
           {crmLoading && <div style={{background:C.lBlue,border:"1px solid "+C.accent+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center"}}><div style={{width:20,height:20,border:"2px solid "+C.accent+"33",borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.accent}}>Cargando datos de HubSpot...</strong></div></div>}
 
           {/* KPI Cards */}
           <Sec>INDICADORES PRINCIPALES</Sec>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:14,marginBottom:24}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5, minmax(0, 1fr))",gap:14,marginBottom:24}}>
             {/* Card: Conversaciones */}
             <Cd style={{border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)",position:"relative",overflow:"hidden"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4AC}"}</div>
@@ -2758,6 +2800,23 @@ export default function Dashboard(){
               <div style={{display:"flex",alignItems:"baseline",gap:4,marginTop:4}}><span style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.cyan,lineHeight:1}}>{iagoRealizadas}</span></div>
               <div style={{fontSize:13,color:C.muted,marginTop:6}}>Out: <strong>{iagoRealOut}</strong> / In: <strong>{iagoRealInb}</strong></div>
               <div style={{fontSize:12,color:C.muted,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6,cursor:realizadas>0?"pointer":"default"}} onClick={realizadas>0?function(e){e.stopPropagation();var completed=filtCrmMeetings.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED";});setRealizadasModalData({title:"Todas Reuniones Realizadas ("+completed.length+")",meetings:completed,leads:allLeads,meetToLead:yagoMeetToLead});}:undefined}>Total realizadas: <strong style={{color:C.cyan,fontFamily:mono}}>{realizadas}</strong>{compareEnabled&&prevResumenData&&<DeltaBadge current={realizadas} previous={prevResumenData.realizadas}/>}</div>
+            </Cd>
+            {/* Card: Cuenta Activada */}
+            <Cd onClick={resActCount>0?function(){setActivatedModalData({title:"\u{1F680} Cuentas Activadas ("+resActCount+")",leads:resActArr});}:undefined} style={{border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)",position:"relative",overflow:"hidden",cursor:activatedPhonesData&&resActCount>0?"pointer":"default"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F680}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F680}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Cuenta Activada</span>
+                <InfoTip dark={_isDark} data={TIPS.activacion}/>
+              </div>
+              {activatedPhonesData?(<>
+                <div style={{display:"flex",alignItems:"baseline",gap:4,marginTop:4}}><span style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.purple,lineHeight:1}}>{resActCount}</span></div>
+                <div style={{fontSize:13,color:C.muted,marginTop:6}}>{resActVsMeet}% de reuniones {"\u00B7"} {resActVsTotal}% del total</div>
+                <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{resActCount>0?"\u{1F680} Ver cuentas activas \u2192":"Sin activaciones"}</div>
+              </>):(<>
+                <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:4}}>Cargando activaciones...</div>
+              </>)}
             </Cd>
           </div>
 
@@ -2948,8 +3007,14 @@ export default function Dashboard(){
               var _pp=computePrevPeriod(dateFrom,dateTo);
               if(_pp){var _ppFD=new Date(_pp.from+"T00:00:00");var _ppTD=new Date(_pp.to+"T23:59:59");var _ppFM=crmMeetings.filter(function(m){var st=m.properties&&m.properties.hs_createdate||m.createdAt;if(!st)return false;var md=new Date(st);return md>=_ppFD&&md<=_ppTD;});if(_ppFM.length>0){var _ppPh=getMeetingContactPhones(_ppFM,crmContacts);var _ppCI=getMeetingContactIds(_ppFM);var _ppPI={};var _ppK=Object.keys(_ppPh);for(var _ppi=0;_ppi<_ppK.length;_ppi++){var _ppd=_ppK[_ppi];_ppPI[_ppd]=true;if(_ppd.length>11)_ppPI[_ppd.slice(-11)]=true;if(_ppd.length>10)_ppPI[_ppd.slice(-10)]=true;}_pActualMeet=0;var _ppOL=_prevMeetings.filter(function(l){return l.ml&&(mode===0||!l.au);});for(var _ppj=0;_ppj<_ppOL.length;_ppj++){var _ppp=(_ppOL[_ppj].p||"").replace(/\D/g,"");var _ppm=false;if(_ppp){if(_ppPI[_ppp])_ppm=true;else if(_ppp.length>11&&_ppPI[_ppp.slice(-11)])_ppm=true;else if(_ppp.length>10&&_ppPI[_ppp.slice(-10)])_ppm=true;}if(!_ppm&&_ppOL[_ppj].hid&&_ppCI[_ppOL[_ppj].hid])_ppm=true;if(_ppm)_pActualMeet++;}}}
             }
+            // Activación (Outbound)
+            var _outActIdx=buildActivatedIdx(activatedPhonesData);
+            var outActArr=computeActivated(_outActIdx,meetings.filter(function(m){return (mode===0||!m.au);}));
+            var outActCount=outActArr.length;
+            var outActVsTotal=contactados>0?((outActCount/contactados)*100).toFixed(1):"0";
+            var outActVsMeet=actualMeetCount>0?((outActCount/actualMeetCount)*100).toFixed(1):"0";
             return (
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:12,marginBottom:22}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5, minmax(0, 1fr))",gap:12,marginBottom:22}}>
             {/* Card 1: Contactados */}
             <Cd onClick={function(){setShowA(true);}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4E9}"}</div>
@@ -3003,6 +3068,23 @@ export default function Dashboard(){
               </>):(<>
                 <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
                 <div style={{fontSize:12,color:C.muted,marginTop:4}}>{crmLoading?"Cargando HubSpot...":"Esperando datos HubSpot"}</div>
+              </>)}
+            </Cd>
+            {/* Card 5: Cuenta Activada */}
+            <Cd onClick={function(){if(outActCount>0){setActivatedModalData({title:"\u{1F680} Cuentas Activadas - Outbound ("+outActCount+")",leads:outActArr});}}} style={{position:"relative",cursor:activatedPhonesData&&outActCount>0?"pointer":"default",border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F680}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F680}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Cuenta Activada</span>
+                <InfoTip dark={_isDark} data={TIPS.activacion}/>
+              </div>
+              {activatedPhonesData?(<>
+                <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.purple}}>{outActCount}</div>
+                <div style={{fontSize:13,color:C.muted,marginTop:4}}>{outActVsMeet}% de reuniones {"\u00B7"} {outActVsTotal}% del total</div>
+                <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{outActCount>0?"\u{1F680} Ver cuentas activas \u2192":"Sin activaciones"}</div>
+              </>):(<>
+                <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:4}}>Cargando activaciones...</div>
               </>)}
             </Cd>
           </div>
@@ -3066,9 +3148,15 @@ export default function Dashboard(){
             var qActualVsOferta=qOferta>0?((qActualMeet/qOferta)*100).toFixed(1):"0";
             var qActualVsTotal=qContactados>0?((qActualMeet/qContactados)*100).toFixed(1):"0";
             var qLpd=lpd>0&&tc>0?Math.round(qContactados/(tc/lpd)):0;
+            // Activación (Calificados)
+            var _qActIdx=buildActivatedIdx(activatedPhonesData);
+            var qActArr=computeActivated(_qActIdx,qMeetings);
+            var qActCount=qActArr.length;
+            var qActVsTotal=qContactados>0?((qActCount/qContactados)*100).toFixed(1):"0";
+            var qActVsMeet=qActualMeet>0?((qActCount/qActualMeet)*100).toFixed(1):"0";
             return (<>
           <div style={{fontSize:13,color:C.green,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700,marginBottom:10,marginTop:6,paddingBottom:8,borderBottom:"2px solid "+C.green+"33",display:"flex",alignItems:"center",gap:8}}>{"\u2B50"} CALIFICADOS: ALTA + MEDIA</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:12,marginBottom:22}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5, minmax(0, 1fr))",gap:12,marginBottom:22}}>
             <Cd onClick={function(){setQualModalLeads(qMeetings);setQualModalTitle("\u{1F4AC} Conversaciones Calificados (Alta + Media)");}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4E9}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
@@ -3118,6 +3206,22 @@ export default function Dashboard(){
               </>):(<>
                 <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
                 <div style={{fontSize:12,color:C.muted,marginTop:4}}>{crmLoading?"Cargando HubSpot...":"Esperando datos HubSpot"}</div>
+              </>)}
+            </Cd>
+            <Cd onClick={function(){if(qActCount>0){setActivatedModalData({title:"\u{1F680} Cuentas Activadas - Calificados ("+qActCount+")",leads:qActArr});}}} style={{position:"relative",cursor:activatedPhonesData&&qActCount>0?"pointer":"default",border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F680}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F680}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Cuenta Activada</span>
+                <InfoTip dark={_isDark} data={TIPS.activacion}/>
+              </div>
+              {activatedPhonesData?(<>
+                <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.purple}}>{qActCount}</div>
+                <div style={{fontSize:13,color:C.muted,marginTop:4}}>{qActVsMeet}% de reuniones {"\u00B7"} {qActVsTotal}% del total</div>
+                <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{qActCount>0?"\u{1F680} Ver cuentas activas \u2192":"Sin activaciones"}</div>
+              </>):(<>
+                <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:4}}>Cargando activaciones...</div>
               </>)}
             </Cd>
           </div>
@@ -3405,6 +3509,31 @@ export default function Dashboard(){
                   </>):(<>
                     <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
                     <div style={{fontSize:12,color:C.muted,marginTop:4}}>{crmLoading?"Cargando HubSpot...":"Esperando datos HubSpot"}</div>
+                  </>)}
+                </Cd>
+              );
+            })()}
+            {(function(){
+              var _inbActIdx=buildActivatedIdx(activatedPhonesData);
+              var inbActArr=computeActivated(_inbActIdx,meetings);
+              var inbActCount=inbActArr.length;
+              var inbActVsTotal=inbTc>0?((inbActCount/inbTc)*100).toFixed(1):"0";
+              var inbActVsMeet=inbActualMeet>0?((inbActCount/inbActualMeet)*100).toFixed(1):"0";
+              return (
+                <Cd onClick={function(){if(inbActCount>0){setActivatedModalData({title:"\u{1F680} Cuentas Activadas - Inbound ("+inbActCount+")",leads:inbActArr});}}} style={{position:"relative",cursor:activatedPhonesData&&inbActCount>0?"pointer":"default",border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)"}}>
+                  <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F680}"}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                    <div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F680}"}</div>
+                    <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Cuenta Activada</span>
+                    <InfoTip dark={_isDark} data={TIPS.activacion}/>
+                  </div>
+                  {activatedPhonesData?(<>
+                    <div style={{fontSize:36,fontWeight:900,fontFamily:mono,lineHeight:1,color:C.purple}}>{inbActCount}</div>
+                    <div style={{fontSize:13,color:C.muted,marginTop:4}}>{inbActVsMeet}% de reuniones {"\u00B7"} {inbActVsTotal}% del total</div>
+                    <div style={{fontSize:11,color:C.purple,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{inbActCount>0?"\u{1F680} Ver cuentas activas \u2192":"Sin activaciones"}</div>
+                  </>):(<>
+                    <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                    <div style={{fontSize:12,color:C.muted,marginTop:4}}>Cargando activaciones...</div>
                   </>)}
                 </Cd>
               );

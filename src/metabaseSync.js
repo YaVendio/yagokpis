@@ -163,6 +163,32 @@ export async function loadAllTemplateNames(queryMetabaseFn) {
   return sbData || [];
 }
 
+// Load activated phones from mb_activated_phones -> { phone: activated_at }
+export async function loadActivatedPhones() {
+  var cacheKey = "activated_phones";
+  function doFetch() {
+    return fetchAllRows(function() {
+      return supabase
+        .from("mb_activated_phones")
+        .select("phone_number, activated_at");
+    }).then(function(r) {
+      if (r.error) throw new Error(r.error.message);
+      var phones = {};
+      for (var i = 0; i < r.rows.length; i++) {
+        var row = r.rows[i];
+        if (row.phone_number) {
+          var clean = String(row.phone_number).replace(/\D/g, "");
+          if (clean) phones[clean] = row.activated_at;
+        }
+      }
+      return phones;
+    });
+  }
+  var result = await staleWhileRevalidate(cacheKey, "activations", doFetch);
+  console.log("[metabaseSync] Loaded " + Object.keys(result.data).length + " activated phones" + (result.isStale ? " (from cache)" : ""));
+  return result.data;
+}
+
 // Load lifecycle phones from mb_lifecycle_phones -> { phone: { firstAt, firstStep1At } }
 export async function loadLifecyclePhones() {
   var cacheKey = "lifecycle_phones";

@@ -6,7 +6,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { password, sql } = await req.json();
+    const { password, sql, db_id } = await req.json();
 
     if (!password || password !== Deno.env.get("DASHBOARD_PASSWORD")) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -40,7 +40,7 @@ Deno.serve(async (req: Request) => {
         "x-api-key": apiKey,
       },
       body: JSON.stringify({
-        database: dbId,
+        database: db_id || dbId,
         type: "native",
         native: { query: sql },
         constraints: { "max-results": 2000000, "max-results-bare-rows": 2000000 },

@@ -195,6 +195,13 @@ var TIPS = {
     why: "Confirma cu\u00E1ntos leads realmente agendaron tras recibir el link.",
     source: "Metabase + HubSpot meetings (v\u00EDa Supabase)"
   },
+  activacion: {
+    title: "Cuenta Activada",
+    description: "Leads del per\u00EDodo que activaron su cuenta Yago (business_activated_at seteado), sin importar cu\u00E1ndo la activaci\u00F3n ocurri\u00F3.",
+    formula: "leads con phone \u2229 companies.business_activated_at IS NOT NULL",
+    why: "M\u00E9trica final de conversi\u00F3n real: cu\u00E1ntos leads efectivamente completaron el onboarding y activaron su negocio.",
+    source: "Metabase \u2014 tabla companies (v\u00EDa Supabase mb_activated_phones)"
+  },
   realizadas: {
     title: "Realizadas por Yago",
     description: "Reuniones con resultado COMPLETED en HubSpot matcheadas con leads de Yago.",
