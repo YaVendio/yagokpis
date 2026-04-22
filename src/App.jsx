@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Legend, PieChart, Pie, Sankey, LabelList } from "recharts";
 import { parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
 import { processOutboundThreads, processInboundThreads } from "./threadProcessor";
-import { fetchThreads, fetchInboundThreads, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats, fetchResponseStatsCached, fetchAdsThreads, fetchInboundCached, fetchLifecyclePhonesCached } from "./metabaseApi";
+import { fetchThreads, fetchInboundThreads, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats, fetchResponseStatsCached, fetchAdsThreads, fetchInboundCached, fetchLifecyclePhonesCached, fetchTemplateStructure } from "./metabaseApi";
 import { loadOutboundThreads, loadInboundThreads, loadLifecyclePhones, loadActivatedPhones, loadThreadMessages, loadAllTemplateNames } from "./metabaseSync";
 import { loadLifecycles, loadLifecycleDetail } from "./lifecyclesSync";
 import { computeTemplateMeetingStats } from "./templateMeetingStats";
@@ -477,7 +477,57 @@ function TplModal({tpl,leads,mode,onClose}){
   </div>);
 }
 
+function TemplatePreview({structure,headerMediaUrl,headerMediaType}){
+  if(!structure||!structure.components)return null;
+  var comps=structure.components||[];
+  var header=null,body=null,footer=null,buttons=null;
+  for(var i=0;i<comps.length;i++){
+    var c=comps[i];
+    if(c.type==="HEADER")header=c;
+    else if(c.type==="BODY")body=c;
+    else if(c.type==="FOOTER")footer=c;
+    else if(c.type==="BUTTONS")buttons=c;
+  }
+  return (<div style={{background:"#E7F8EC",border:"1px solid #C8E6C9",borderRadius:14,padding:0,overflow:"hidden",maxWidth:420,margin:"0 auto",boxShadow:"0 2px 6px #00000010"}}>
+    {header && (header.format==="TEXT" ? (
+      <div style={{padding:"12px 14px 4px",fontWeight:800,fontSize:15,color:"#111",fontFamily:"'Source Sans 3',sans-serif"}}>{header.text}</div>
+    ) : header.format==="IMAGE" ? (
+      <div style={{background:"#D0D8DA",height:160,display:"flex",alignItems:"center",justifyContent:"center",color:"#667781",fontSize:36}}>
+        {headerMediaUrl ? <img src={headerMediaUrl} alt="header" style={{width:"100%",height:"100%",objectFit:"cover"}}/> : "\u{1F5BC}"}
+      </div>
+    ) : header.format==="VIDEO" ? (
+      <div style={{background:"#D0D8DA",height:160,display:"flex",alignItems:"center",justifyContent:"center",color:"#667781",fontSize:36}}>{"\u{1F3A5}"}</div>
+    ) : header.format==="DOCUMENT" ? (
+      <div style={{background:"#F1F3F4",padding:"14px",display:"flex",alignItems:"center",gap:10,color:"#444",fontSize:13}}>{"\u{1F4C4}"} Documento</div>
+    ) : null)}
+    {body && (
+      <div style={{padding:"12px 14px",fontSize:14,color:"#111",lineHeight:1.5,whiteSpace:"pre-wrap",fontFamily:"'Source Sans 3',sans-serif"}}>{body.text||""}</div>
+    )}
+    {footer && (
+      <div style={{padding:"2px 14px 10px",fontSize:11,color:"#667781",fontFamily:"'Source Sans 3',sans-serif"}}>{footer.text||""}</div>
+    )}
+    {buttons && buttons.buttons && buttons.buttons.length>0 && (
+      <div style={{display:"flex",flexDirection:"column",borderTop:"1px solid #D1E7D3"}}>
+        {buttons.buttons.map(function(b,bi){return (<div key={bi} style={{padding:"10px 14px",textAlign:"center",fontSize:14,fontWeight:600,color:"#008069",borderTop:bi>0?"1px solid #D1E7D3":"none",fontFamily:"'Source Sans 3',sans-serif"}}>{b.type==="URL"?"🔗 ":b.type==="PHONE_NUMBER"?"📞 ":""}{b.text||b.url||""}</div>);})}
+      </div>
+    )}
+  </div>);
+}
+
 function LifecycleTplModal({data,onClose}){
+  const [tplStructure,setTplStructure]=useState(null);
+  const [structureLoading,setStructureLoading]=useState(true);
+  const [structureError,setStructureError]=useState(null);
+  useEffect(function(){
+    if(!data||!data.tpl||data.tpl.template_id==null){setStructureLoading(false);return;}
+    var cancelled=false;
+    setStructureLoading(true);setStructureError(null);
+    fetchTemplateStructure(data.tpl.template_id)
+      .then(function(s){if(cancelled)return;setTplStructure(s);})
+      .catch(function(e){if(cancelled)return;setStructureError(e.message||"Error cargando template");})
+      .finally(function(){if(cancelled)return;setStructureLoading(false);});
+    return function(){cancelled=true;};
+  },[data&&data.tpl&&data.tpl.template_id]);
   if(!data||!data.tpl)return null;
   var t=data.tpl;var flow=data.flow;var ms=data.meetStats||{link:0,booked:0};
   function _fmtAvgReply(sec){if(sec==null||isNaN(sec))return"\u2014";if(sec<60)return Math.round(sec)+"s";if(sec<3600)return Math.round(sec/60)+"m";if(sec<86400)return(sec/3600).toFixed(1)+"h";return(sec/86400).toFixed(1)+"d";}
@@ -499,6 +549,16 @@ function LifecycleTplModal({data,onClose}){
           <div style={{fontSize:12,color:C.muted,marginTop:4,fontFamily:mono}}>ID: {t.template_id} · Último envío: {_fmtDate(t.last_sent)}</div>
         </div>
         <button onClick={onClose} style={{background:C.rowAlt,border:"none",borderRadius:8,width:36,height:36,fontSize:18,cursor:"pointer",color:C.muted,fontWeight:700,flexShrink:0}}>{"\u2715"}</button>
+      </div>
+      <div style={{marginBottom:18}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:1}}>Mensaje</div>
+          {tplStructure && tplStructure.language && <span style={{fontSize:10,fontWeight:700,color:C.muted,background:C.rowAlt,padding:"2px 8px",borderRadius:6,textTransform:"uppercase"}}>{tplStructure.language}</span>}
+          {tplStructure && tplStructure.status && <span style={{fontSize:10,fontWeight:700,color:tplStructure.status==="APPROVED"?C.green:C.yellow,background:tplStructure.status==="APPROVED"?C.lGreen:C.lYellow,padding:"2px 8px",borderRadius:6}}>{tplStructure.status}</span>}
+        </div>
+        {structureLoading ? (<div style={{textAlign:"center",padding:20,color:C.muted,fontSize:13}}>Cargando mensaje...</div>) : structureError ? (<div style={{color:C.red,fontSize:13,background:C.lRed,padding:12,borderRadius:10}}>Error: {structureError}</div>) : tplStructure && tplStructure.structure ? (
+          <TemplatePreview structure={tplStructure.structure} headerMediaUrl={tplStructure.header_media_url} headerMediaType={tplStructure.header_media_type}/>
+        ) : (<div style={{textAlign:"center",padding:20,color:C.muted,fontSize:13,background:C.rowBg,borderRadius:10}}>Mensaje no encontrado para este template.</div>)}
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:18}}>
         <div style={{background:C.accent+"08",border:"1px solid "+C.accent+"22",borderRadius:12,padding:"14px 16px"}}><div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>Enviados</div><div style={{fontSize:26,fontWeight:800,color:C.accent,fontFamily:mono,marginTop:4}}>{t.sent||0}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>+{t.sent_24h||0} en 24h</div></div>
@@ -1161,7 +1221,7 @@ export default function Dashboard(){
       <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet"/>
       <form onSubmit={handleLogin} style={{background:C.card,border:"1px solid "+C.border,borderRadius:14,padding:40,boxShadow:"0 1px 3px #0000000a",width:360,textAlign:"center"}}>
         <div style={{fontSize:32,marginBottom:8}}>{"🔒"}</div>
-        <div style={{fontSize:20,fontWeight:800,color:C.text,marginBottom:4}}>Yago SDR Analytics</div>
+        <div style={{fontSize:20,fontWeight:800,color:C.text,marginBottom:4}}>Go-to-market KPI{"'"}s</div>
         <div style={{fontSize:13,color:C.muted,marginBottom:24}}>Ingrese la contraseña para acceder</div>
         <input type="password" value={loginPassword} onChange={function(ev){setLoginPassword(ev.target.value);}} placeholder="Contraseña" style={{width:"100%",padding:"12px 14px",fontSize:15,border:"1px solid "+C.border,borderRadius:8,fontFamily:font,marginBottom:12,boxSizing:"border-box",outline:"none",background:C.inputBg,color:C.text}}/>
         {loginError && <div style={{color:C.red,fontSize:13,fontWeight:600,marginBottom:12}}>{loginError}</div>}

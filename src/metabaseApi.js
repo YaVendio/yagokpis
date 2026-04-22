@@ -978,6 +978,36 @@ export async function fetchLifecycleTemplateStats(flowId, since, until) {
   return out;
 }
 
+// Fetch the template structure (WhatsApp Business API shape) for a template_id.
+// Returns { id, name, language, status, structure (jsonb), header_media_url, header_media_type } | null
+export async function fetchTemplateStructure(templateId) {
+  var tid = parseInt(templateId);
+  if (isNaN(tid)) return null;
+  var query =
+    "SELECT id, name, language, status, structure::text AS structure,\n" +
+    "       header_media_url, header_media_type\n" +
+    "FROM yago_templates\n" +
+    "WHERE id = " + tid + "\n" +
+    "LIMIT 1";
+  var result = await queryMetabase(query);
+  if (!result || !result.results || result.results.length === 0) return null;
+  var colIdx = {};
+  for (var i = 0; i < result.columns.length; i++) colIdx[result.columns[i]] = i;
+  var row = result.results[0];
+  var structure = null;
+  try { structure = row[colIdx["structure"]] ? JSON.parse(row[colIdx["structure"]]) : null; }
+  catch (e) { console.warn("[fetchTemplateStructure] parse failed:", e); }
+  return {
+    id: row[colIdx["id"]],
+    name: row[colIdx["name"]] || "",
+    language: row[colIdx["language"]] || "",
+    status: row[colIdx["status"]] || "",
+    structure: structure,
+    header_media_url: row[colIdx["header_media_url"]] || null,
+    header_media_type: row[colIdx["header_media_type"]] || null,
+  };
+}
+
 // Per-template hourly send buckets over the last N hours (default 24).
 // Returns { [template_id]: [{ bucket: iso, sent: n }, ...] }
 export async function fetchLifecycleTemplateTimeseries(flowId, hours) {
