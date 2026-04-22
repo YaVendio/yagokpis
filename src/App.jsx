@@ -477,6 +477,52 @@ function TplModal({tpl,leads,mode,onClose}){
   </div>);
 }
 
+function LifecycleTplModal({data,onClose}){
+  if(!data||!data.tpl)return null;
+  var t=data.tpl;var flow=data.flow;var ms=data.meetStats||{link:0,booked:0};
+  function _fmtAvgReply(sec){if(sec==null||isNaN(sec))return"\u2014";if(sec<60)return Math.round(sec)+"s";if(sec<3600)return Math.round(sec/60)+"m";if(sec<86400)return(sec/3600).toFixed(1)+"h";return(sec/86400).toFixed(1)+"d";}
+  function _fmtDate(iso){if(!iso)return"\u2014";try{var d=new Date(iso);return d.toLocaleDateString("es",{day:"2-digit",month:"short",year:"numeric"})+" "+d.toLocaleTimeString("es",{hour:"2-digit",minute:"2-digit"});}catch(e){return String(iso);}}
+  var rate=t.sent>0?((t.replied/t.sent)*100):0;
+  var rateStr=t.sent>0?rate.toFixed(1)+"%":"0%";
+  var rateCol=rate>=20?C.green:rate>=12?C.yellow:C.red;
+  var ts=t.timeseries||[];
+  var maxTs=0;for(var _ti=0;_ti<ts.length;_ti++)if(ts[_ti].sent>maxTs)maxTs=ts[_ti].sent;
+  return (<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#00000044",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:20,animation:"fadeInModal 0.2s ease-out"}} onClick={onClose}>
+    <div style={{background:C.card,borderRadius:20,padding:28,maxWidth:880,width:"100%",maxHeight:"92vh",overflowY:"auto",boxShadow:"0 25px 60px #00000025",animation:"scaleInModal 0.2s ease-out"}} onClick={function(e){e.stopPropagation();}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18,gap:12}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,marginBottom:6}}>
+            {flow?(flow.flow_name||("Flow #"+flow.flow_id)):("Flow #"+(t.flow_id||"?"))}
+            {t.step_order!=null && <span style={{marginLeft:10,color:C.accent}}>Step {t.step_order}</span>}
+          </div>
+          <div style={{fontSize:20,fontWeight:900,fontFamily:mono,color:C.text,wordBreak:"break-word"}}>{t.template_name||("Template #"+t.template_id)}</div>
+          <div style={{fontSize:12,color:C.muted,marginTop:4,fontFamily:mono}}>ID: {t.template_id} · Último envío: {_fmtDate(t.last_sent)}</div>
+        </div>
+        <button onClick={onClose} style={{background:C.rowAlt,border:"none",borderRadius:8,width:36,height:36,fontSize:18,cursor:"pointer",color:C.muted,fontWeight:700,flexShrink:0}}>{"\u2715"}</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:18}}>
+        <div style={{background:C.accent+"08",border:"1px solid "+C.accent+"22",borderRadius:12,padding:"14px 16px"}}><div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>Enviados</div><div style={{fontSize:26,fontWeight:800,color:C.accent,fontFamily:mono,marginTop:4}}>{t.sent||0}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>+{t.sent_24h||0} en 24h</div></div>
+        <div style={{background:C.lGreen,border:"1px solid "+C.green+"22",borderRadius:12,padding:"14px 16px"}}><div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>Respuestas</div><div style={{fontSize:26,fontWeight:800,color:rateCol,fontFamily:mono,marginTop:4}}>{t.replied||0}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{rateStr} tasa</div></div>
+        <div style={{background:C.lBlue,border:"1px solid "+C.accent+"22",borderRadius:12,padding:"14px 16px"}}><div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>T. respuesta</div><div style={{fontSize:26,fontWeight:800,color:C.accent,fontFamily:mono,marginTop:4}}>{_fmtAvgReply(t.avg_reply_seconds)}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>promedio</div></div>
+        <div style={{background:C.lRed,border:"1px solid "+C.red+"22",borderRadius:12,padding:"14px 16px"}}><div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>Opt-outs</div><div style={{fontSize:26,fontWeight:800,color:C.red,fontFamily:mono,marginTop:4}}>{t.opt_outs||0}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>bajas detectadas</div></div>
+      </div>
+      {(ms.link>0||ms.booked>0) && <div style={{background:C.lPurple,border:"1px solid "+C.pink+"22",borderRadius:12,padding:"14px 16px",marginBottom:18,display:"flex",gap:24,alignItems:"center"}}>
+        <div><div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>{"\u{1F4C5} "}Reuniones agendadas</div><div style={{fontSize:26,fontWeight:800,color:C.pink,fontFamily:mono,marginTop:4}}>{ms.booked}</div></div>
+        <div><div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>{"\u{1F517} "}Links de agenda enviados</div><div style={{fontSize:26,fontWeight:800,color:C.pink,fontFamily:mono,marginTop:4}}>{ms.link}</div></div>
+      </div>}
+      <div style={{marginBottom:18}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Envíos últimas 24 horas ({t.sent_24h||0})</div>
+        {ts.length===0 ? (<div style={{fontSize:13,color:C.muted,padding:16,background:C.rowBg,borderRadius:10,textAlign:"center"}}>Sin envíos en las últimas 24 horas.</div>) : (<div style={{display:"flex",alignItems:"flex-end",gap:3,height:80,padding:"8px 12px",background:C.rowBg,borderRadius:10}}>
+          {ts.map(function(b,bi){var pct=maxTs>0?((b.sent/maxTs)*100):0;var d=new Date(b.bucket);var hr=String(d.getHours()).padStart(2,"0");return <div key={bi} title={hr+":00 — "+b.sent+" envíos"} style={{flex:1,minWidth:4,height:Math.max(4,pct)+"%",background:C.accent,opacity:0.5+0.5*(pct/100),borderRadius:"3px 3px 0 0",position:"relative"}}>{b.sent>0&&pct>20&&<span style={{position:"absolute",top:-16,left:"50%",transform:"translateX(-50%)",fontSize:10,color:C.muted,fontFamily:mono}}>{b.sent}</span>}</div>;})}
+        </div>)}
+      </div>
+      <div style={{fontSize:12,color:C.muted,padding:"12px 16px",background:C.rowBg,borderRadius:10,lineHeight:1.6}}>
+        {"\u2139\uFE0F "} <strong>Tasa de respuesta</strong>: % de envíos con al menos una respuesta humana. <strong>T. respuesta</strong>: media del tiempo entre envío y primer humano (janela 0–7d). <strong>Opt-outs</strong>: respostas com termos como "baja", "stop", "cancelar" etc.
+      </div>
+    </div>
+  </div>);
+}
+
 function Delta({current,previous,suffix,invert}){
   if(previous===null||previous===undefined) return null;
   var cv=typeof current==="string"?parseFloat(current):current;
@@ -555,6 +601,10 @@ export default function Dashboard(){
   const [lifecycleDetail,setLifecycleDetail]=useState(null);
   const [lifecycleDetailLoading,setLifecycleDetailLoading]=useState(false);
   const [lifecyclesRefreshedAt,setLifecyclesRefreshedAt]=useState(null);
+  const [lifecyclesPreset,setLifecyclesPreset]=useState("ultimos_30");
+  const [lifecyclesFrom,setLifecyclesFrom]=useState(function(){var d=new Date();d.setDate(d.getDate()-29);return d.toISOString().slice(0,10);});
+  const [lifecyclesTo,setLifecyclesTo]=useState(function(){return new Date().toISOString().slice(0,10);});
+  const [selLifecycleTpl,setSelLifecycleTpl]=useState(null);
   const outboundSinceRef=useRef(getFirstOfMonth());
   const inboundSinceRef=useRef(getFirstOfMonth());
   const crmLoadingRef=useRef(false);
@@ -731,31 +781,33 @@ export default function Dashboard(){
     if(section==="ads"&&!adsInited&&!adsLoading&&!adsError){initAds();}
   },[section,subTab,growthInited]);
 
-  // Auto-init Lifecycles when section is selected
+  // Auto-load Lifecycles list when section is active or dates change
   useEffect(function(){
     if(section!=="lifecycles") return;
-    if(lifecyclesList!==null||lifecyclesLoading) return;
     setLifecyclesLoading(true);setLifecyclesError(null);
-    loadLifecycles({onRefresh:function(fresh){setLifecyclesList(fresh);}})
+    loadLifecycles({since:lifecyclesFrom,until:lifecyclesTo,onRefresh:function(fresh){setLifecyclesList(fresh);setLifecyclesRefreshedAt(Date.now());}})
       .then(function(list){
         setLifecyclesList(list);
         setLifecyclesRefreshedAt(Date.now());
-        if(list&&list.length>0&&activeFlowId==null){setActiveFlowId(list[0].flow_id);}
+        if(list&&list.length>0){
+          var stillPresent=activeFlowId!=null&&list.some(function(l){return l.flow_id===activeFlowId;});
+          if(!stillPresent){setActiveFlowId(list[0].flow_id);}
+        }else{setActiveFlowId(null);setLifecycleDetail(null);}
       })
       .catch(function(e){console.error("[lifecycles] load failed:",e);setLifecyclesError(e.message||"Error cargando lifecycles");})
       .finally(function(){setLifecyclesLoading(false);});
-  },[section]);
+  },[section,lifecyclesFrom,lifecyclesTo]);
 
-  // Load detail when activeFlowId changes
+  // Load detail when activeFlowId or dates change
   useEffect(function(){
     if(section!=="lifecycles") return;
     if(activeFlowId==null) return;
     setLifecycleDetailLoading(true);
-    loadLifecycleDetail(activeFlowId,{onRefresh:function(fresh){setLifecycleDetail(fresh);}})
+    loadLifecycleDetail(activeFlowId,{since:lifecyclesFrom,until:lifecyclesTo,onRefresh:function(fresh){setLifecycleDetail(fresh);}})
       .then(function(d){setLifecycleDetail(d);})
       .catch(function(e){console.error("[lifecycles] detail failed:",e);})
       .finally(function(){setLifecycleDetailLoading(false);});
-  },[activeFlowId,section]);
+  },[activeFlowId,section,lifecyclesFrom,lifecyclesTo]);
 
   // Auto-load inbound data when navigating to inbound, resumen, or hubspot analytics
   useEffect(function(){
@@ -2106,6 +2158,26 @@ export default function Dashboard(){
       <span style={{fontSize:12,color:C.accent,fontWeight:700,background:C.lBlue,padding:"4px 10px",borderRadius:6}}>{tc} leads</span>
       {_compareToggle}
     </div>);
+    if(section==="lifecycles") return (<div style={{background:C.card,borderBottom:"1px solid "+C.border,padding:"10px 28px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+      <select value={lifecyclesPreset} onChange={function(e){var k=e.target.value;setLifecyclesPreset(k);if(k!=="custom"){var r=resolvePreset(k);setLifecyclesFrom(r.from);setLifecyclesTo(r.to);}}} style={{fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:8,border:"1px solid "+C.border,background:C.rowBg,color:C.text,fontFamily:font,cursor:"pointer"}}>
+        <option value="hoy">Hoy</option>
+        <option value="ayer">Ayer</option>
+        <option value="esta_semana">Esta Semana</option>
+        <option value="este_mes">Este Mes</option>
+        <option value="ultimos_7">{"\u00DA"}lt. 7d</option>
+        <option value="ultimos_30">{"\u00DA"}lt. 30d</option>
+        <option value="mes_pasado">Mes Pasado</option>
+        <option value="custom">Personalizado</option>
+      </select>
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <span style={{fontSize:12,color:C.muted}}>De</span>
+        <input type="date" value={lifecyclesFrom} onChange={function(e){setLifecyclesPreset("custom");setLifecyclesFrom(e.target.value);}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <span style={{fontSize:12,color:C.muted}}>Hasta</span>
+        <input type="date" value={lifecyclesTo} onChange={function(e){setLifecyclesPreset("custom");setLifecyclesTo(e.target.value);}} style={{padding:"5px 10px",border:"1px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:mono,color:C.text,background:C.rowBg,outline:"none"}}/>
+      </div>
+    </div>);
     if(section==="hubspot"&&subTab==="analytics"){
       var _dealOwnerIds={};
       for(var _doi=0;_doi<crmDeals.length;_doi++){var _doId=crmDeals[_doi].properties&&crmDeals[_doi].properties.hubspot_owner_id;if(_doId)_dealOwnerIds[_doId]=true;}
@@ -2427,6 +2499,7 @@ export default function Dashboard(){
       </div>;
     })()}
     {selTpl && <TplModal tpl={selTpl} leads={meetings} mode={mode} onClose={function(){setSelTpl(null);}}/>}
+    {selLifecycleTpl && <LifecycleTplModal data={selLifecycleTpl} onClose={function(){setSelLifecycleTpl(null);}}/>}
     {topicModal && (function(){
       var tkw=TOPIC_KEYWORDS[topicModal];
       var useHumanOnly=section==="inbound";
@@ -4153,13 +4226,13 @@ export default function Dashboard(){
         function _fmtAvgReply(sec){if(sec==null||isNaN(sec))return"\u2014";if(sec<60)return Math.round(sec)+"s";if(sec<3600)return Math.round(sec/60)+"m";if(sec<86400)return(sec/3600).toFixed(1)+"h";return(sec/86400).toFixed(1)+"d";}
         function _refresh(){
           setLifecyclesLoading(true);
-          loadLifecycles({forceRefresh:true})
+          loadLifecycles({since:lifecyclesFrom,until:lifecyclesTo,forceRefresh:true})
             .then(function(list){setLifecyclesList(list);setLifecyclesRefreshedAt(Date.now());})
             .catch(function(e){setLifecyclesError(e.message||String(e));})
             .finally(function(){setLifecyclesLoading(false);});
           if(activeFlowId!=null){
             setLifecycleDetailLoading(true);
-            loadLifecycleDetail(activeFlowId,{forceRefresh:true})
+            loadLifecycleDetail(activeFlowId,{since:lifecyclesFrom,until:lifecyclesTo,forceRefresh:true})
               .then(function(d){setLifecycleDetail(d);})
               .catch(function(e){console.error("[lifecycles] refresh detail:",e);})
               .finally(function(){setLifecycleDetailLoading(false);});
@@ -4178,7 +4251,7 @@ export default function Dashboard(){
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18,flexWrap:"wrap",gap:12}}>
             <div>
               <div style={{fontSize:24,fontWeight:800,color:C.text,display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:26}}>{"\u{1F504}"}</span>Lifecycles</div>
-              <div style={{fontSize:13,color:C.muted,marginTop:4}}>Performance de templates por lifecycle activo (últimos 30 días).</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:4}}>Performance de templates por lifecycle activo <span style={{fontFamily:mono}}>({lifecyclesFrom} → {lifecyclesTo})</span>.</div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:10}}>
               <span style={{fontSize:12,color:C.muted,fontFamily:mono}}>Actualizado {_fmtAgo(lifecyclesRefreshedAt)}</span>
@@ -4186,7 +4259,7 @@ export default function Dashboard(){
             </div>
           </div>
           {lifecyclesError && (<Cd style={{background:C.lRed,border:"1px solid "+C.red+"44",marginBottom:14,color:C.red,fontSize:13}}>Error: {lifecyclesError}</Cd>)}
-          {_loadingList ? (<Cd style={{textAlign:"center",padding:40,color:C.muted,fontSize:14}}>Cargando lifecycles...</Cd>) : _list.length===0 ? (<Cd style={{textAlign:"center",padding:40,color:C.muted,fontSize:14}}>Ningún lifecycle activo en los últimos 30 días.</Cd>) : (<>
+          {_loadingList ? (<Cd style={{textAlign:"center",padding:40,color:C.muted,fontSize:14}}>Cargando lifecycles...</Cd>) : _list.length===0 ? (<Cd style={{textAlign:"center",padding:40,color:C.muted,fontSize:14}}>Ningún lifecycle con envíos en el rango seleccionado.</Cd>) : (<>
             <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:20,paddingBottom:14,borderBottom:"1px solid "+C.border+"66"}}>
               {_list.map(function(lc){var active=lc.flow_id===activeFlowId;var _nm=lc.flow_name||("Flow #"+lc.flow_id);return (<button key={lc.flow_id} onClick={function(){setActiveFlowId(lc.flow_id);}} title={"Flow ID #"+lc.flow_id+(lc.is_active===false?" (inactivo)":"")} style={{background:active?C.accent:C.card,color:active?"#FFF":C.text,border:"1px solid "+(active?C.accent:C.border),borderRadius:10,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font,display:"flex",alignItems:"center",gap:8,transition:"all 0.15s ease",opacity:lc.is_active===false?0.65:1}}><span style={{fontFamily:mono,fontSize:12}}>{_nm}</span><span style={{fontSize:11,fontWeight:600,opacity:0.85,fontFamily:mono}}>{_cS(lc.total_sent)} env · {lc.n_templates} tpl</span></button>);})}
             </div>
@@ -4212,7 +4285,7 @@ export default function Dashboard(){
                       var ms=_meetStats[t.template_name]||{link:0,booked:0};
                       var ts=t.timeseries||[];
                       var maxTs=0;for(var _ti=0;_ti<ts.length;_ti++)if(ts[_ti].sent>maxTs)maxTs=ts[_ti].sent;
-                      return (<Cd key={t.template_id} style={{padding:14}}>
+                      return (<Cd key={t.template_id} onClick={function(){setSelLifecycleTpl({tpl:t,flow:_list.find(function(l){return l.flow_id===activeFlowId;})||null,meetStats:_meetStats[t.template_name]||{link:0,booked:0}});}} style={{padding:14,cursor:"pointer"}}>
                         <div style={{fontSize:13,fontWeight:700,fontFamily:mono,color:C.text,marginBottom:8,wordBreak:"break-word"}}>{t.template_name||("Template #"+t.template_id)}</div>
                         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:10}}>
                           <div><div style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>Enviados</div><div style={{fontSize:17,fontWeight:800,color:C.text,fontFamily:mono}}>{_cS(t.sent||0)}</div></div>

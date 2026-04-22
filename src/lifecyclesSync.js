@@ -14,15 +14,20 @@ function defaultSince() {
   return d.toISOString().slice(0, 10);
 }
 
-// Load enumerated active lifecycles.
+function _rangeKey(since, until) {
+  return (since || "_") + "__" + (until || "_");
+}
+
+// Load enumerated active lifecycles for the given date range.
 // Uses stale-while-revalidate cache unless `forceRefresh` is true.
 export async function loadLifecycles(opts) {
   opts = opts || {};
   var since = opts.since || defaultSince();
-  var cacheKey = "lifecycles_list_v2_" + since;
+  var until = opts.until || null;
+  var cacheKey = "lifecycles_list_v3_" + _rangeKey(since, until);
 
   if (opts.forceRefresh) {
-    var fresh = await fetchActiveLifecycles(since);
+    var fresh = await fetchActiveLifecycles(since, until);
     await setCache(cacheKey, fresh);
     return fresh;
   }
@@ -30,7 +35,7 @@ export async function loadLifecycles(opts) {
   var result = await staleWhileRevalidate(
     cacheKey,
     "lifecycle",
-    function () { return fetchActiveLifecycles(since); },
+    function () { return fetchActiveLifecycles(since, until); },
     opts.onRefresh
   );
   console.log(
@@ -44,12 +49,13 @@ export async function loadLifecycles(opts) {
 export async function loadLifecycleDetail(flowId, opts) {
   opts = opts || {};
   var since = opts.since || defaultSince();
+  var until = opts.until || null;
   var hours = opts.hours || 24;
-  var cacheKey = "lifecycle_detail_" + flowId + "_" + since;
+  var cacheKey = "lifecycle_detail_v2_" + flowId + "_" + _rangeKey(since, until);
 
   function doFetch() {
     return Promise.all([
-      fetchLifecycleTemplateStats(flowId, since),
+      fetchLifecycleTemplateStats(flowId, since, until),
       fetchLifecycleTemplateTimeseries(flowId, hours),
     ]).then(function (parts) {
       var stats = parts[0];

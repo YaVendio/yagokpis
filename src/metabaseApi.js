@@ -862,10 +862,11 @@ export async function fetchResponseStatsCached(since) {
 
 // ========== LIFECYCLES SCREEN ==========
 
-// Enumerate distinct active lifecycles (flow_id with recent executions).
+// Enumerate distinct active lifecycles (flow_id with executions in range).
 // Joins lifecycle_flows for the human-readable internal_name.
 // Returns [{ flow_id, flow_name, is_active, total_sent, last_sent, n_templates, n_leads, n_steps }]
-export async function fetchActiveLifecycles(since) {
+export async function fetchActiveLifecycles(since, until) {
+  var untilClause = until ? "  AND le.sent_at <= '" + until + " 23:59:59'\n" : "";
   var query =
     "SELECT\n" +
     "    le.flow_id,\n" +
@@ -879,6 +880,7 @@ export async function fetchActiveLifecycles(since) {
     "FROM lifecycle_executions le\n" +
     "LEFT JOIN lifecycle_flows lf ON lf.id = le.flow_id\n" +
     "WHERE le.sent_at >= '" + since + "'\n" +
+    untilClause +
     "  AND le.flow_id IS NOT NULL\n" +
     "GROUP BY le.flow_id, lf.internal_name, lf.is_active\n" +
     "ORDER BY total_sent DESC";
@@ -907,9 +909,10 @@ export async function fetchActiveLifecycles(since) {
 // opt_outs, sent_24h, last_sent, step_order. Join thread via execution_id.
 // Returns [{ template_id, template_name, step_order, sent, sent_24h, last_sent,
 //            replied, avg_reply_seconds, opt_outs }]
-export async function fetchLifecycleTemplateStats(flowId, since) {
+export async function fetchLifecycleTemplateStats(flowId, since, until) {
   var fid = parseInt(flowId);
   if (isNaN(fid)) throw new Error("Invalid flow_id");
+  var untilClause = until ? "      AND le.sent_at <= '" + until + " 23:59:59'\n" : "";
   var query =
     "WITH exec_threads AS (\n" +
     "    SELECT\n" +
@@ -923,6 +926,7 @@ export async function fetchLifecycleTemplateStats(flowId, since) {
     "    LEFT JOIN thread t ON (t.metadata->>'execution_id') = le.id::text\n" +
     "    WHERE le.flow_id = " + fid + "\n" +
     "      AND le.sent_at >= '" + since + "'\n" +
+    untilClause +
     "),\n" +
     "enriched AS (\n" +
     "    SELECT\n" +
