@@ -205,9 +205,9 @@ var TIPS = {
   whatsappConectado: {
     title: "WhatsApp Conectado",
     description: "Leads del per\u00EDodo que ya conectaron una instancia de WhatsApp en la plataforma Yago.",
-    formula: "leads con phone \u2229 evento de WhatsApp conectado en PostHog",
-    why: "Primer paso cr\u00EDtico del onboarding: sin WhatsApp conectado no hay activaci\u00F3n posible.",
-    source: "PostHog (v\u00EDa Supabase mb_whatsapp_connected_phones)"
+    formula: "leads con phone \u2229 companies.whatsapp_connected = true en HubSpot",
+    why: "Primer paso cr\u00EDtico del onboarding: sin WhatsApp conectado no hay activaci\u00F3n posible. Por definici\u00F3n, Cuenta Activada \u2286 WhatsApp Conectado.",
+    source: "HubSpot \u2014 companies.whatsapp_connected (v\u00EDa Supabase mb_whatsapp_connected_phones)"
   },
   productosCreados: {
     title: "Productos Creados",

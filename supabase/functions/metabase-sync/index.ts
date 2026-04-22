@@ -426,23 +426,66 @@ async function queryPostHog(hogql: string): Promise<{ results: any[][] }> {
   return { results: data.results || [] };
 }
 
+// Source: HubSpot companies with whatsapp_connected="true".
+// Replaces the earlier PostHog-based sync so the WhatsApp-connected set matches
+// the authoritative flag on the company record and is guaranteed to be a
+// superset of activated accounts (invariant: Cuenta Activada ⊆ WA Conectado).
 async function syncWhatsAppConnectedPhones(sb: any): Promise<number> {
-  const sql = `SELECT properties.phone_number AS phone, min(timestamp) AS first_at
-    FROM events
-    WHERE event IN ('Whatsapp Connection: Completed', 'WhatsApp Connection: Completed')
-      AND properties.phone_number IS NOT NULL
-    GROUP BY properties.phone_number
-    LIMIT 1000000`;
-  const result = await queryPostHog(sql);
+  const token = Deno.env.get("HUBSPOT_API_TOKEN");
+  if (!token) throw new Error("HUBSPOT_API_TOKEN not configured");
+
+  async function hsSearchCompanies(body: any): Promise<any> {
+    const resp = await fetch("https://api.hubapi.com/crm/v3/objects/companies/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`HubSpot companies/search ${resp.status}: ${text}`);
+    }
+    return resp.json();
+  }
+
+  const companies: any[] = [];
+  let after: string | undefined;
+  while (true) {
+    const body: any = {
+      filterGroups: [{
+        filters: [
+          { propertyName: "whatsapp_connected", operator: "EQ", value: "true" },
+          { propertyName: "phone", operator: "HAS_PROPERTY" },
+        ],
+      }],
+      properties: ["phone", "hs_lastmodifieddate"],
+      sorts: [{ propertyName: "hs_lastmodifieddate", direction: "DESCENDING" }],
+      limit: 100,
+    };
+    if (after) body.after = after;
+    const data = await hsSearchCompanies(body);
+    if (data.results) companies.push(...data.results);
+    if (!data.paging?.next?.after) break;
+    after = data.paging.next.after;
+    if (companies.length >= 100000) break;
+    await new Promise((r) => setTimeout(r, 150));
+  }
 
   const rows: any[] = [];
   const seen = new Set<string>();
-  for (const row of result.results) {
-    if (!row[0] || !row[1]) continue;
-    const clean = String(row[0]).replace(/\D/g, "");
+  for (const c of companies) {
+    const phone = c.properties?.phone;
+    if (!phone) continue;
+    const clean = String(phone).replace(/\D/g, "");
     if (!clean || seen.has(clean)) continue;
     seen.add(clean);
-    rows.push({ phone_number: clean, connected_at: row[1], synced_at: new Date().toISOString() });
+    const connectedAt = c.properties?.hs_lastmodifieddate || new Date().toISOString();
+    rows.push({ phone_number: clean, connected_at: connectedAt, synced_at: new Date().toISOString() });
+  }
+
+  // Clear stale rows (old PostHog-sourced data) so table reflects HubSpot authoritatively.
+  {
+    const { error } = await sb.from("mb_whatsapp_connected_phones").delete().neq("phone_number", "__never__");
+    if (error) throw new Error(`Clear mb_whatsapp_connected_phones: ${error.message}`);
   }
 
   for (let i = 0; i < rows.length; i += 500) {
