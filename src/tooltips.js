@@ -202,6 +202,20 @@ var TIPS = {
     why: "M\u00E9trica final de conversi\u00F3n real: cu\u00E1ntos leads efectivamente completaron el onboarding y activaron su negocio.",
     source: "Metabase \u2014 tabla companies (v\u00EDa Supabase mb_activated_phones)"
   },
+  whatsappConectado: {
+    title: "WhatsApp Conectado",
+    description: "Leads del per\u00EDodo que ya conectaron una instancia de WhatsApp en la plataforma Yago.",
+    formula: "leads con phone \u2229 evento de WhatsApp conectado en PostHog",
+    why: "Primer paso cr\u00EDtico del onboarding: sin WhatsApp conectado no hay activaci\u00F3n posible.",
+    source: "PostHog (v\u00EDa Supabase mb_whatsapp_connected_phones)"
+  },
+  productosCreados: {
+    title: "Productos Creados",
+    description: "Leads del per\u00EDodo que crearon al menos un producto en la plataforma Yago.",
+    formula: "leads con phone \u2229 evento de producto creado en PostHog",
+    why: "Se\u00F1al fuerte de engagement: el lead avanz\u00F3 m\u00E1s all\u00E1 del signup y empez\u00F3 a configurar su cat\u00E1logo.",
+    source: "PostHog (v\u00EDa Supabase mb_products_created_phones)"
+  },
   realizadas: {
     title: "Realizadas por Yago",
     description: "Reuniones con resultado COMPLETED en HubSpot matcheadas con leads de Yago.",

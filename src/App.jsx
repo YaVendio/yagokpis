@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { parseDatetime, TOPIC_KEYWORDS } from "./csvParser";
 import { processOutboundThreads, processInboundThreads } from "./threadProcessor";
 import { fetchThreads, fetchInboundThreads, fetchLifecyclePhones, fetchInboundThreadsFiltered, queryMetabase, fetchResponseStats, fetchResponseStatsCached, fetchAdsThreads, fetchInboundCached, fetchLifecyclePhonesCached, fetchTemplateStructure } from "./metabaseApi";
-import { loadOutboundThreads, loadInboundThreads, loadLifecyclePhones, loadActivatedPhones, loadThreadMessages, loadAllTemplateNames } from "./metabaseSync";
+import { loadOutboundThreads, loadInboundThreads, loadLifecyclePhones, loadActivatedPhones, loadWhatsAppConnectedPhones, loadProductsCreatedPhones, loadThreadMessages, loadAllTemplateNames } from "./metabaseSync";
 import { loadLifecycles, loadLifecycleDetail } from "./lifecyclesSync";
 import { computeTemplateMeetingStats } from "./templateMeetingStats";
 import { supabase, retryQuery } from "./supabase";
@@ -653,6 +653,8 @@ export default function Dashboard(){
   const [inboundRawRows,setInboundRawRows]=useState(null);
   const [lifecyclePhonesData,setLifecyclePhonesData]=useState(null);
   const [activatedPhonesData,setActivatedPhonesData]=useState(null);
+  const [whatsappConnectedPhonesData,setWhatsappConnectedPhonesData]=useState(null);
+  const [productsCreatedPhonesData,setProductsCreatedPhonesData]=useState(null);
   const [activatedModalData,setActivatedModalData]=useState(null);
   const [lifecyclesList,setLifecyclesList]=useState(null);
   const [lifecyclesLoading,setLifecyclesLoading]=useState(false);
@@ -2028,14 +2030,18 @@ export default function Dashboard(){
       Promise.all([
         loadInboundThreads(getFirstOfMonth()),
         loadLifecyclePhones().catch(function(e){console.warn("Lifecycle phones query failed:",e);return {};}),
-        loadActivatedPhones().catch(function(e){console.warn("Activated phones query failed:",e);return {};})
+        loadActivatedPhones().catch(function(e){console.warn("Activated phones query failed:",e);return {};}),
+        loadWhatsAppConnectedPhones().catch(function(e){console.warn("WhatsApp connected phones query failed:",e);return {};}),
+        loadProductsCreatedPhones().catch(function(e){console.warn("Products created phones query failed:",e);return {};})
       ]).then(function(all){
         setInboundLoadStep(3);
-        var inbThreads=all[0];var sp=all[1];var ap=all[2];
+        var inbThreads=all[0];var sp=all[1];var ap=all[2];var wp=all[3];var pp=all[4];
         setInboundRawRows(inbThreads);
         inboundSinceRef.current=getFirstOfMonth();
         setLifecyclePhonesData(sp);
         setActivatedPhonesData(ap);
+        setWhatsappConnectedPhonesData(wp);
+        setProductsCreatedPhonesData(pp);
         // HubSpot phone match — targeted search for inbound phones only
         if(!inboundHsPhones){
           setInboundLoadStep(4);
@@ -2843,11 +2849,14 @@ export default function Dashboard(){
         var yagoOutcomeCounts={};var yagoOutcomeLeads={};var yagoOutcomeMeetings={};var yagoMeetToLead={};
         for(var _yoi=0;_yoi<confirmedArr.length;_yoi++){var _yl=confirmedArr[_yoi];var _ylp=(_yl.p||"").replace(/\D/g,"");var _ylMeeting=null;if(_ylp){_ylMeeting=fPhToMeeting[_ylp]||(_ylp.length>11&&fPhToMeeting[_ylp.slice(-11)])||(_ylp.length>10&&fPhToMeeting[_ylp.slice(-10)])||(_ylp.length>9&&fPhToMeeting[_ylp.slice(-9)])||(_ylp.length>8&&fPhToMeeting[_ylp.slice(-8)])||null;}if(!_ylMeeting&&_yl.hid){_ylMeeting=fIdToMeeting[_yl.hid]||null;}var _yoKey=_ylMeeting?getOutcomeStatus(_ylMeeting):"UNKNOWN";yagoOutcomeCounts[_yoKey]=(yagoOutcomeCounts[_yoKey]||0)+1;if(!yagoOutcomeLeads[_yoKey])yagoOutcomeLeads[_yoKey]=[];yagoOutcomeLeads[_yoKey].push(_yl);if(_ylMeeting){if(!yagoOutcomeMeetings[_yoKey])yagoOutcomeMeetings[_yoKey]=[];yagoOutcomeMeetings[_yoKey].push(_ylMeeting);if(!yagoMeetToLead[_ylMeeting.id])yagoMeetToLead[_ylMeeting.id]=_yl;}}
         var _yagoAllRaw=[];var _yamSeen={};Object.keys(yagoOutcomeMeetings).forEach(function(k){var arr=yagoOutcomeMeetings[k];for(var i=0;i<arr.length;i++){if(!_yamSeen[arr[i].id]){_yamSeen[arr[i].id]=true;_yagoAllRaw.push(arr[i]);}}});
-        var yagoAllMeetings=_yagoAllRaw.filter(function(m){var oid=m.properties&&m.properties.hubspot_owner_id;return oid&&_sdrOwnerIds[oid];});
+        var yagoAllMeetings=_yagoAllRaw.filter(function(m){var oid=m.properties&&m.properties.hubspot_owner_id;if(!oid||!_sdrOwnerIds[oid])return false;if(resumenRegionFilter==="br"&&!_brOwnerIds[oid])return false;if(resumenRegionFilter==="latam"&&!_latamOwnerIds[oid])return false;return true;});
         // Recompute Yago outcome stats from owner-filtered meetings
         var _filtYagoOC={};var _filtYagoOL={};var _filtYagoOM={};var _filtYagoML={};
         for(var _fyi=0;_fyi<yagoAllMeetings.length;_fyi++){var _fym=yagoAllMeetings[_fyi];var _fyoc=getOutcomeStatus(_fym);_filtYagoOC[_fyoc]=(_filtYagoOC[_fyoc]||0)+1;if(!_filtYagoOM[_fyoc])_filtYagoOM[_fyoc]=[];_filtYagoOM[_fyoc].push(_fym);var _fyl=yagoMeetToLead[_fym.id];if(_fyl){if(!_filtYagoOL[_fyoc])_filtYagoOL[_fyoc]=[];_filtYagoOL[_fyoc].push(_fyl);}}
         yagoOutcomeCounts=_filtYagoOC;yagoOutcomeLeads=_filtYagoOL;yagoOutcomeMeetings=_filtYagoOM;
+        // Align Realizadas (Yago) card with filtered yagoOutcomeMeetings["COMPLETED"] so count & modal match
+        var _yrCompleted=yagoOutcomeMeetings["COMPLETED"]||[];iagoRealizadas=_yrCompleted.length;iagoRealOut=0;iagoRealInb=0;iagoRealArr=[];
+        for(var _yrci=0;_yrci<_yrCompleted.length;_yrci++){var _yrcm=_yrCompleted[_yrci];var _yrcl=yagoMeetToLead[_yrcm.id];if(_yrcl){iagoRealArr.push(_yrcl);if(_yrcl._table==="mb_outbound_threads")iagoRealOut++;else iagoRealInb++;}}
         var yagoOutcomeData=Object.keys(yagoOutcomeCounts).sort(function(a,b){return yagoOutcomeCounts[b]-yagoOutcomeCounts[a];}).map(function(k){return{name:k,count:yagoOutcomeCounts[k],color:outcomeColor[k]||C.muted};});
 
         // --- Yago meetings daily stacked chart data ---
@@ -2917,13 +2926,26 @@ export default function Dashboard(){
         var resActVsTotal=totalLeads>0?((resActCount/totalLeads)*100).toFixed(1):"0";
         var resActVsMeet=confirmedCount>0?((resActCount/confirmedCount)*100).toFixed(1):"0";
 
+        // WhatsApp Conectado (Resumen main — allLeads)
+        var _resWaIdx=buildActivatedIdx(whatsappConnectedPhonesData);
+        var resWaArr=computeActivated(_resWaIdx,allLeads);
+        var resWaCount=resWaArr.length;
+        var resWaVsTotal=totalLeads>0?((resWaCount/totalLeads)*100).toFixed(1):"0";
+
+        // Productos Creados (Resumen main — allLeads)
+        var _resPcIdx=buildActivatedIdx(productsCreatedPhonesData);
+        var resPcArr=computeActivated(_resPcIdx,allLeads);
+        var resPcCount=resPcArr.length;
+        var resPcVsTotal=totalLeads>0?((resPcCount/totalLeads)*100).toFixed(1):"0";
+        var resPcVsWa=resWaCount>0?((resPcCount/resWaCount)*100).toFixed(1):"0";
+
         return (<>
           {/* CRM loading indicator */}
           {crmLoading && <div style={{background:C.lBlue,border:"1px solid "+C.accent+"25",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",gap:12,alignItems:"center"}}><div style={{width:20,height:20,border:"2px solid "+C.accent+"33",borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/><div><strong style={{color:C.accent}}>Cargando datos de HubSpot...</strong></div></div>}
 
           {/* KPI Cards */}
           <Sec>INDICADORES PRINCIPALES</Sec>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(5, minmax(0, 1fr))",gap:14,marginBottom:24}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4, minmax(0, 1fr))",gap:14,marginBottom:14}}>
             {/* Card: Conversaciones */}
             <Cd style={{border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)",position:"relative",overflow:"hidden"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4AC}"}</div>
@@ -2968,6 +2990,44 @@ export default function Dashboard(){
               <div style={{display:"flex",alignItems:"baseline",gap:4,marginTop:4}}><span style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.cyan,lineHeight:1}}>{iagoRealizadas}</span></div>
               <div style={{fontSize:13,color:C.muted,marginTop:6}}>Out: <strong>{iagoRealOut}</strong> / In: <strong>{iagoRealInb}</strong></div>
               <div style={{fontSize:12,color:C.muted,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6,cursor:realizadas>0?"pointer":"default"}} onClick={realizadas>0?function(e){e.stopPropagation();var completed=filtCrmMeetings.filter(function(m){return m.properties&&m.properties.hs_meeting_outcome==="COMPLETED";});setRealizadasModalData({title:"Todas Reuniones Realizadas ("+completed.length+")",meetings:completed,leads:allLeads,meetToLead:yagoMeetToLead});}:undefined}>Total realizadas: <strong style={{color:C.cyan,fontFamily:mono}}>{realizadas}</strong>{compareEnabled&&prevResumenData&&<DeltaBadge current={realizadas} previous={prevResumenData.realizadas}/>}</div>
+            </Cd>
+          </div>
+
+          {/* Row 2: engagement + activación */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3, minmax(0, 1fr))",gap:14,marginBottom:24}}>
+            {/* Card: WhatsApp Conectado */}
+            <Cd onClick={resWaCount>0?function(){setActivatedModalData({title:"\u{1F4F1} WhatsApp Conectado ("+resWaCount+")",leads:resWaArr});}:undefined} style={{border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)",position:"relative",overflow:"hidden",cursor:whatsappConnectedPhonesData&&resWaCount>0?"pointer":"default"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4F1}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4F1}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>WhatsApp Conectado</span>
+                <InfoTip dark={_isDark} data={TIPS.whatsappConectado}/>
+              </div>
+              {whatsappConnectedPhonesData?(<>
+                <div style={{display:"flex",alignItems:"baseline",gap:4,marginTop:4}}><span style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.green,lineHeight:1}}>{resWaCount}</span></div>
+                <div style={{fontSize:13,color:C.muted,marginTop:6}}>{resWaVsTotal}% del total</div>
+                <div style={{fontSize:11,color:C.green,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{resWaCount>0?"\u{1F4F1} Ver conectados \u2192":"Sin conexiones"}</div>
+              </>):(<>
+                <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:4}}>Cargando WhatsApp...</div>
+              </>)}
+            </Cd>
+            {/* Card: Productos Creados */}
+            <Cd onClick={resPcCount>0?function(){setActivatedModalData({title:"\u{1F4E6} Productos Creados ("+resPcCount+")",leads:resPcArr});}:undefined} style={{border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)",position:"relative",overflow:"hidden",cursor:productsCreatedPhonesData&&resPcCount>0?"pointer":"default"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4E6}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.cyan+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4E6}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Productos Creados</span>
+                <InfoTip dark={_isDark} data={TIPS.productosCreados}/>
+              </div>
+              {productsCreatedPhonesData?(<>
+                <div style={{display:"flex",alignItems:"baseline",gap:4,marginTop:4}}><span style={{fontSize:36,fontWeight:900,fontFamily:mono,color:C.cyan,lineHeight:1}}>{resPcCount}</span></div>
+                <div style={{fontSize:13,color:C.muted,marginTop:6}}>{resPcVsWa}% de WhatsApp {"\u00B7"} {resPcVsTotal}% del total</div>
+                <div style={{fontSize:11,color:C.cyan,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{resPcCount>0?"\u{1F4E6} Ver con productos \u2192":"Sin productos"}</div>
+              </>):(<>
+                <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:4}}>Cargando productos...</div>
+              </>)}
             </Cd>
             {/* Card: Cuenta Activada */}
             <Cd onClick={resActCount>0?function(){setActivatedModalData({title:"\u{1F680} Cuentas Activadas ("+resActCount+")",leads:resActArr});}:undefined} style={{border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)",position:"relative",overflow:"hidden",cursor:activatedPhonesData&&resActCount>0?"pointer":"default"}}>
@@ -3176,13 +3236,26 @@ export default function Dashboard(){
               if(_pp){var _ppFD=new Date(_pp.from+"T00:00:00");var _ppTD=new Date(_pp.to+"T23:59:59");var _ppFM=crmMeetings.filter(function(m){var st=m.properties&&m.properties.hs_createdate||m.createdAt;if(!st)return false;var md=new Date(st);return md>=_ppFD&&md<=_ppTD;});if(_ppFM.length>0){var _ppPh=getMeetingContactPhones(_ppFM,crmContacts);var _ppCI=getMeetingContactIds(_ppFM);var _ppPI={};var _ppK=Object.keys(_ppPh);for(var _ppi=0;_ppi<_ppK.length;_ppi++){var _ppd=_ppK[_ppi];_ppPI[_ppd]=true;if(_ppd.length>11)_ppPI[_ppd.slice(-11)]=true;if(_ppd.length>10)_ppPI[_ppd.slice(-10)]=true;}_pActualMeet=0;var _ppOL=_prevMeetings.filter(function(l){return l.ml&&(mode===0||!l.au);});for(var _ppj=0;_ppj<_ppOL.length;_ppj++){var _ppp=(_ppOL[_ppj].p||"").replace(/\D/g,"");var _ppm=false;if(_ppp){if(_ppPI[_ppp])_ppm=true;else if(_ppp.length>11&&_ppPI[_ppp.slice(-11)])_ppm=true;else if(_ppp.length>10&&_ppPI[_ppp.slice(-10)])_ppm=true;}if(!_ppm&&_ppOL[_ppj].hid&&_ppCI[_ppOL[_ppj].hid])_ppm=true;if(_ppm)_pActualMeet++;}}}
             }
             // Activación (Outbound)
+            var _outLeadsBase=meetings.filter(function(m){return (mode===0||!m.au);});
             var _outActIdx=buildActivatedIdx(activatedPhonesData);
-            var outActArr=computeActivated(_outActIdx,meetings.filter(function(m){return (mode===0||!m.au);}));
+            var outActArr=computeActivated(_outActIdx,_outLeadsBase);
             var outActCount=outActArr.length;
             var outActVsTotal=contactados>0?((outActCount/contactados)*100).toFixed(1):"0";
             var outActVsMeet=actualMeetCount>0?((outActCount/actualMeetCount)*100).toFixed(1):"0";
+            // WhatsApp Conectado (Outbound)
+            var _outWaIdx=buildActivatedIdx(whatsappConnectedPhonesData);
+            var outWaArr=computeActivated(_outWaIdx,_outLeadsBase);
+            var outWaCount=outWaArr.length;
+            var outWaVsTotal=contactados>0?((outWaCount/contactados)*100).toFixed(1):"0";
+            // Productos Creados (Outbound)
+            var _outPcIdx=buildActivatedIdx(productsCreatedPhonesData);
+            var outPcArr=computeActivated(_outPcIdx,_outLeadsBase);
+            var outPcCount=outPcArr.length;
+            var outPcVsTotal=contactados>0?((outPcCount/contactados)*100).toFixed(1):"0";
+            var outPcVsWa=outWaCount>0?((outPcCount/outWaCount)*100).toFixed(1):"0";
             return (
-          <div style={{display:"grid",gridTemplateColumns:"repeat(5, minmax(0, 1fr))",gap:12,marginBottom:22}}>
+          <>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4, minmax(0, 1fr))",gap:12,marginBottom:12}}>
             {/* Card 1: Contactados */}
             <Cd onClick={function(){setShowA(true);}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4E9}"}</div>
@@ -3238,7 +3311,44 @@ export default function Dashboard(){
                 <div style={{fontSize:12,color:C.muted,marginTop:4}}>{crmLoading?"Cargando HubSpot...":"Esperando datos HubSpot"}</div>
               </>)}
             </Cd>
-            {/* Card 5: Cuenta Activada */}
+          </div>
+          {/* Row 2: engagement + activación (Outbound) */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3, minmax(0, 1fr))",gap:12,marginBottom:22}}>
+            {/* Card: WhatsApp Conectado */}
+            <Cd onClick={function(){if(outWaCount>0){setActivatedModalData({title:"\u{1F4F1} WhatsApp Conectado - Outbound ("+outWaCount+")",leads:outWaArr});}}} style={{position:"relative",cursor:whatsappConnectedPhonesData&&outWaCount>0?"pointer":"default",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4F1}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4F1}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>WhatsApp Conectado</span>
+                <InfoTip dark={_isDark} data={TIPS.whatsappConectado}/>
+              </div>
+              {whatsappConnectedPhonesData?(<>
+                <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.green}}>{outWaCount}</div>
+                <div style={{fontSize:13,color:C.muted,marginTop:4}}>{outWaVsTotal}% del total</div>
+                <div style={{fontSize:11,color:C.green,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{outWaCount>0?"\u{1F4F1} Ver conectados \u2192":"Sin conexiones"}</div>
+              </>):(<>
+                <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:4}}>Cargando WhatsApp...</div>
+              </>)}
+            </Cd>
+            {/* Card: Productos Creados */}
+            <Cd onClick={function(){if(outPcCount>0){setActivatedModalData({title:"\u{1F4E6} Productos Creados - Outbound ("+outPcCount+")",leads:outPcArr});}}} style={{position:"relative",cursor:productsCreatedPhonesData&&outPcCount>0?"pointer":"default",border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4E6}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.cyan+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4E6}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Productos Creados</span>
+                <InfoTip dark={_isDark} data={TIPS.productosCreados}/>
+              </div>
+              {productsCreatedPhonesData?(<>
+                <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.cyan}}>{outPcCount}</div>
+                <div style={{fontSize:13,color:C.muted,marginTop:4}}>{outPcVsWa}% de WhatsApp {"\u00B7"} {outPcVsTotal}% del total</div>
+                <div style={{fontSize:11,color:C.cyan,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{outPcCount>0?"\u{1F4E6} Ver con productos \u2192":"Sin productos"}</div>
+              </>):(<>
+                <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:4}}>Cargando productos...</div>
+              </>)}
+            </Cd>
+            {/* Card: Cuenta Activada */}
             <Cd onClick={function(){if(outActCount>0){setActivatedModalData({title:"\u{1F680} Cuentas Activadas - Outbound ("+outActCount+")",leads:outActArr});}}} style={{position:"relative",cursor:activatedPhonesData&&outActCount>0?"pointer":"default",border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F680}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
@@ -3256,6 +3366,7 @@ export default function Dashboard(){
               </>)}
             </Cd>
           </div>
+          </>
             );
           })()}
           {/* Qualified KPI Cards: Alta + Media */}
@@ -3322,9 +3433,20 @@ export default function Dashboard(){
             var qActCount=qActArr.length;
             var qActVsTotal=qContactados>0?((qActCount/qContactados)*100).toFixed(1):"0";
             var qActVsMeet=qActualMeet>0?((qActCount/qActualMeet)*100).toFixed(1):"0";
+            // WhatsApp Conectado (Calificados)
+            var _qWaIdx=buildActivatedIdx(whatsappConnectedPhonesData);
+            var qWaArr=computeActivated(_qWaIdx,qMeetings);
+            var qWaCount=qWaArr.length;
+            var qWaVsTotal=qContactados>0?((qWaCount/qContactados)*100).toFixed(1):"0";
+            // Productos Creados (Calificados)
+            var _qPcIdx=buildActivatedIdx(productsCreatedPhonesData);
+            var qPcArr=computeActivated(_qPcIdx,qMeetings);
+            var qPcCount=qPcArr.length;
+            var qPcVsTotal=qContactados>0?((qPcCount/qContactados)*100).toFixed(1):"0";
+            var qPcVsWa=qWaCount>0?((qPcCount/qWaCount)*100).toFixed(1):"0";
             return (<>
           <div style={{fontSize:13,color:C.green,textTransform:"uppercase",letterSpacing:1.5,fontWeight:700,marginBottom:10,marginTop:6,paddingBottom:8,borderBottom:"2px solid "+C.green+"33",display:"flex",alignItems:"center",gap:8}}>{"\u2B50"} CALIFICADOS: ALTA + MEDIA</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(5, minmax(0, 1fr))",gap:12,marginBottom:22}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4, minmax(0, 1fr))",gap:12,marginBottom:12}}>
             <Cd onClick={function(){setQualModalLeads(qMeetings);setQualModalTitle("\u{1F4AC} Conversaciones Calificados (Alta + Media)");}} style={{position:"relative",cursor:"pointer",border:"2px solid "+C.accent+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4E9}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
@@ -3374,6 +3496,42 @@ export default function Dashboard(){
               </>):(<>
                 <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
                 <div style={{fontSize:12,color:C.muted,marginTop:4}}>{crmLoading?"Cargando HubSpot...":"Esperando datos HubSpot"}</div>
+              </>)}
+            </Cd>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3, minmax(0, 1fr))",gap:12,marginBottom:22}}>
+            {/* Card: WhatsApp Conectado (Calificados) */}
+            <Cd onClick={function(){if(qWaCount>0){setActivatedModalData({title:"\u{1F4F1} WhatsApp Conectado - Calificados ("+qWaCount+")",leads:qWaArr});}}} style={{position:"relative",cursor:whatsappConnectedPhonesData&&qWaCount>0?"pointer":"default",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4F1}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4F1}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>WhatsApp Conectado</span>
+                <InfoTip dark={_isDark} data={TIPS.whatsappConectado}/>
+              </div>
+              {whatsappConnectedPhonesData?(<>
+                <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.green}}>{qWaCount}</div>
+                <div style={{fontSize:13,color:C.muted,marginTop:4}}>{qWaVsTotal}% del total</div>
+                <div style={{fontSize:11,color:C.green,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{qWaCount>0?"\u{1F4F1} Ver conectados \u2192":"Sin conexiones"}</div>
+              </>):(<>
+                <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:4}}>Cargando WhatsApp...</div>
+              </>)}
+            </Cd>
+            {/* Card: Productos Creados (Calificados) */}
+            <Cd onClick={function(){if(qPcCount>0){setActivatedModalData({title:"\u{1F4E6} Productos Creados - Calificados ("+qPcCount+")",leads:qPcArr});}}} style={{position:"relative",cursor:productsCreatedPhonesData&&qPcCount>0?"pointer":"default",border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
+              <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4E6}"}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:32,height:32,borderRadius:10,background:C.cyan+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4E6}"}</div>
+                <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Productos Creados</span>
+                <InfoTip dark={_isDark} data={TIPS.productosCreados}/>
+              </div>
+              {productsCreatedPhonesData?(<>
+                <div style={{fontSize:32,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.cyan}}>{qPcCount}</div>
+                <div style={{fontSize:13,color:C.muted,marginTop:4}}>{qPcVsWa}% de WhatsApp {"\u00B7"} {qPcVsTotal}% del total</div>
+                <div style={{fontSize:11,color:C.cyan,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{qPcCount>0?"\u{1F4E6} Ver con productos \u2192":"Sin productos"}</div>
+              </>):(<>
+                <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:4}}>Cargando productos...</div>
               </>)}
             </Cd>
             <Cd onClick={function(){if(qActCount>0){setActivatedModalData({title:"\u{1F680} Cuentas Activadas - Calificados ("+qActCount+")",leads:qActArr});}}} style={{position:"relative",cursor:activatedPhonesData&&qActCount>0?"pointer":"default",border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)"}}>
@@ -3574,7 +3732,7 @@ export default function Dashboard(){
         var inbActualMeet=0;
         return (<>
         {ix ? (<>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))",gap:14,marginBottom:22}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4, minmax(0, 1fr))",gap:14,marginBottom:12}}>
             <Cd onClick={function(){setShowA(true);}} style={{cursor:"pointer",border:"2px solid "+C.purple+"44",position:"relative",overflow:"hidden"}}>
               <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04}}>{"\u{1F4AC}"}</div>
               <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:32,height:32,borderRadius:10,background:C.purple+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4AC}"}</div><span style={{fontSize:13,color:C.muted,fontWeight:600}}>Leads Inbound</span><InfoTip dark={_isDark} data={TIPS.contactados}/></div>
@@ -3682,13 +3840,60 @@ export default function Dashboard(){
                 </Cd>
               );
             })()}
+          </div>
+          {/* Row 2: engagement + activación (Inbound) */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3, minmax(0, 1fr))",gap:14,marginBottom:22}}>
             {(function(){
+              var _inbWaIdx=buildActivatedIdx(whatsappConnectedPhonesData);
+              var inbWaArr=computeActivated(_inbWaIdx,meetings);
+              var inbWaCount=inbWaArr.length;
+              var inbWaVsTotal=inbTc>0?((inbWaCount/inbTc)*100).toFixed(1):"0";
+              var _inbPcIdx=buildActivatedIdx(productsCreatedPhonesData);
+              var inbPcArr=computeActivated(_inbPcIdx,meetings);
+              var inbPcCount=inbPcArr.length;
+              var inbPcVsTotal=inbTc>0?((inbPcCount/inbTc)*100).toFixed(1):"0";
+              var inbPcVsWa=inbWaCount>0?((inbPcCount/inbWaCount)*100).toFixed(1):"0";
               var _inbActIdx=buildActivatedIdx(activatedPhonesData);
               var inbActArr=computeActivated(_inbActIdx,meetings);
               var inbActCount=inbActArr.length;
               var inbActVsTotal=inbTc>0?((inbActCount/inbTc)*100).toFixed(1):"0";
               var inbActVsMeet=inbActualMeet>0?((inbActCount/inbActualMeet)*100).toFixed(1):"0";
-              return (
+              return (<>
+                {/* Card: WhatsApp Conectado (Inbound) */}
+                <Cd onClick={function(){if(inbWaCount>0){setActivatedModalData({title:"\u{1F4F1} WhatsApp Conectado - Inbound ("+inbWaCount+")",leads:inbWaArr});}}} style={{position:"relative",cursor:whatsappConnectedPhonesData&&inbWaCount>0?"pointer":"default",border:"2px solid "+C.green+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lGreen+" 100%)"}}>
+                  <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4F1}"}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                    <div style={{width:32,height:32,borderRadius:10,background:C.green+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4F1}"}</div>
+                    <span style={{fontSize:13,color:C.muted,fontWeight:600}}>WhatsApp Conectado</span>
+                    <InfoTip dark={_isDark} data={TIPS.whatsappConectado}/>
+                  </div>
+                  {whatsappConnectedPhonesData?(<>
+                    <div style={{fontSize:36,fontWeight:900,fontFamily:mono,lineHeight:1,color:C.green}}>{inbWaCount}</div>
+                    <div style={{fontSize:13,color:C.muted,marginTop:4}}>{inbWaVsTotal}% del total</div>
+                    <div style={{fontSize:11,color:C.green,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{inbWaCount>0?"\u{1F4F1} Ver conectados \u2192":"Sin conexiones"}</div>
+                  </>):(<>
+                    <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                    <div style={{fontSize:12,color:C.muted,marginTop:4}}>Cargando WhatsApp...</div>
+                  </>)}
+                </Cd>
+                {/* Card: Productos Creados (Inbound) */}
+                <Cd onClick={function(){if(inbPcCount>0){setActivatedModalData({title:"\u{1F4E6} Productos Creados - Inbound ("+inbPcCount+")",leads:inbPcArr});}}} style={{position:"relative",cursor:productsCreatedPhonesData&&inbPcCount>0?"pointer":"default",border:"2px solid "+C.cyan+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lBlue+" 100%)"}}>
+                  <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F4E6}"}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                    <div style={{width:32,height:32,borderRadius:10,background:C.cyan+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{"\u{1F4E6}"}</div>
+                    <span style={{fontSize:13,color:C.muted,fontWeight:600}}>Productos Creados</span>
+                    <InfoTip dark={_isDark} data={TIPS.productosCreados}/>
+                  </div>
+                  {productsCreatedPhonesData?(<>
+                    <div style={{fontSize:36,fontWeight:900,fontFamily:mono,lineHeight:1,color:C.cyan}}>{inbPcCount}</div>
+                    <div style={{fontSize:13,color:C.muted,marginTop:4}}>{inbPcVsWa}% de WhatsApp {"\u00B7"} {inbPcVsTotal}% del total</div>
+                    <div style={{fontSize:11,color:C.cyan,fontWeight:700,marginTop:6,borderTop:"1px solid "+C.border,paddingTop:6}}>{inbPcCount>0?"\u{1F4E6} Ver con productos \u2192":"Sin productos"}</div>
+                  </>):(<>
+                    <div style={{fontSize:24,fontWeight:800,fontFamily:mono,lineHeight:1,color:C.muted}}>...</div>
+                    <div style={{fontSize:12,color:C.muted,marginTop:4}}>Cargando productos...</div>
+                  </>)}
+                </Cd>
+                {/* Card: Cuenta Activada (Inbound) */}
                 <Cd onClick={function(){if(inbActCount>0){setActivatedModalData({title:"\u{1F680} Cuentas Activadas - Inbound ("+inbActCount+")",leads:inbActArr});}}} style={{position:"relative",cursor:activatedPhonesData&&inbActCount>0?"pointer":"default",border:"2px solid "+C.purple+"44",background:"linear-gradient(135deg, "+C.card+" 0%, "+C.lPurple+" 100%)"}}>
                   <div style={{position:"absolute",top:-8,right:-8,fontSize:48,opacity:0.04,pointerEvents:"none"}}>{"\u{1F680}"}</div>
                   <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
@@ -3705,7 +3910,7 @@ export default function Dashboard(){
                     <div style={{fontSize:12,color:C.muted,marginTop:4}}>Cargando activaciones...</div>
                   </>)}
                 </Cd>
-              );
+              </>);
             })()}
           </div>
           {/* Daily chart: Ofertadas vs Confirmadas — Inbound */}

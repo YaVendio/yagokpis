@@ -400,6 +400,111 @@ GROUP BY le.phone_number`;
   return rows.length;
 }
 
+// --- PostHog engagement syncs (WhatsApp connected, Products created) ---
+//
+// WhatsApp event carries properties.phone_number directly.
+// Products event has no phone, so we join to the WhatsApp event via person_id to retrieve it
+// (creating a product without a connected WhatsApp is not supported in the product, so this JOIN
+//  is the narrative-correct matching).
+// Event name casings vary in history ("Whatsapp" and "WhatsApp"); we match both.
+
+async function queryPostHog(hogql: string): Promise<{ results: any[][] }> {
+  const apiKey = Deno.env.get("POSTHOG_PERSONAL_API_KEY");
+  if (!apiKey) throw new Error("POSTHOG_PERSONAL_API_KEY not configured");
+  const host = Deno.env.get("POSTHOG_HOST") || "https://us.posthog.com";
+  const projectId = Deno.env.get("POSTHOG_PROJECT_ID") || "@current";
+  const resp = await fetch(host + "/api/projects/" + projectId + "/query/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+    body: JSON.stringify({ query: { kind: "HogQLQuery", query: hogql } }),
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`PostHog ${resp.status}: ${text}`);
+  }
+  const data = await resp.json();
+  return { results: data.results || [] };
+}
+
+async function syncWhatsAppConnectedPhones(sb: any): Promise<number> {
+  const sql = `SELECT properties.phone_number AS phone, min(timestamp) AS first_at
+    FROM events
+    WHERE event IN ('Whatsapp Connection: Completed', 'WhatsApp Connection: Completed')
+      AND properties.phone_number IS NOT NULL
+    GROUP BY properties.phone_number
+    LIMIT 1000000`;
+  const result = await queryPostHog(sql);
+
+  const rows: any[] = [];
+  const seen = new Set<string>();
+  for (const row of result.results) {
+    if (!row[0] || !row[1]) continue;
+    const clean = String(row[0]).replace(/\D/g, "");
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    rows.push({ phone_number: clean, connected_at: row[1], synced_at: new Date().toISOString() });
+  }
+
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    const { error } = await sb.from("mb_whatsapp_connected_phones").upsert(chunk, { onConflict: "phone_number" });
+    if (error) throw new Error(`Upsert mb_whatsapp_connected_phones chunk ${i}: ${error.message}`);
+  }
+  return rows.length;
+}
+
+async function syncProductsCreatedPhones(sb: any): Promise<number> {
+  const sql = `SELECT wa.phone AS phone, min(pc.ts) AS first_at
+    FROM (
+      SELECT person_id, min(timestamp) AS ts
+      FROM events
+      WHERE event = 'Product: Created'
+      GROUP BY person_id
+    ) pc
+    JOIN (
+      SELECT person_id, any(properties.phone_number) AS phone
+      FROM events
+      WHERE event IN ('Whatsapp Connection: Completed', 'WhatsApp Connection: Completed')
+        AND properties.phone_number IS NOT NULL
+      GROUP BY person_id
+    ) wa ON pc.person_id = wa.person_id
+    GROUP BY wa.phone
+    LIMIT 1000000`;
+  const result = await queryPostHog(sql);
+
+  const rows: any[] = [];
+  const seen = new Set<string>();
+  for (const row of result.results) {
+    if (!row[0] || !row[1]) continue;
+    const clean = String(row[0]).replace(/\D/g, "");
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    rows.push({ phone_number: clean, created_at: row[1], synced_at: new Date().toISOString() });
+  }
+
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    const { error } = await sb.from("mb_products_created_phones").upsert(chunk, { onConflict: "phone_number" });
+    if (error) throw new Error(`Upsert mb_products_created_phones chunk ${i}: ${error.message}`);
+  }
+  return rows.length;
+}
+
+// Discovery helper: returns top events matching common engagement keywords.
+async function discoverPostHogEvents(): Promise<any> {
+  const evSql = `SELECT event, count() AS n
+    FROM events
+    WHERE timestamp > now() - interval 90 day
+      AND (event ILIKE '%whatsapp%' OR event ILIKE '%product%' OR event ILIKE '%instance%' OR event ILIKE '%connect%')
+    GROUP BY event
+    ORDER BY n DESC
+    LIMIT 50`;
+  const events = await queryPostHog(evSql);
+  return {
+    candidate_events: events.results.map((r) => ({ event: r[0], count: r[1] })),
+  };
+}
+
 async function syncActivatedPhones(sb: any): Promise<number> {
   const sql = `SELECT phone, business_activated_at
     FROM companies
@@ -622,6 +727,14 @@ Deno.serve(async (req: Request) => {
       } else if (step === "activations") {
         const count = await syncActivatedPhones(sb);
         result = { activated_phones: count };
+      } else if (step === "whatsapp") {
+        const count = await syncWhatsAppConnectedPhones(sb);
+        result = { whatsapp_connected_phones: count };
+      } else if (step === "products") {
+        const count = await syncProductsCreatedPhones(sb);
+        result = { products_created_phones: count };
+      } else if (step === "posthog_discover") {
+        result = await discoverPostHogEvents();
       } else if (step === "stats") {
         await syncResponseStats(sb, sinceStr);
         result = { response_stats: "ok" };
@@ -671,6 +784,24 @@ Deno.serve(async (req: Request) => {
     const actCount = await syncActivatedPhones(sb);
     details.activated_phones = actCount;
     console.log(`[metabase-sync] Activated phones: ${actCount}`);
+
+    try {
+      const waCount = await syncWhatsAppConnectedPhones(sb);
+      details.whatsapp_connected_phones = waCount;
+      console.log(`[metabase-sync] WhatsApp connected phones: ${waCount}`);
+    } catch (e) {
+      details.whatsapp_connected_phones_error = (e as Error).message;
+      console.warn(`[metabase-sync] WhatsApp sync failed: ${(e as Error).message}`);
+    }
+
+    try {
+      const pcCount = await syncProductsCreatedPhones(sb);
+      details.products_created_phones = pcCount;
+      console.log(`[metabase-sync] Products created phones: ${pcCount}`);
+    } catch (e) {
+      details.products_created_phones_error = (e as Error).message;
+      console.warn(`[metabase-sync] Products sync failed: ${(e as Error).message}`);
+    }
 
     await syncResponseStats(sb, sinceStr);
     details.response_stats = "ok";

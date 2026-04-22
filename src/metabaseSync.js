@@ -189,6 +189,58 @@ export async function loadActivatedPhones() {
   return result.data;
 }
 
+// Load WhatsApp-connected phones from mb_whatsapp_connected_phones -> { phone: connected_at }
+export async function loadWhatsAppConnectedPhones() {
+  var cacheKey = "whatsapp_connected_phones";
+  function doFetch() {
+    return fetchAllRows(function() {
+      return supabase
+        .from("mb_whatsapp_connected_phones")
+        .select("phone_number, connected_at");
+    }).then(function(r) {
+      if (r.error) throw new Error(r.error.message);
+      var phones = {};
+      for (var i = 0; i < r.rows.length; i++) {
+        var row = r.rows[i];
+        if (row.phone_number) {
+          var clean = String(row.phone_number).replace(/\D/g, "");
+          if (clean) phones[clean] = row.connected_at;
+        }
+      }
+      return phones;
+    });
+  }
+  var result = await staleWhileRevalidate(cacheKey, "whatsapp", doFetch);
+  console.log("[metabaseSync] Loaded " + Object.keys(result.data).length + " whatsapp-connected phones" + (result.isStale ? " (from cache)" : ""));
+  return result.data;
+}
+
+// Load products-created phones from mb_products_created_phones -> { phone: created_at }
+export async function loadProductsCreatedPhones() {
+  var cacheKey = "products_created_phones";
+  function doFetch() {
+    return fetchAllRows(function() {
+      return supabase
+        .from("mb_products_created_phones")
+        .select("phone_number, created_at");
+    }).then(function(r) {
+      if (r.error) throw new Error(r.error.message);
+      var phones = {};
+      for (var i = 0; i < r.rows.length; i++) {
+        var row = r.rows[i];
+        if (row.phone_number) {
+          var clean = String(row.phone_number).replace(/\D/g, "");
+          if (clean) phones[clean] = row.created_at;
+        }
+      }
+      return phones;
+    });
+  }
+  var result = await staleWhileRevalidate(cacheKey, "products", doFetch);
+  console.log("[metabaseSync] Loaded " + Object.keys(result.data).length + " products-created phones" + (result.isStale ? " (from cache)" : ""));
+  return result.data;
+}
+
 // Load lifecycle phones from mb_lifecycle_phones -> { phone: { firstAt, firstStep1At } }
 export async function loadLifecyclePhones() {
   var cacheKey = "lifecycle_phones";
